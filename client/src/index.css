@@ -177,6 +177,12 @@ button::after,
 [data-sonner-toast] [data-close-button] {
   width: 24px;
   height: 24px;
+  /* Move the close button to the top-right of the toast card.
+     Sonner's default LTR rule pins it at the top-left; this keeps
+     the same visual offset but mirrors it to the right edge. */
+  left: auto !important;
+  right: 0 !important;
+  transform: translate(35%, -35%) !important;
 }
 
 [data-sonner-toast] [data-close-button]::after {

@@ -138,6 +138,23 @@ form.inline{display:inline}
 ul.sources{list-style:none;margin:.3rem 0 0;padding:0}
 ul.sources li{display:flex;gap:.4rem;align-items:center;flex-wrap:wrap;
   padding:.25rem 0}
+pre{white-space:pre-wrap;word-break:break-word;overflow-wrap:break-word;
+  background:#f3f4f6;padding:.5rem .6rem;border-radius:6px;margin:.4rem 0;
+  font-size:.9rem;max-width:100%}
+.scroll-table{overflow-x:auto;-webkit-overflow-scrolling:touch;margin:.4rem 0 1rem}
+.scroll-table table{margin:0;width:auto;min-width:100%}
+.msg{background:#fff;border:1px solid var(--line);border-radius:8px;
+  padding:.85rem 1rem;margin:.7rem 0}
+.msg-hd{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;
+  margin-bottom:.35rem}
+.msg .role{font-weight:600;color:var(--miami)}
+.msg .time{color:var(--muted);font-size:.82rem}
+.tag{display:inline-block;padding:.1rem .45rem;border-radius:999px;
+  font-size:.75rem;background:#f3f4f6;color:var(--ink)}
+.tag.down{background:var(--warn-bg);color:var(--warn)}
+.tag.refuse{background:var(--open-bg);color:var(--open)}
+.tag.done{background:var(--done-bg);color:var(--done)}
+.tag.rated{background:var(--prog-bg);color:var(--prog)}
 label{display:block;margin:.8rem 0 .25rem;font-weight:600}
 input[type=text],input[type=email],textarea,select{width:100%;padding:.5rem;
   border:1px solid #bbb;border-radius:6px;font:inherit;background:#fff}

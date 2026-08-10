@@ -245,14 +245,16 @@ def build_review_view_router(deps: dict) -> Any:
                     f"from</small><ul class='sources'>{items}</ul></div>")
 
         msgs = "".join(
-            f"<div><span class='role'>{_e(m['role'])}</span> "
-            f"<small>{_e(m['time'])}</small>"
-            + (" <span class='tag refuse'>refusal:"
+            f"<div class='msg'>"
+            f"<div class='msg-hd'>"
+            f"<span class='role'>{_e(m['role'])}</span>"
+            f"<small class='time'>{_e(m['time'])}</small>"
+            + ("<span class='tag refuse'>refusal: "
                f"{_e(m['refusal_trigger'])}</span>" if m['was_refusal']
                else "")
-            + (" <span class='tag down'>thumbs-down</span>"
+            + ("<span class='tag down'>thumbs-down</span>"
                if m['is_positive_rated'] is False else "")
-            + f"<pre>{_e(m['content'])}</pre>{_sources(m)}</div>"
+            + f"</div><pre>{_e(m['content'])}</pre>{_sources(m)}</div>"
             for m in d["messages"]
         )
         toks = "".join(
@@ -267,6 +269,7 @@ def build_review_view_router(deps: dict) -> Any:
             f"<td>{_e(t['time'])}</td></tr>"
             for t in d["tools_called"]
         ) or "<tr><td colspan=5>none</td></tr>"
+        tsummary = ", ".join(_e(t) for t in (d.get("tools_used_summary") or [])) or "none"
         ho = ", ".join(
             f"{_e(h['trigger'])} @ {_e(h['time'])}"
             for h in d["human_handoff"]
@@ -287,12 +290,15 @@ def build_review_view_router(deps: dict) -> Any:
             + (f"rating={_e(fb['rating'])} note={_e(fb['comment'])}"
                if fb else "none")
             + f"</p><h3>Transcript</h3>{msgs}"
-            f"<h3>Token usage</h3><table><tr><th>model</th>"
+            f"<h3>Token usage</h3>"
+            f"<div class='scroll-table'><table><tr><th>model</th>"
             f"<th>call_site</th><th>prompt</th><th>cached</th>"
-            f"<th>completion</th><th>total</th></tr>{toks}</table>"
-            f"<h3>Tools called</h3><table><tr><th>agent</th>"
+            f"<th>completion</th><th>total</th></tr>{toks}</table></div>"
+            f"<h3>Tools called</h3>"
+            f"<p><b>Tools used:</b> {tsummary}</p>"
+            f"<div class='scroll-table'><table><tr><th>agent</th>"
             f"<th>tool</th><th>ok</th><th>ms</th><th>time</th></tr>"
-            f"{tools}</table>"
+            f"{tools}</table></div>"
         )
         return HTMLResponse(_page(f"Conversation {conversation_id}", body))
 
