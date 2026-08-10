@@ -106,8 +106,20 @@ def build_review_view_router(deps: dict) -> Any:
         # from the list (operator report 2026-07-27).
         rows = await attach_feedback(db, rows)
         _kq = ("&key=" + _e(key)) if key else ""
+        _filter_class = {
+            "flagged": "flagged",
+            "thumbs_down": "down",
+            "thumbs_up": "up",
+            "refusal": "refuse",
+            "low_confidence": "low-conf",
+            "rated": "rated",
+            "reviewed": "done",
+            "all": "all",
+        }
         opts = "".join(
-            f"<a class='tag' href='/admin/review?filter={f}{_kq}'>{f}</a> "
+            f"<a class='tag {_filter_class.get(f, f)}"
+            f"{' active' if f == filter else ''}'"
+            f" href='/admin/review?filter={f}{_kq}'>{_e(f)}</a>"
             for f in FILTERS
         )
         trs = []
@@ -124,7 +136,7 @@ def build_review_view_router(deps: dict) -> Any:
                     f"<span class='tag refuse'>refusal:"
                     f"{_e(r.get('refusal_trigger'))}</span>")
             if r.get("confidence") == "low":
-                flags.append("<span class='tag'>low-conf</span>")
+                flags.append("<span class='tag low-conf'>low-conf</span>")
             fr = r.get("feedback_rating")
             if fr is not None:
                 stars = "&#9733;" * max(0, min(int(fr), 5))
@@ -169,7 +181,7 @@ def build_review_view_router(deps: dict) -> Any:
             f"<p class='lede'>{len(rows)} row(s) &middot; filter: "
             f"{_e(filter)}{_scope_note}. Patron star ratings and comments "
             f"show inline; marking a row reviewed drops it out of the "
-            f"working views.</p><p>{opts}</p>"
+            f"working views.</p><div class='filter-bar'>{opts}</div>"
             f"<table><tr><th>time</th><th>role</th><th>preview</th>"
             f"<th>flags</th><th>conversation</th></tr>"
             f"{''.join(trs) or '<tr><td colspan=5>none</td></tr>'}"

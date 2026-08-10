@@ -1,5 +1,5 @@
 import { useContext, useEffect, useState, useCallback } from 'react';
-import { ArrowLeft, Clock } from 'lucide-react';
+import { ArrowLeft, Clock, X } from 'lucide-react';
 import { toast } from 'sonner';
 import HumanLibrarianWidget from './components/HumanLibrarianWidget';
 import OfflineTicketWidget from './components/TicketWidget';
@@ -190,15 +190,27 @@ const App = () => {
       </div>
 
       <Dialog open={isOpen} onOpenChange={(open) => !open && handleClose()}>
-        <DialogContent className="max-w-[450px] mx-4">
-          <DialogHeader className="flex flex-row items-center justify-evenly ps-0">
-            <img
-              src='https://libapps.s3.amazonaws.com/accounts/190074/images/0721_STier1_Libraries_HS_186KW_K_Digital.png'
-              height={50}
-              width={120}
-              alt='library logo'
-            />
-            <DialogTitle>Smart Chatbot</DialogTitle>
+        <DialogContent className="max-w-[450px] mx-4" hideClose>
+          <DialogHeader className="flex flex-row items-center justify-between ps-0 pe-0">
+            <div className="flex items-center gap-3">
+              <img
+                src='https://libapps.s3.amazonaws.com/accounts/190074/images/0721_STier1_Libraries_HS_186KW_K_Digital.png'
+                height={50}
+                width={120}
+                alt='library logo'
+              />
+              <DialogTitle>Smart Chatbot</DialogTitle>
+            </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 -mr-2"
+              aria-label="Close"
+              onClick={handleClose}
+            >
+              <X className="h-4 w-4" />
+            </Button>
           </DialogHeader>
           
           <div className="flex justify-between">

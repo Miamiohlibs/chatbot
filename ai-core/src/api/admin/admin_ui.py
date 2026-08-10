@@ -150,11 +150,19 @@ pre{white-space:pre-wrap;word-break:break-word;overflow-wrap:break-word;
 .msg .role{font-weight:600;color:var(--miami)}
 .msg .time{color:var(--muted);font-size:.82rem}
 .tag{display:inline-block;padding:.1rem .45rem;border-radius:999px;
-  font-size:.75rem;background:#f3f4f6;color:var(--ink)}
+  font-size:.75rem;background:#f3f4f6;color:var(--ink);border:1px solid transparent}
 .tag.down{background:var(--warn-bg);color:var(--warn)}
+.tag.up{background:var(--done-bg);color:var(--done)}
 .tag.refuse{background:var(--open-bg);color:var(--open)}
 .tag.done{background:var(--done-bg);color:var(--done)}
 .tag.rated{background:var(--prog-bg);color:var(--prog)}
+.tag.flagged{background:var(--warn-bg);color:var(--warn)}
+.tag.low-conf{background:var(--open-bg);color:var(--open)}
+.tag.all{background:#f3f4f6;color:var(--muted)}
+.filter-bar{display:flex;gap:.4rem;flex-wrap:wrap;margin:.6rem 0 1rem}
+.filter-bar a.tag{padding:.25rem .7rem;text-decoration:none;border-color:var(--line)}
+.filter-bar a.tag:hover{filter:brightness(.95);border-color:var(--muted)}
+.filter-bar a.tag.active{box-shadow:0 0 0 2px var(--miami);font-weight:600;border-color:var(--miami)}
 label{display:block;margin:.8rem 0 .25rem;font-weight:600}
 input[type=text],input[type=email],textarea,select{width:100%;padding:.5rem;
   border:1px solid #bbb;border-radius:6px;font:inherit;background:#fff}
