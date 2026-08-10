@@ -97,7 +97,7 @@ const ChatBotComponent = ({ askUsStatus = { isOpen: false, hoursToday: null } })
                 ? 'The chatbot service is experiencing technical difficulties. '
                 : 'Unable to connect to the chatbot service. '}
               {askUsStatus.isOpen 
-                ? 'Please talk to a human librarian for immediate assistance.'
+                ? 'Please talk to a librarian for immediate assistance.'
                 : 'Please submit a ticket and we\'ll get back to you.'}
             </AlertDescription>
           </div>
@@ -107,7 +107,7 @@ const ChatBotComponent = ({ askUsStatus = { isOpen: false, hoursToday: null } })
               variant="default"
               onClick={() => setWidgetVisible(!widgetVisible)}
             >
-              {widgetVisible ? 'Hide' : 'Chat with Human Librarian'}
+              {widgetVisible ? 'Hide' : 'Chat with a librarian'}
             </Button>
           ) : (
             <Button
@@ -121,7 +121,7 @@ const ChatBotComponent = ({ askUsStatus = { isOpen: false, hoursToday: null } })
         </Alert>
       )}
 
-      {/* Human Librarian Widget - only shown during business hours */}
+      {/* Librarian Widget - only shown during business hours */}
       {widgetVisible && askUsStatus.isOpen && (
         <div className="mb-4 p-4 border border-blue-200 rounded-md bg-blue-50">
           <div className="flex justify-between items-center mb-2">
@@ -141,7 +141,7 @@ const ChatBotComponent = ({ askUsStatus = { isOpen: false, hoursToday: null } })
         </div>
       )}
 
-      {/* Ticket Form Widget - shown when human chat not available */}
+      {/* Ticket Form Widget - shown when librarian chat not available */}
       {showTicketForm && !askUsStatus.isOpen && (
         <div className="mb-4 p-4 border border-orange-200 rounded-md bg-orange-50">
           <div className="flex justify-between items-center mb-2">
@@ -329,9 +329,9 @@ const ChatBotComponent = ({ askUsStatus = { isOpen: false, hoursToday: null } })
       <p className="text-xs pt-2 text-gray-500">
         Chatbot can make mistakes. 
         {askUsStatus.isOpen 
-          ? ' Talk to a human librarian during business hours if needed.'
+          ? ' Talk to a librarian during business hours if needed.'
           : askUsStatus.hoursToday 
-            ? ` Human chat available ${askUsStatus.hoursToday.open} - ${askUsStatus.hoursToday.close}. Submit a ticket for off-hours help.`
+            ? ` Librarian chat available ${askUsStatus.hoursToday.open} - ${askUsStatus.hoursToday.close}. Submit a ticket for off-hours help.`
             : ' Submit a ticket for assistance.'}
       </p>
     </>

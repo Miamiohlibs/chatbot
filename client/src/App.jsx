@@ -70,7 +70,7 @@ const App = () => {
         // cards ended up on screen at once.
         id: 'connection-error',
         description: askUsStatus.isOpen
-          ? 'The Smart Chatbot is currently not available. Please talk to a human librarian during business hours or create a ticket for help.'
+          ? 'The Smart Chatbot is currently not available. Please talk to a librarian during business hours or create a ticket for help.'
           : 'The Smart Chatbot is currently not available. Please create a ticket and we\'ll get back to you.',
         // Persistent, not timed. The condition it reports does not go away
         // after nine seconds, and WCAG 2.2.1 (Timing Adjustable, Level A)
@@ -97,7 +97,7 @@ const App = () => {
       if (askUsStatus.isOpen) {
         toast.warning('Service Unavailable', {
           description:
-            'The Smart Chatbot is currently unavailable. Redirecting you to a human librarian for assistance.',
+            'The Smart Chatbot is currently unavailable. Redirecting you to a librarian for assistance.',
           duration: 5000,
         });
         setStep('humanLibrarian');
@@ -128,13 +128,13 @@ const App = () => {
     if (askUsStatus.isOpen) {
       setStep('humanLibrarian');
       toast.info('Connecting to Librarian', {
-        description: 'Redirecting you to a human librarian.',
+        description: 'Redirecting you to a librarian.',
         duration: 3000,
       });
     } else {
       setStep('ticket');
       toast.info('Submit a Ticket', {
-        description: 'Human chat is currently offline. Please submit a ticket and we\'ll get back to you.',
+        description: 'Librarian chat is currently offline. Please submit a ticket and we\'ll get back to you.',
         duration: 3000,
       });
     }
@@ -237,7 +237,7 @@ const App = () => {
                     if (isChatbotUnavailable) {
                       toast.error('Chatbot Unavailable', {
                         description:
-                          'The Smart Chatbot is currently unavailable. Please talk to a human librarian during business hours or submit a ticket.',
+                          'The Smart Chatbot is currently unavailable. Please talk to a librarian during business hours or submit a ticket.',
                         duration: 5000,
                       });
                       if (askUsStatus.isOpen) {
@@ -259,7 +259,7 @@ const App = () => {
                     '(Unavailable)'}
                 </Button>
                 
-                {/* Show "Talk to human" only during business hours */}
+                {/* Show the librarian button only during business hours */}
                 {askUsStatus.isOpen ? (
                   <Button variant="secondary" onClick={() => setStep('humanLibrarian')}>
                     Talk to a librarian
@@ -268,9 +268,9 @@ const App = () => {
                   <div className="text-center text-sm text-gray-500 py-2">
                     <Clock className="inline-block w-4 h-4 mr-1" />
                     {askUsStatus.hoursToday ? (
-                      <span>Human chat available {askUsStatus.hoursToday.open} - {askUsStatus.hoursToday.close}</span>
+                      <span>Librarian chat available {askUsStatus.hoursToday.open} - {askUsStatus.hoursToday.close}</span>
                     ) : (
-                      <span>Human chat is currently offline</span>
+                      <span>Librarian chat is currently offline</span>
                     )}
                   </div>
                 )}
@@ -291,7 +291,7 @@ const App = () => {
                   <p className="text-gray-600 text-sm">
                     We're experiencing technical difficulties. 
                     {askUsStatus.isOpen 
-                      ? ' Let us connect you with a human librarian.'
+                      ? ' Let us connect you with a librarian.'
                       : ' Please submit a ticket and we\'ll get back to you.'}
                   </p>
                   {askUsStatus.isOpen ? (
@@ -315,7 +315,7 @@ const App = () => {
             {step === 'ticket' && <OfflineTicketWidget />}
           </div>
           
-          {/* Bottom action button during chat - shows human chat or ticket based on availability */}
+          {/* Bottom action button during chat - shows librarian chat or ticket based on availability */}
           {step === 'services' && (
             <Button
               size="sm"
