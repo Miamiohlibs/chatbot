@@ -262,7 +262,7 @@ const App = () => {
                 {/* Show "Talk to human" only during business hours */}
                 {askUsStatus.isOpen ? (
                   <Button variant="secondary" onClick={() => setStep('humanLibrarian')}>
-                    Talk to a human librarian
+                    Talk to a librarian
                   </Button>
                 ) : (
                   <div className="text-center text-sm text-gray-500 py-2">
@@ -299,7 +299,7 @@ const App = () => {
                       variant="default"
                       onClick={() => setStep('humanLibrarian')}
                     >
-                      Talk to a Human Librarian
+                      Talk to a librarian
                     </Button>
                   ) : (
                     <Button
@@ -323,7 +323,7 @@ const App = () => {
               className="fixed bottom-10 right-20 mr-4 absolute right-0 bottom-0 mb-2"
               onClick={() => askUsStatus.isOpen ? setStep('humanLibrarian') : setStep('ticket')}
             >
-              {askUsStatus.isOpen ? 'Talk to a Human Librarian' : 'Submit a ticket'}
+              {askUsStatus.isOpen ? 'Talk to a librarian' : 'Submit a ticket'}
             </Button>
           )}
         </DialogContent>

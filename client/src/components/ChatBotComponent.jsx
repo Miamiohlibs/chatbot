@@ -126,12 +126,12 @@ const ChatBotComponent = ({ askUsStatus = { isOpen: false, hoursToday: null } })
         <div className="mb-4 p-4 border border-blue-200 rounded-md bg-blue-50">
           <div className="flex justify-between items-center mb-2">
             <span className="font-bold text-blue-700">
-              Talk to a Human Librarian
+              Talk to a librarian
             </span>
             <Button
               size="xs"
               variant="ghost"
-              aria-label="Close the human librarian panel"
+              aria-label="Close the librarian panel"
               onClick={() => setWidgetVisible(false)}
             >
               <span aria-hidden="true">✕</span>

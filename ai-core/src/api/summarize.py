@@ -74,14 +74,45 @@ async def summarize_chat(request: ChatSummaryRequest):
         # ~42-char "Summarized by AI" marker, so anything past ~108 chars
         # was cut mid-word in the subject (prod 2026-06-17). Ask for a
         # short one-line subject, not a multi-sentence paragraph.
-        system_prompt = """You are writing the SUBJECT LINE for a library help-desk ticket, summarizing what a user needs based on their chat with the library bot.
+        #
+        # Rewritten 2026-08-10. The old prompt asked for "the user's main
+        # question(s)" over the transcript and ended the user turn with
+        # "Subject:", which reliably produced a summary of the LAST
+        # exchange only -- students routinely open with something small,
+        # get it answered, and only then ask the thing they actually came
+        # for, and that was the part the librarian never saw. It also
+        # listed everything discussed, so a ticket whose real content was
+        # one stuck question arrived padded with three the bot had
+        # already handled. A librarian reads this one line before
+        # deciding what to do; anything already resolved is noise.
+        system_prompt = """You are writing the SUBJECT LINE of a library help-desk ticket. A librarian reads this one line before deciding what to do with the ticket, so it must carry the thing they have to act on -- nothing else.
 
-Write ONE concise line capturing the user's main question(s) and any key specifics (subject, building, course, what's unresolved) -- at most ~130 characters (about 20 words). No preamble, no "the user asked", no full sentences. Pack in the useful details, not filler.
-Examples: "Library hours, and who the dean of libraries is"; "Booking a 2-3pm study room at King for tomorrow"; "Finding a peer-reviewed article on insomnia and academic performance"."""
+Read the WHOLE conversation before writing. Students often open with a small question, get it answered, and only then ask the thing they actually came for.
+
+Write ONE line, at most ~130 characters (about 20 words):
+
+- Lead with what the student STILL NEEDS: the question the bot did not resolve, or the point where its answer was wrong, partial, or a refusal.
+- Keep the specifics a librarian needs to act -- subject, building, course, date, item, campus.
+- LEAVE OUT anything the bot already handled. If the student asked four things and three were answered, name only the fourth.
+- If nothing went wrong and nothing is unresolved, just name what the student was working on. Do NOT invent a problem or a sticking point.
+
+No preamble, no "the user asked", no full sentence, no trailing period.
+
+Examples:
+- Chat covers hours (answered), then fails to find a peer-reviewed article -> "Peer-reviewed articles on insomnia and academic performance"
+- Chat books a room fine, then bot cannot say if the room has a projector -> "Whether King group study rooms have projectors"
+- Chat where everything was answered -> "Renewing OhioLINK books"
+- Bot gave a wrong loan period and the student pushed back -> "Reserve textbook loan period -- bot's answer contradicted by student\""""
 
         messages = [
             SystemMessage(content=system_prompt),
-            HumanMessage(content=f"Chat History:\n{request.chatHistory}\n\nSubject:")
+            HumanMessage(
+                content=(
+                    "Full conversation, oldest message first:\n"
+                    f"{request.chatHistory}\n\n"
+                    "Subject line (what the librarian still has to deal with):"
+                )
+            ),
         ]
 
         # Generate summary using async invoke (matching system pattern)
