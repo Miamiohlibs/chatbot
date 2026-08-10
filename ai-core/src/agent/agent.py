@@ -264,12 +264,19 @@ def run_agent(
         last_tool_call_key = current_key
 
         # Dispatch each tool call.
+        # `trail_phase` labels these rows `agent` in the review ticket's
+        # "Tools called" table; the orchestrator's short-circuit
+        # dispatches stay `orchestrator`, so a reviewer can tell which
+        # stage of the turn actually hit the network.
+        from src.observability.tool_trail import trail_phase
+
         results: list[ToolResult] = []
-        for tc in tool_calls:
-            result = registry.dispatch(tc)
-            results.append(result)
-            if result.is_error:
-                tool_failure_count += 1
+        with trail_phase("agent"):
+            for tc in tool_calls:
+                result = registry.dispatch(tc)
+                results.append(result)
+                if result.is_error:
+                    tool_failure_count += 1
 
         turns.append(
             AgentTurn(

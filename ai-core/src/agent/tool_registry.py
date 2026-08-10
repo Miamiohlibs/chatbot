@@ -281,9 +281,30 @@ class ToolRegistry:
             except Exception:  # pragma: no cover -- metrics must never break a turn
                 pass
 
+        def _record(success: bool, latency_s: float, detail: str = "") -> None:
+            # Persisted trail for the admin review ticket's "Tools called"
+            # table. _meter aggregates into Prometheus and _trace writes
+            # text; neither survives into the DB, so the ticket showed
+            # "none" on every turn. Recording here -- the one dispatch
+            # chokepoint -- covers the agent loop AND the orchestrator
+            # short-circuits that call dispatch() directly, without each
+            # site having to opt in. Keys only, never argument values.
+            try:
+                from src.observability.tool_trail import record
+                record(
+                    tool=call.name,
+                    success=success,
+                    latency_ms=int(latency_s * 1000),
+                    arg_keys=tuple((call.arguments or {}).keys()),
+                    detail=detail,
+                )
+            except Exception:  # pragma: no cover -- telemetry must never break a turn
+                pass
+
         tool = self.tools.get(call.name)
         if tool is None:
             _meter("error", 0.0)
+            _record(False, 0.0, detail="unknown tool")
             return ToolResult(
                 call_id=call.id,
                 name=call.name,
@@ -320,6 +341,8 @@ class ToolRegistry:
             # "ok but empty" is the case the agent is told to fall back from,
             # so it needs to be distinguishable from a useful result.
             _trace("empty" if _empty else "ok", time.monotonic() - start)
+            _record(True, time.monotonic() - start,
+                    detail="empty" if _empty else "")
             return ToolResult(
                 call_id=call.id,
                 name=call.name,
@@ -329,6 +352,7 @@ class ToolRegistry:
         except ToolError as e:
             _meter("error", time.monotonic() - start)
             _trace("error", time.monotonic() - start, detail=f"-- {e.message[:160]}")
+            _record(False, time.monotonic() - start, detail=e.message[:160])
             return ToolResult(
                 call_id=call.id,
                 name=call.name,
@@ -340,6 +364,7 @@ class ToolRegistry:
             # handler, but record it as a tool error first so the metric
             # reflects reality.
             _meter("error", time.monotonic() - start)
+            _record(False, time.monotonic() - start, detail="unexpected exception")
             raise
 
 

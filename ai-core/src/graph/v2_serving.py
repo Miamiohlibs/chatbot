@@ -189,6 +189,23 @@ def turnresponse_to_wire(
         "refusal_trigger": resp.refusal_trigger,
         "scope": dict(resp.scope or {}),
         "cited_chunk_ids": list(resp.cited_chunk_ids or []),
+        # Third instance of the same dropped-telemetry bug as the two
+        # blocks above: ToolExecution was never written for v2 traffic,
+        # so the admin ticket's "Tools called" table read "none" on every
+        # turn -- including turns that demonstrably hit search_kb. The
+        # frontend ignores unknown keys; main._v2_message writes the rows.
+        "tools_called": [
+            {
+                "tool": t.get("tool"),
+                "agent": t.get("agent"),
+                "success": bool(t.get("success")),
+                "latency_ms": int(t.get("latency_ms", 0) or 0),
+                "arg_keys": list(t.get("arg_keys") or []),
+                "detail": t.get("detail") or "",
+            }
+            for t in (resp.tools_called or [])
+            if isinstance(t, dict)
+        ],
     }
 
 

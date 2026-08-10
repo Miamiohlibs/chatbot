@@ -1523,3 +1523,79 @@ def test_bare_hours_question_prefetches_flagship_library() -> None:
         f"expected a King hours prefetch, got {calls!r}"
     )
     assert not resp.is_refusal
+
+
+# --- tool trail ----------------------------------------------------------
+#
+# The trail is attached at run_turn's single exit rather than at each of
+# the body's 32 return points. These tests pin that it actually arrives,
+# including on the short-circuit paths that never reach the agent loop --
+# which is where the equivalent per-return approach leaked before (see
+# _append_unanswered_note's history).
+
+
+def test_a_turn_carries_the_tools_it_called() -> None:
+    """Without this the admin ticket's "Tools called" table renders
+    "none" on every conversation, which is the first thing an operator
+    opens when a librarian reports a bad answer."""
+    deps = _build_deps(
+        classification=_classification("hours"),
+        evidence_in_search_kb_result=[_evidence_dict("c1")],
+        synth_citations_n=[1],
+    )
+    resp = run_turn(
+        TurnRequest(user_message="What time does King close?",
+                    conversation_id="conv-1"),
+        deps,
+    )
+    called = {t["tool"] for t in resp.tools_called}
+    assert "search_kb" in called, resp.tools_called
+    row = next(t for t in resp.tools_called if t["tool"] == "search_kb")
+    assert row["agent"] == "agent", "agent-loop calls must be labelled as such"
+    assert row["success"] is True
+    assert "query" in row["arg_keys"]
+
+
+def test_one_turns_tools_do_not_leak_into_the_next() -> None:
+    """run_turn resets the trail on entry. Without that reset a second
+    turn on the same executor thread reports the first turn's tools, and
+    a reviewer reads another conversation's evidence."""
+    def one_turn(conv_id: str):
+        # Fresh deps per turn: the stubs carry per-run state, so reusing
+        # them makes the second turn refuse instead of searching, which
+        # would test the stub rather than the reset.
+        return run_turn(
+            TurnRequest(user_message="What time does King close?",
+                        conversation_id=conv_id),
+            _build_deps(
+                classification=_classification("hours"),
+                evidence_in_search_kb_result=[_evidence_dict("c1")],
+                synth_citations_n=[1],
+            ),
+        )
+
+    first = one_turn("conv-1")
+    second = one_turn("conv-2")
+
+    assert first.tools_called, "precondition: the first turn called something"
+    assert len(second.tools_called) == len(first.tools_called), (
+        "the second turn accumulated the first turn's rows"
+    )
+
+
+def test_a_short_circuit_turn_reports_an_empty_trail_not_a_stale_one() -> None:
+    """Clarification never reaches the agent loop. The field must still
+    be present and empty rather than absent or left over."""
+    cls = _classification(
+        "hours", margin=0.01, needs_clarification=True,
+        candidates=[("hours", 0.5), ("room_booking", 0.49)],
+    )
+    deps = _build_deps(
+        classification=cls,
+        evidence_in_search_kb_result=[_evidence_dict("c1")],
+    )
+    run_turn(TurnRequest(user_message="What time does King close?",
+                         conversation_id="conv-1"), deps)
+    resp = run_turn(TurnRequest(user_message="hours?",
+                                conversation_id="conv-2"), deps)
+    assert resp.tools_called == []

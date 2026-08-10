@@ -408,3 +408,38 @@ def test_review_mark_401_without_token() -> None:
     from starlette.testclient import TestClient
     c = TestClient(app, raise_server_exceptions=False)
     assert c.get("/admin/review/mark/m9").status_code == 401
+
+
+def test_tools_used_summary_prefers_the_rows_over_the_legacy_column() -> None:
+    """Conversation.toolUsed is only ever written by the ARCHIVED legacy
+    orchestrator, so for all v2 traffic it is empty -- and the ticket's
+    one-line "Tools used:" read "none" even when the table underneath it
+    listed calls."""
+    db = _StubDB(
+        msgs=[_msg(id="a1", type="assistant", conversationId="c1")],
+        conv=SimpleNamespace(createdAt="c", updatedAt="u", toolUsed=[]),
+        tools=[
+            SimpleNamespace(agentName="agent", toolName="search_kb",
+                            success=True, executionTime=12, timestamp="t"),
+            SimpleNamespace(agentName="orchestrator", toolName="get_hours",
+                            success=True, executionTime=3, timestamp="t"),
+            SimpleNamespace(agentName="agent", toolName="search_kb",
+                            success=True, executionTime=9, timestamp="t"),
+        ],
+    )
+    d = _run(conversation_detail(db, "c1"))
+    assert d["tools_used_summary"] == ["search_kb", "get_hours"], \
+        "distinct names, first-use order"
+
+
+def test_tools_used_summary_falls_back_for_pre_v2_conversations() -> None:
+    """1,549 of 7,050 conversations carry the column and no rows. Those
+    must keep showing what they always showed."""
+    db = _StubDB(
+        msgs=[_msg(id="a1", type="assistant", conversationId="c1")],
+        conv=SimpleNamespace(createdAt="c", updatedAt="u",
+                             toolUsed=["search_website"]),
+        tools=[],
+    )
+    d = _run(conversation_detail(db, "c1"))
+    assert d["tools_used_summary"] == ["search_website"]

@@ -640,6 +640,60 @@ def _looks_like_dev_client(environ: dict) -> bool:
     return any(h in low for h in _DEV_ORIGIN_HINTS)
 
 
+async def persist_tool_trail(conversation_id: str, wire: dict) -> int:
+    """Write the turn's tool calls to ToolExecution. Returns rows written.
+
+    Called from the socket handler rather than from inside run_turn for
+    the same loop-affinity reason as the token rows: run_turn executes on
+    an executor thread and the Prisma client is bound to the main loop.
+
+    Until this existed nothing in the v2 path called log_tool_execution
+    at all -- its only caller was the ARCHIVED legacy orchestrator -- so
+    the admin review ticket's "Tools called" table rendered "none" for
+    every conversation, including turns that demonstrably hit search_kb.
+    That table is the first thing an operator opens when a librarian
+    reports a bad answer.
+
+    `arg_keys` only, never argument values: a book_room call carries a
+    patron's name and email and these rows are shown to library staff.
+
+    Telemetry must never break a served turn, so a bad row is logged and
+    skipped and any wider failure is swallowed. Lifted out of the handler
+    body so it can be tested without a socket.
+    """
+    written = 0
+    try:
+        rows = wire.get("tools_called") or []
+        if not rows:
+            return 0
+        from src.memory.conversation_store import log_tool_execution
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            try:
+                await log_tool_execution(
+                    conversation_id,
+                    agent_name=str(row.get("agent") or "orchestrator"),
+                    tool_name=str(row.get("tool") or "unknown"),
+                    parameters={
+                        "arg_keys": list(row.get("arg_keys") or []),
+                        "detail": row.get("detail") or "",
+                    },
+                    success=bool(row.get("success")),
+                    execution_time=int(row.get("latency_ms", 0) or 0),
+                )
+                written += 1
+            except Exception as one:  # noqa: BLE001
+                logging.warning(
+                    f"⚠️ [v2] tool-execution row failed "
+                    f"({row.get('tool')!r}): {one}"
+                )
+    except Exception as exc:  # noqa: BLE001
+        logging.warning(
+            f"⚠️ [v2] tool-trail telemetry failed (turn was served): {exc}")
+    return written
+
+
 async def _v2_connect(sid, environ):
     dev = _looks_like_dev_client(environ or {})
     client_is_dev[sid] = dev
@@ -840,6 +894,7 @@ async def _v2_message(sid, data):
                 )
         except Exception as te:  # noqa: BLE001
             logging.warning(f"⚠️ [v2] token-usage telemetry failed (turn was served): {te}")
+        await persist_tool_trail(conversation_id, wire)
     except Exception as e:  # noqa: BLE001
         logging.error(f"❌ [v2] Error: {e}", exc_info=True)
         await sio_v2.emit(

@@ -47,6 +47,7 @@ from src.graph import facility_facts as _ff
 from src.graph import tech_checkout as _tc
 from src.agent.agent import AgentLLM, AgentOutcome, AgentRequest, run_agent
 from src.agent.tool_registry import ToolRegistry
+from src.observability import tool_trail
 from src.observability.logging import bind_request_context, get_logger
 from src.observability.metrics import (
     record_llm_call,
@@ -121,6 +122,13 @@ class TurnResponse:
     """For the Message.cited_chunk_ids column so librarian review can
     join back to ChunkProvenance."""
 
+    tools_called: list[dict] = field(default_factory=list)
+    """Per-turn tool trail for the ToolExecution table behind the admin
+    ticket's "Tools called" view. DEFAULTED on purpose: the turn body has
+    32 TurnResponse construction sites and none of them should have to
+    know about telemetry -- `run_turn` fills this in at the single exit
+    from what `observability/tool_trail` collected during the turn."""
+
 
 # --- Dependency bundle ---------------------------------------------------
 
@@ -184,6 +192,10 @@ def run_turn(
     tried first and immediately leaked two of them (live check
     2026-07-27).
     """
+    # Reset the tool trail before the body runs. MUST happen per turn:
+    # run_turn executes on a REUSED executor thread, so a stale buffer
+    # from the previous turn would otherwise leak into this one.
+    tool_trail.begin_turn()
     response = _run_turn(
         request, deps,
         model_basic=model_basic, model_reasoning=model_reasoning,
@@ -191,7 +203,15 @@ def run_turn(
     response = _add_research_disclaimer(
         response, response.intent, request.user_message
     )
-    return _append_unanswered_note(response, request.user_message)
+    response = _append_unanswered_note(response, request.user_message)
+    # Attach the trail at the SINGLE exit, for the same reason the
+    # disclaimer is applied here: the body has 32 return points -- ~25 of
+    # them short-circuits that never reach the agent loop -- and doing
+    # this per-return is exactly how the disclaimer leaked two paths.
+    try:
+        return _dc_replace(response, tools_called=tool_trail.collected())
+    except Exception:  # pragma: no cover -- telemetry must never break a turn
+        return response
 
 
 def _run_turn(

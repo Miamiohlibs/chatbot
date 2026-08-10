@@ -302,3 +302,41 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+def test_wire_carries_the_tool_trail() -> None:
+    """Third instance of the same v1->v2 dropped-telemetry seam as the
+    ModelTokenUsage regression above: ToolExecution was never written for
+    v2 traffic, so the admin ticket's "Tools called" table read "none" on
+    every turn. _v2_message writes the rows from this key."""
+    w = V.turnresponse_to_wire(
+        _resp(tools_called=[
+            {"tool": "search_kb", "agent": "agent", "success": True,
+             "latency_ms": 42, "arg_keys": ["query"], "detail": ""},
+        ]),
+        message_id="m", conversation_id="c",
+    )
+    assert w["tools_called"] == [
+        {"tool": "search_kb", "agent": "agent", "success": True,
+         "latency_ms": 42, "arg_keys": ["query"], "detail": ""},
+    ]
+    json.dumps(w)
+
+
+def test_wire_tool_trail_defaults_to_empty_and_drops_junk() -> None:
+    """A short-circuit turn calls no tools, and a malformed row must not
+    reach the insert loop in _v2_message."""
+    assert V.turnresponse_to_wire(
+        _resp(), message_id="m", conversation_id="c")["tools_called"] == []
+
+    w = V.turnresponse_to_wire(
+        _resp(tools_called=["not-a-dict", None,
+                            {"tool": "get_hours", "success": 1,
+                             "latency_ms": "7"}]),
+        message_id="m", conversation_id="c",
+    )
+    assert len(w["tools_called"]) == 1
+    row = w["tools_called"][0]
+    assert row["tool"] == "get_hours"
+    assert row["success"] is True and row["latency_ms"] == 7
+    json.dumps(w)

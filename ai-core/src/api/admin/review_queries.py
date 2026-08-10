@@ -235,6 +235,23 @@ async def mark_reviewed(
         return False
 
 
+def _tools_used_summary(tools: Any, conv: Any) -> list[str]:
+    """Distinct tool names for one conversation, first-use order.
+
+    Prefers the ToolExecution rows (written per turn by the v2 socket
+    handler) and falls back to the legacy `Conversation.toolUsed` column
+    for conversations recorded before the rows were persisted.
+    """
+    names: list[str] = []
+    for t in (tools or []):
+        name = getattr(t, "toolName", None)
+        if name and name not in names:
+            names.append(str(name))
+    if names:
+        return names
+    return [str(n) for n in (getattr(conv, "toolUsed", []) or [])]
+
+
 async def conversation_detail(db: Any, conversation_id: str) -> Optional[dict]:
     """Full read-only drill-down for one conversation: id, time, the
     whole transcript, token usage, tools called, human-handoff, and
@@ -299,7 +316,13 @@ async def conversation_detail(db: Any, conversation_id: str) -> Optional[dict]:
         "conversation_id": str(conversation_id),
         "created_at": str(getattr(conv, "createdAt", "") or ""),
         "updated_at": str(getattr(conv, "updatedAt", "") or ""),
-        "tools_used_summary": list(getattr(conv, "toolUsed", []) or []),
+        # Derived from the ToolExecution rows rather than read straight
+        # from Conversation.toolUsed. That column is only written by the
+        # ARCHIVED legacy orchestrator, so for all v2 traffic it is empty
+        # and this line used to render "Tools used: none" even when the
+        # table below listed calls. Rows are authoritative; the column is
+        # kept as a fallback so pre-v2 conversations still show something.
+        "tools_used_summary": _tools_used_summary(tools, conv),
         "messages": messages,
         "token_usage": token_rows,
         "token_total": sum(r["total"] or 0 for r in token_rows),
