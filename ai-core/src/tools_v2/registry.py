@@ -232,7 +232,16 @@ def _make_get_hours(backends: ToolBackends) -> Callable[[dict], Any]:
         library_id = args.get("library")
         if not library_id:
             raise ToolError("get_hours requires 'library' (canonical id).")
-        return backends.get_hours(library_id)
+        target = (args.get("date") or "").strip() or None
+        if target is None:
+            return backends.get_hours(library_id)
+        # Backends predating the date parameter stay callable: fall back
+        # to the current week rather than failing the turn over a
+        # TypeError.
+        try:
+            return backends.get_hours(library_id, date=target)
+        except TypeError:
+            return backends.get_hours(library_id)
 
     return handler
 
@@ -448,6 +457,18 @@ _GET_HOURS_SCHEMA = {
                 "gardner_harvey",
                 "sword",
             ],
+        },
+        # Optional and rarely needed from the model: the orchestrator
+        # resolves the date deterministically (scope/date_window) and
+        # passes it, because leaving the model to re-derive it is how
+        # "labor day monday" came back with THIS Monday's hours.
+        "date": {
+            "type": "string",
+            "description": (
+                "ISO YYYY-MM-DD. Omit for the current week. Supply it when "
+                "the question is about a specific future day, so the week "
+                "containing THAT day is fetched."
+            ),
         },
     },
     "required": ["library"],

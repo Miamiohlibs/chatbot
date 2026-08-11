@@ -65,6 +65,25 @@ _HOLIDAYS = {
 }
 
 
+def _holiday_name_matches(name: str, frag: str) -> bool:
+    """Whether a `holidays` package name is the holiday `frag` names.
+
+    PREFIX, not substring. "Independence Day" is a substring of
+    "Juneteenth National Independence Day", so a substring test answered
+    "when is July 4th" with the next Juneteenth -- 2027-06-18 instead of
+    2027-07-04 (found 2026-08-10 while fixing the Labor Day case).
+
+    Every fragment in _HOLIDAYS is the start of its holiday's real name
+    ("New Year" -> "New Year's Day", "Washington" -> "Washington's
+    Birthday"), and no holiday starts with another's fragment, so a prefix
+    test separates them. The "(observed)" suffix is stripped first: the
+    real date is what a patron names, and it sorts before the observed one
+    anyway.
+    """
+    clean = (name or "").replace(" (observed)", "").strip()
+    return clean.startswith(frag)
+
+
 def resolve_target_date(
     text: str, today: Optional[date] = None
 ) -> Optional[date]:
@@ -88,7 +107,7 @@ def resolve_target_date(
             if kw in t:
                 cands = sorted(
                     d for d, name in us.items()
-                    if frag in name and d >= ref
+                    if _holiday_name_matches(name, frag) and d >= ref
                 )
                 if cands:
                     return cands[0]

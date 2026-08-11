@@ -1009,13 +1009,50 @@ def _mark_todays_row(hours_text: str) -> str:
     return f"Today is {_today_sentence()}.\n" + "\n".join(out)
 
 
-def _make_get_hours() -> Callable[[str], dict]:
+def _mark_target_row(hours_text: str, target: "_dt.date") -> str:
+    """The week schedule with the ASKED-ABOUT row tagged, for the model.
+
+    Same contract as `_mark_todays_row` -- never assign this to `hours`,
+    which several callers print verbatim -- but anchored on the date the
+    question is about instead of on today. Marking today's row in a week
+    four weeks out would point the model at a day nobody asked about, and
+    for "labor day monday" today's row is not even in the fetched week.
+    """
+    text = hours_text or ""
+    if not text.strip() or _TARGET_TAG in text:
+        return text
+    weekday = target.strftime("%A")
+    out = []
+    for line in text.splitlines():
+        if target.isoformat() in line and weekday in line:
+            line = f"{line}{_TARGET_TAG}"
+        out.append(line)
+    return (
+        f"The question is about {weekday}, "
+        f"{target.strftime('%B %-d, %Y')} ({target.isoformat()}).\n"
+        + "\n".join(out)
+    )
+
+
+_TARGET_TAG = "  <-- THE DAY ASKED ABOUT"
+
+
+def _make_get_hours() -> Callable[..., dict]:
     from src.tools.libcal_comprehensive_tools import LibCalWeekHoursTool
 
     tool = LibCalWeekHoursTool()
 
-    def get_hours(library_id: str) -> dict:
+    def get_hours(library_id: str, date: Optional[str] = None) -> dict:
         canon = (library_id or "king").strip().lower()
+        # A malformed date must not fail the turn -- fall back to the
+        # current week, which is what every call did before this existed.
+        _target_date: Optional[_dt.date] = None
+        if date:
+            try:
+                _target_date = _dt.date.fromisoformat(str(date).strip())
+            except (TypeError, ValueError):
+                logger.warning("get_hours: ignoring unparseable date %r", date)
+                date = None
         if canon == "sword":
             return {
                 "success": False,
@@ -1027,8 +1064,14 @@ def _make_get_hours() -> Callable[[str], dict]:
                 ),
             }
         name = _CANON_TO_LIBCAL_NAME.get(canon, canon)
+        # LibCalWeekHoursTool has always taken a date and fetched the
+        # Monday-Sunday week containing it; nothing ever passed one, so
+        # every hours answer was built from the CURRENT week. A question
+        # about a day further out than Sunday therefore had no data behind
+        # it at all, and the model answered from the week it was given --
+        # "labor day monday" came back with this Monday's hours.
         try:
-            res = _bridge(tool.execute(query=name, building=name))
+            res = _bridge(tool.execute(query=name, building=name, date=date))
         except Exception as e:  # noqa: BLE001
             raise ToolError(
                 f"get_hours: LibCal lookup failed for {library_id!r} "
@@ -1057,7 +1100,16 @@ def _make_get_hours() -> Callable[[str], dict]:
             # time" -- the model had the date but would not commit to a row.
             # Marking the row inline restores that, and keeping it in its own
             # field keeps `hours` safe for verbatim callers.
-            "hours_today_marked": _mark_todays_row(res.get("text", "")),
+            "hours_today_marked": (
+                _mark_todays_row(res.get("text", "")) if _target_date is None
+                else _mark_target_row(res.get("text", ""), _target_date)
+            ),
+            # Present only when the question named a specific day, so the
+            # synthesizer can tell "which day is it now" from "which day
+            # was asked about".
+            "target_date": (
+                _target_date.isoformat() if _target_date is not None else None
+            ),
             # Operator-provided and WebFetch-verified 2026-05-16:
             # 200, title "Library Hours | Miami University Libraries",
             # canonical hours hub, no redirect. (Earlier guesses
