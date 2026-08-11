@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+#
+# Stop patron data, staff rosters and credentials from being committed.
+#
+# This file is TRACKED, unlike .git/hooks/pre-commit, which is not copied by
+# `git clone` and so silently protects nobody on a fresh checkout. Enable it
+# once per clone:
+#
+#     git config core.hooksPath scripts/hooks
+#
+# `scripts/setup_hooks.sh` does that and checks it took effect.
+#
+# It can be skipped with `git commit --no-verify`, on purpose -- a hook that
+# cannot be skipped gets deleted instead. The same check runs in CI, so a
+# skip is visible to someone other than the person who skipped it.
+
+set -uo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+
+# No Python means no scan. Fail the commit rather than waving it through:
+# the whole failure mode we are guarding against is a control that quietly
+# stopped applying.
+if ! command -v python3 >/dev/null 2>&1; then
+    echo "pre-commit: python3 not found, cannot scan for patron data." >&2
+    echo "            Install python3, or use --no-verify if you are certain." >&2
+    exit 1
+fi
+
+python3 "$REPO_ROOT/scripts/scan_for_pii.py" --staged

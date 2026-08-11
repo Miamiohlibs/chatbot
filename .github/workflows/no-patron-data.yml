@@ -1,0 +1,50 @@
+name: no patron data
+
+# The local pre-commit hook can be skipped with --no-verify, and on a fresh
+# clone it is not even installed until someone runs scripts/setup_hooks.sh.
+# This is the backstop that does not depend on anyone's machine being set up
+# correctly, which is precisely how the last leak got through.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Need the merge base to diff against. 0 = full history; the repo
+          # is small enough that this costs seconds.
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Scan what this change adds
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE="${{ github.event.pull_request.base.sha }}"
+          else
+            BASE="${{ github.event.before }}"
+            # First push to a new branch has an all-zero "before".
+            if [ "$BASE" = "0000000000000000000000000000000000000000" ]; then
+              BASE=$(git rev-parse HEAD~1 2>/dev/null || git rev-parse HEAD)
+            fi
+          fi
+          echo "Comparing against $BASE"
+          python3 scripts/scan_for_pii.py --diff "$BASE"
+
+      - name: Show what is already in the repo
+        # Never fails -- the repo legitimately contains the library's public
+        # phone numbers, the subject-librarian directory, and test fixtures.
+        # This step exists so the numbers are visible in the log and a jump
+        # is noticeable, not so it can gate anything.
+        if: always()
+        run: python3 scripts/scan_for_pii.py --all
