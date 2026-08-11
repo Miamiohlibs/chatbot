@@ -1,0 +1,83 @@
+// Coverage gaps found by reading the 111-item flagged queue on 2026-08-11.
+//
+// All three groups below were real library questions that the kNN scored
+// BELOW SCORE_FLOOR (0.50) and so were overridden to out_of_scope and
+// refused. The classifier's own top-1 was right in every case:
+//
+//   "printing cost at gardner harvey"              0.499  top=location_directions
+//   "where can I find books about totalitarianism?" 0.485  top=find_resource
+//   "what happens if i dont show up"                0.369  top=loan_policy
+//
+// Lowering SCORE_FLOOR is NOT the fix and was measured, not assumed: real
+// off-topic traffic from the same queue scores 0.256-0.660 -- "can you
+// order a pizza" is 0.450 and "how are you today" is 0.660, both ABOVE
+// two of the three above. The classes overlap, so no threshold separates
+// them. These questions score low because nothing in the exemplar set is
+// close to them, which is a coverage gap, so it is closed with coverage.
+//
+// Deliberately paraphrases, not the students' own sentences: these files
+// are committed, and a live utterance can carry identifying detail.
+
+// --- printing at the regional campuses -------------------------------------
+// A campus name plus a printing word scored 0.499 -- just under the floor.
+{"intent": "printing_wifi", "utterance": "printing cost at gardner harvey", "source": "queue_triage_2026_08_11"}
+{"intent": "printing_wifi", "utterance": "how much is printing at Gardner-Harvey", "source": "queue_triage_2026_08_11"}
+{"intent": "printing_wifi", "utterance": "printing cost at Rentschler", "source": "queue_triage_2026_08_11"}
+{"intent": "printing_wifi", "utterance": "what does it cost to print at the Middletown library", "source": "queue_triage_2026_08_11"}
+{"intent": "printing_wifi", "utterance": "price per page to print at Hamilton", "source": "queue_triage_2026_08_11"}
+{"intent": "printing_wifi", "utterance": "can I print at the regional campus library", "source": "queue_triage_2026_08_11"}
+{"intent": "printing_wifi", "utterance": "color printing cost at gardner harvey", "source": "queue_triage_2026_08_11"}
+
+// --- "where can I find books about <topic>" --------------------------------
+// The shape is core library work and scored 0.485. Topics are varied on
+// purpose: the shape has to match, not the subject.
+{"intent": "find_resource", "utterance": "where can I find books about totalitarianism?", "source": "queue_triage_2026_08_11"}
+{"intent": "find_resource", "utterance": "where do I find books on the Cold War", "source": "queue_triage_2026_08_11"}
+{"intent": "find_resource", "utterance": "where are the books about climate policy", "source": "queue_triage_2026_08_11"}
+{"intent": "find_resource", "utterance": "how do I find a book about jazz history", "source": "queue_triage_2026_08_11"}
+{"intent": "find_resource", "utterance": "which section has books on organic chemistry", "source": "queue_triage_2026_08_11"}
+{"intent": "find_resource", "utterance": "do you have books about the Ottoman Empire", "source": "queue_triage_2026_08_11"}
+{"intent": "find_resource", "utterance": "where would I look for books on nursing ethics", "source": "queue_triage_2026_08_11"}
+
+// --- study-room booking RULES, not a booking -------------------------------
+// room_booking so the answer comes from the reservation pages. The
+// orchestrator's _is_booking_policy_question keeps these OUT of the
+// slot-collection flow -- otherwise "how far ahead can i book" is answered
+// with "I still need: first name, last name, email, date...", which is
+// exactly what the queue caught.
+{"intent": "room_booking", "utterance": "what happens if i dont show up", "source": "queue_triage_2026_08_11"}
+{"intent": "room_booking", "utterance": "what if I miss my study room reservation", "source": "queue_triage_2026_08_11"}
+{"intent": "room_booking", "utterance": "how far ahead can i book a study room", "source": "queue_triage_2026_08_11"}
+{"intent": "room_booking", "utterance": "how far in advance can I reserve a room", "source": "queue_triage_2026_08_11"}
+{"intent": "room_booking", "utterance": "how long can I book a study room for", "source": "queue_triage_2026_08_11"}
+{"intent": "room_booking", "utterance": "what are the study room booking rules", "source": "queue_triage_2026_08_11"}
+{"intent": "room_booking", "utterance": "can I book more than one room at a time", "source": "queue_triage_2026_08_11"}
+{"intent": "room_booking", "utterance": "what is the room reservation policy", "source": "queue_triage_2026_08_11"}
+{"intent": "room_booking", "utterance": "how do I cancel a study room reservation", "source": "queue_triage_2026_08_11"}
+
+// --- "do my coursework for me" ---------------------------------------------
+// Pre-existing gap, confirmed by removing this file and re-measuring: "can
+// you write my lab report" scored 0.587 and routed to
+// research_consultation with or without the exemplars above. "write my
+// essay" was already covered; the assignment NOUNS were not. Doing a
+// student's coursework is the one refusal a library cannot get wrong.
+{"intent": "out_of_scope", "utterance": "can you write my lab report", "source": "queue_triage_2026_08_11"}
+{"intent": "out_of_scope", "utterance": "write my lab report for me", "source": "queue_triage_2026_08_11"}
+{"intent": "out_of_scope", "utterance": "do my problem set", "source": "queue_triage_2026_08_11"}
+{"intent": "out_of_scope", "utterance": "can you do my homework for me", "source": "queue_triage_2026_08_11"}
+{"intent": "out_of_scope", "utterance": "write my discussion post", "source": "queue_triage_2026_08_11"}
+{"intent": "out_of_scope", "utterance": "finish my term paper for me", "source": "queue_triage_2026_08_11"}
+{"intent": "out_of_scope", "utterance": "answer my quiz questions", "source": "queue_triage_2026_08_11"}
+{"intent": "out_of_scope", "utterance": "solve these calculus problems for me", "source": "queue_triage_2026_08_11"}
+
+// --- the OTHER side of that boundary ---------------------------------------
+// The refusals above pulled "can you help me find sources for my lab report"
+// in with them (0.669 -> out_of_scope). Helping a student find sources FOR
+// an assignment is the library's actual job; doing the assignment is not.
+// A one-sided exemplar set draws the line in the wrong place, so both sides
+// are stated.
+{"intent": "research_consultation", "utterance": "can you help me find sources for my lab report", "source": "queue_triage_2026_08_11"}
+{"intent": "research_consultation", "utterance": "I need sources for my term paper", "source": "queue_triage_2026_08_11"}
+{"intent": "research_consultation", "utterance": "help me find research for my essay", "source": "queue_triage_2026_08_11"}
+{"intent": "research_consultation", "utterance": "where do I start researching my problem set topic", "source": "queue_triage_2026_08_11"}
+{"intent": "research_consultation", "utterance": "what databases should I use for my discussion post", "source": "queue_triage_2026_08_11"}

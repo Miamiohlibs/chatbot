@@ -1769,3 +1769,99 @@ def test_a_named_day_beyond_the_window_is_left_to_the_hours_page() -> None:
 
     assert _named_day_answer("are you open memorial day", deps, scope) is None
     assert called == []
+
+
+# --- booking POLICY is not a booking --------------------------------------
+
+
+def test_booking_policy_questions_are_not_booking_requests() -> None:
+    """"how far ahead can i book" was answered with "I still need: first
+    name, last name, email, date..." -- a student who asked about the rules
+    was handed a form (flagged queue, 2026-08-11)."""
+    from src.graph.new_orchestrator import _is_booking_policy_question
+
+    for q in ("how far ahead can i book",
+              "how far in advance can I reserve a study room",
+              "what happens if i dont show up",
+              "what if I miss my reservation",
+              "how long can I book a room for",
+              "what is the room reservation policy",
+              "can I book more than one room",
+              "what happens if i forget to cancel"):
+        assert _is_booking_policy_question(q), q
+
+
+def test_an_actual_booking_request_still_reaches_the_slot_flow() -> None:
+    """The guard must not swallow real bookings -- a concrete time means
+    they are booking, not asking."""
+    from src.graph.new_orchestrator import _is_booking_policy_question
+
+    for q in ("book a room at King tomorrow 6pm to 7pm",
+              "can I book two rooms tomorrow at 3pm",
+              "reserve King 240 for Thursday at 10am",
+              "book something for right now"):
+        assert not _is_booking_policy_question(q), q
+
+
+def test_availability_questions_keep_their_own_path() -> None:
+    """_ROOM_AVAIL_RE answers those with live availability, which is better
+    than the policy path's pointer."""
+    from src.graph.new_orchestrator import _is_booking_policy_question
+
+    for q in ("what study rooms are available at King",
+              "is King 240 open next Thursday"):
+        assert not _is_booking_policy_question(q), q
+
+
+# --- a bare library name is a question, not off-topic ---------------------
+
+
+def test_a_bare_library_name_is_recognised() -> None:
+    from src.graph.new_orchestrator import _is_bare_library_name
+
+    for m in ("king", "King", "  king  ", "king library",
+              "at rentschler", "gardner-harvey", "the art library",
+              "middletown", "hamilton", "oxford"):
+        assert _is_bare_library_name(m), m
+
+
+def test_a_real_question_is_not_a_bare_library_name() -> None:
+    """The override must not swallow questions that merely NAME a library."""
+    from src.graph.new_orchestrator import _is_bare_library_name
+
+    for m in ("what are the hours at king",
+              "is king open",
+              "book a room at king",
+              "does king have a scanner",
+              "", "   ", "the library",
+              "where can I find books about totalitarianism"):
+        assert not _is_bare_library_name(m), m
+
+
+def test_a_bare_library_name_asks_instead_of_refusing() -> None:
+    """"what are the hours" -> we answer for King -> "king" was met with
+    the out-of-scope refusal (flagged queue, 2026-08-11). Refusing a
+    patron who typed one of our own library names is the worst option.
+
+    We ASK rather than guess. Carrying the previous topic forward was
+    built first and measured worse: the intent came out right, every
+    deterministic hours path needs a question shape, and a bare "king"
+    fell through to the synthesizer and produced "I don't have a reliable
+    answer to that"."""
+    deps = _build_deps(
+        classification=_classification("out_of_scope"),
+        evidence_in_search_kb_result=[_evidence_dict("c1")],
+    )
+    resp = run_turn(
+        TurnRequest(
+            user_message="king",
+            conversation_id="c1",
+            conversation_history=[
+                {"role": "user", "content": "what are the hours"},
+                {"role": "assistant",
+                 "content": "King Library is open 7:30am to 9:00pm. [1]"},
+            ],
+        ),
+        deps,
+    )
+    assert not resp.is_refusal, resp.answer

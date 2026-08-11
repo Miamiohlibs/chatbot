@@ -426,6 +426,63 @@ def _run_turn(
         bind_request_context(intent="room_booking",
                              margin=classification.margin)
 
+    # --- 2.0265. A bare library name is a question, not off-topic ---
+    # "what are the hours" -> we answer for King -> "king" -> OUT OF SCOPE
+    # and a refusal (flagged queue, 2026-08-11). Refusing a patron who
+    # typed one of our own library names is the worst of the options.
+    #
+    # We ASK rather than guess, and that is the considered choice, not the
+    # lazy one. Carrying the previous topic forward was built first --
+    # infer from our own last answer that we were talking about hours, then
+    # force intent=hours -- and it made things WORSE: the intent came out
+    # right and the deterministic hours paths all need a question shape, so
+    # a bare "king" fell through to the synthesizer with nothing to work
+    # from and produced "I don't have a reliable answer to that". A wrong
+    # guess dressed as an answer beats neither asking nor refusing.
+    #
+    # A bare library name genuinely is ambiguous -- hours, spaces, a
+    # booking, an address -- so the clarifier offering the choices is the
+    # honest reading, and scope resolution has already pinned the library
+    # by alias so the choices come back scoped to the one they named.
+    if (
+        not booking_flow
+        and classification.intent == "out_of_scope"
+        and _is_bare_library_name(request.user_message)
+    ):
+        classification = _dc_replace(
+            classification, needs_clarification=True,
+        )
+
+    # --- 2.0275. Booking POLICY question is not a booking ---
+    # "how far ahead can i book" classifies as room_booking at 1.000 and
+    # the agent prompt biases hard toward book_room, so the student who
+    # asked about the RULES was answered with "I still need: first name,
+    # last name, @miamioh.edu email address, date..." -- a form, for a
+    # question (flagged queue, 2026-08-11).
+    #
+    # Skipping the slot-filling registry was tried first and does not
+    # work: that only stops arg back-filling, and the agent still calls
+    # book_room, whose missing-args reply IS that text. The lever is the
+    # intent, because that is what the agent prompt reads.
+    #
+    # space_info retrieves the same room and reservation pages without any
+    # booking machinery, so the answer comes from the corpus -- which has
+    # how to reserve and how to cancel and nothing about advance limits.
+    # A student who then says "book it" starts a booking on purpose.
+    #
+    # Mid-flow turns are exempt: once a booking IS under way, "what
+    # happens if i dont show up" belongs to that booking.
+    if (
+        not booking_flow
+        and classification.intent == "room_booking"
+        and _is_booking_policy_question(request.user_message)
+    ):
+        classification = _dc_replace(
+            classification, intent="space_info", needs_clarification=False,
+        )
+        bind_request_context(intent="space_info",
+                             margin=classification.margin)
+
     # --- 2.028. "<subject> librarian" override ---
     # First live student, 2026-07-30: "Does King Library have a music section?"
     # then "How about music librarian at King?" -- and the bot answered about
@@ -3161,6 +3218,61 @@ _ROOM_AVAIL_RE = re.compile(
     r"\b(?:king|rentschler|gardner[- ]?harvey|wertz)\s+\d{2,3}\b",
     re.IGNORECASE,
 )
+
+# --- Room-booking POLICY question (live queue triage 2026-08-11) ---------
+#
+# Same family as _ROOM_AVAIL_RE above, one step further out: asking what
+# the booking RULES are is neither a booking nor an availability check.
+#
+#   "how far ahead can i book"      -> room_booking (1.000), so the slot
+#                                      flow answered "I still need: first
+#                                      name, last name, email, date..."
+#   "what happens if i dont show up" -> out_of_scope (0.369), refused
+#
+# Both came out of the flagged queue. The first is worse: the student
+# asked a policy question and was handed a form.
+#
+# These are answered from the corpus, NOT from a template here. The
+# corpus has how to reserve and how to cancel and nothing about advance
+# limits, maximum durations or no-shows -- so the honest outcome is the
+# reservation page plus what IS known, and a synthesizer that declines to
+# state a limit it cannot source. Writing "you may book up to 14 days
+# ahead" into a template would be inventing library policy.
+_BOOKING_POLICY_RE = re.compile(
+    # "how far ahead / in advance", "how long", "how many hours"
+    r"\bhow\s+(?:far|long|much|many|early)\b[^.?!]*"
+    r"\b(?:ahead|advance|book|reserv\w*|room)\b"
+    # no-show / late / cancel rules
+    r"|\b(?:no[- ]?show|don'?t\s+show|dont\s+show|miss(?:ed)?\s+my|"
+    r"late\s+for|forget\s+to\s+cancel)\b[^.?!]*"
+    r"|\bwhat\s+happens\s+if\b[^.?!]*"
+    r"\b(?:book\w*|reserv\w*|room|show\s+up|cancel|late)\b"
+    r"|\b(?:can|may)\s+i\s+(?:book|reserve)\b[^.?!]*"
+    r"\b(?:more\s+than|multiple|two|several|again)\b"
+    # limits and rules, stated as such
+    r"|\b(?:booking|reservation|room)\s+(?:polic\w+|rules?|limits?)\b"
+    r"|\b(?:polic\w+|rules?|limits?)\b[^.?!]*\b(?:book\w*|reserv\w*)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_booking_policy_question(message: str) -> bool:
+    """Whether this asks about the booking RULES rather than to book.
+
+    An explicit date or time means they are booking, not asking -- "can I
+    book two rooms tomorrow at 3pm" is a request, and the slot flow is
+    right for it.
+    """
+    m = message or ""
+    if not _BOOKING_POLICY_RE.search(m):
+        return False
+    if _ROOM_AVAIL_RE.search(m):
+        return False        # availability has its own, better answer
+    if re.search(r"\b\d{1,2}\s*(?:am|pm|:\d{2})\b|\btomorrow\b|\btonight\b",
+                 m, re.IGNORECASE):
+        return False        # a concrete when -- they are booking
+    return True
+
 
 _AVAIL_RESERVE_PAGES = {
     "king": (_ROOMS_KING_RESERVE_URL,
@@ -6529,6 +6641,43 @@ def _flow_active(
     return False
 
 
+def _is_bare_library_name(message: str) -> bool:
+    """Whether the whole message is just a library or campus name.
+
+    "king", "Gardner-Harvey", "the art library" -- nothing else. A few
+    filler words are allowed ("king library", "at rentschler") because
+    that is how people type, but anything carrying a question of its own
+    keeps normal routing.
+    """
+    from src.scope.aliases import CAMPUS_ALIASES, LIBRARY_ALIASES
+
+    m = (message or "").strip().lower().strip("?.!,")
+    if not m or len(m.split()) > 4:
+        return False
+
+    # Two candidate forms, because stripping too much loses real aliases and
+    # stripping too little misses how people type. "art library" IS an
+    # alias, so removing the word "library" breaks it; "at rentschler" is
+    # not, so the leading preposition has to go.
+    lead_only = " ".join(
+        re.sub(r"^\s*(?:the|at|in|for)\b", " ", m).split()
+    )
+    bare = " ".join(
+        re.sub(r"\b(the|at|in|for|library|libraries|campus|please|one)\b",
+               " ", m).split()
+    )
+    if not bare and not lead_only:
+        return False        # "the library" alone names nothing specific
+
+    aliases = {a.lower() for a in LIBRARY_ALIASES} | {
+        a.lower() for a in CAMPUS_ALIASES}
+    return any(form and form in aliases for form in (lead_only, bare))
+
+
+# What our own last substantive answer was about, inferred from its text.
+# conversation_history carries no intent, so the marker phrases our
+# deterministic answers use are the only signal -- the same trick
+# _flow_active relies on.
 def _booking_flow_active(history: Optional[list]) -> bool:
     """True when a mid-flow booking text is still the open question,
     even if the patron asked something else in between."""
