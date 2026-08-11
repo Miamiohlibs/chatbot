@@ -129,6 +129,19 @@ class TurnResponse:
     know about telemetry -- `run_turn` fills this in at the single exit
     from what `observability/tool_trail` collected during the turn."""
 
+    campus_assumed: Optional[str] = None
+    """Campus display name when the turn ASSUMED a campus the patron never
+    named, on a question whose answer differs between campuses.
+
+    A field rather than a sentence in `answer`. The first version wrote
+    the caveat into the answer text and cost 10 of 150 gold cases: the
+    judge scored it as unsupported campus framing, the citation validator
+    saw prose it could not source, and leading with it read as the clarify
+    prompt that clr_which_library_chips forbids by name. None of that is
+    about the caveat being wrong -- it is about scope metadata not
+    belonging in the answer body. The client renders it above the answer,
+    which is where the operator wanted it seen."""
+
 
 # --- Dependency bundle ---------------------------------------------------
 
@@ -204,6 +217,10 @@ def run_turn(
         response, response.intent, request.user_message
     )
     response = _append_unanswered_note(response, request.user_message)
+    # Applied at the same single exit and for the same reason: ~25 of the
+    # body's return points are short-circuits, and a rule that has to be
+    # remembered at each of them is a rule that will be missed at one.
+    response = _flag_campus_assumption(response, request.user_message)
     # Attach the trail at the SINGLE exit, for the same reason the
     # disclaimer is applied here: the body has 32 return points -- ~25 of
     # them short-circuits that never reach the agent loop -- and doing
@@ -1715,6 +1732,94 @@ def _append_unanswered_note(
 
 
 _UNANSWERED_MARKER = "You also asked about"
+
+
+# Intents whose correct answer genuinely changes between Oxford, Hamilton
+# and Middletown. Kept narrow on purpose -- a note on every turn is noise,
+# and noise is how a safety net gets ignored.
+#
+#   tech_checkout   the equipment list itself differs. LibAnswers FAQ
+#                   158197: "Different library locations have different
+#                   equipment." This is the reported case: a student asked
+#                   how long they could keep a borrowed laptop, gave no
+#                   campus, and got Oxford's 3-hour/30-day answer
+#                   (thumbs-down, 2026-08-10 19:40).
+#   hours           different buildings, different calendars.
+#   room_booking    separate LibCal space sets per campus.
+#   printing_wifi   per-building printers and pricing.
+#   course_reserves a different desk holds them on each campus.
+#   space_info      quiet floors and reading rooms are per building.
+#
+# Deliberately NOT included: circulation_basic, renewal, loan_policy. The
+# circulation LibGuide states policies "are essentially the same on all
+# Miami University campuses", so asking a renewal question to name its
+# campus would be friction with nothing behind it.
+_CAMPUS_VARYING_INTENTS = frozenset({
+    "course_reserves",
+    "hours",
+    "printing_wifi",
+    "room_booking",
+    "space_info",
+    "tech_checkout",
+})
+
+# Naming a regional campus in the answer means the turn already drew the
+# distinction, so flagging an assumption would contradict it.
+_REGIONAL_MENTION_RE = re.compile(
+    r"\b(hamilton|middletown|rentschler|gardner[- ]harvey|regional)\b",
+    re.IGNORECASE,
+)
+
+# A question that spans campuses is not a question with an assumed campus.
+# "Can I print at any library?" wants all three listed; answering it under
+# an Oxford banner suppresses the two the patron asked about (gold
+# xcc_printing_all_campuses, which the first version turned from correct
+# to wrong).
+_SPANS_CAMPUSES_RE = re.compile(
+    r"\b(any|all|each|every|both|which)\s+(library|libraries|campus|campuses|"
+    r"location|locations)\b"
+    r"|\b(all|every|each|both)\s+(three\s+)?campuses\b"
+    r"|\bcompare\b|\bdifference between\b|\bvs\.?\b|\bversus\b",
+    re.IGNORECASE,
+)
+
+
+def _flag_campus_assumption(response: "TurnResponse",
+                            user_message: str = "") -> "TurnResponse":
+    """Record that an unspecified campus was read as Oxford.
+
+    resolve_scope falls back to ("oxford", None) when the message names no
+    library and no campus and there is no regional session origin, and it
+    records that as source="default". The fallback is right -- Oxford is
+    the flagship and most traffic -- but it was silent, so a Middletown
+    student asking how long they can keep a laptop got Oxford's loan
+    period with nothing to suggest it was not theirs (thumbs-down,
+    2026-08-10 19:40).
+
+    Sets a FIELD; it does not touch `answer`. The first attempt wrote the
+    caveat into the answer and cost 10 of 150 gold cases -- the judge read
+    it as unsupported campus framing, and leading with it read as the
+    clarify prompt clr_which_library_chips forbids by name. The caveat is
+    scope metadata, so it travels as metadata and the client renders it
+    above the answer.
+
+    Asking outright would be the stronger guard, but 19 gold cases require
+    a direct answer for exactly these shapes, so the assumption is
+    disclosed rather than interrogated.
+    """
+    if response.is_refusal:
+        return response  # already routing to a person
+    if response.intent not in _CAMPUS_VARYING_INTENTS:
+        return response
+    if (response.scope or {}).get("source") != "default":
+        return response  # a campus WAS established; nothing was assumed
+    if not (response.answer or "").strip():
+        return response
+    if _SPANS_CAMPUSES_RE.search(user_message or ""):
+        return response  # they asked about all of them, not one
+    if _REGIONAL_MENTION_RE.search(response.answer or ""):
+        return response  # the answer already draws the distinction
+    return _dc_replace(response, campus_assumed="Oxford")
 
 
 def _add_research_disclaimer(
@@ -5287,7 +5392,16 @@ _WEEKDAY_ORDER = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday",
 
 _NAMED_DAY_RE = re.compile(
     r"\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday|"
-    r"tomorrow|weekend)\b", re.IGNORECASE)
+    r"tomorrow|weekend|"
+    # Named holidays reach this path too, so a date inside the live window
+    # gets the dated table instead of a guess. _NOT_SIMPLE_DAY_RE still
+    # holds back christmas/thanksgiving/break, and _named_day_answer drops
+    # anything the window cannot serve -- so which holidays qualify is
+    # decided by the date, not by the name.
+    r"labor day|memorial day|mlk|martin luther king|presidents? day|"
+    r"president's day|independence day|fourth of july|4th of july|"
+    r"july 4(th)?|columbus day|veterans day|new year'?s?( day)?)\b",
+    re.IGNORECASE)
 
 # "next Saturday", holidays and term-length questions each have their own path
 # and must keep it -- this one only answers "which hours apply on <day>".
@@ -5354,7 +5468,19 @@ def _collapse_week(hours_text: str) -> "Optional[str]":
 
 
 def _resolve_named_day(message: str, now) -> "Optional[tuple[str, object]]":
-    """(weekday name, date) for a simple named day in the message, or None."""
+    """(weekday name, date) for a named day in the message, or None.
+
+    A CALENDAR date in the message wins over the weekday word, because a
+    weekday word on its own is ambiguous and the arithmetic below resolves
+    it to the nearest one -- which is today when the two agree. "when does
+    Art library open labor day monday" therefore answered with THIS
+    Monday's hours: Labor Day was ignored, "monday" matched, and
+    2026-08-10 happened to be a Monday (thumbs-down, 2026-08-10 19:35).
+
+    scope/date_window already resolves every named US holiday and every
+    explicit date to a concrete day, and got 2026-09-07 right for that
+    message all along -- it was just never consulted here.
+    """
     import datetime as _d
     m = message or ""
     if _NOT_SIMPLE_DAY_RE.search(m):
@@ -5362,13 +5488,27 @@ def _resolve_named_day(message: str, now) -> "Optional[tuple[str, object]]":
     hit = _NAMED_DAY_RE.search(m)
     if not hit:
         return None
-    word = hit.group(1).lower()
+
     today = now.date()
+    try:
+        from src.scope.date_window import resolve_target_date
+
+        specific = resolve_target_date(m, today=today)
+        if specific is not None:
+            return specific.strftime("%A"), specific
+    except Exception:  # noqa: BLE001 -- never let date logic break routing
+        pass
+
+    word = hit.group(1).lower()
     if word == "tomorrow":
         d = today + _d.timedelta(days=1)
         return d.strftime("%A"), d
     if word == "weekend":
         return None            # two days; the table answer is the honest one
+    if word.capitalize() not in _WEEKDAY_ORDER:
+        # A holiday name with no weekday and no resolvable date -- let the
+        # long-period path point at the hours page rather than guessing.
+        return None
     target = _WEEKDAY_ORDER.index(word.capitalize())
     delta = (target - today.weekday()) % 7
     d = today + _d.timedelta(days=delta)
@@ -5417,8 +5557,15 @@ def _fmt_clock(minutes: int) -> str:
     return f"{h12}:{m:02d}{suffix}" if m else f"{h12}{suffix}"
 
 
-def _get_hours_data(deps: "OrchestratorDeps", library: str) -> "Optional[dict]":
+def _get_hours_data(deps: "OrchestratorDeps", library: str,
+                    target_date: "Optional[object]" = None) -> "Optional[dict]":
     """get_hours for one library, retried, or None.
+
+    `target_date` (a date) fetches the Monday-Sunday week containing THAT
+    day instead of the current one. LibCalWeekHoursTool always accepted a
+    date and nothing ever passed one, so every hours answer was built from
+    the current week -- a question about a day past this Sunday had no data
+    behind it at all, and the answer came from whatever week was to hand.
 
     ONE place, because the retry is not optional. The first hours call in a
     freshly restarted process comes back with ToolResult.error UNSET but
@@ -5430,11 +5577,14 @@ def _get_hours_data(deps: "OrchestratorDeps", library: str) -> "Optional[dict]":
     """
     try:
         from src.agent.tool_registry import ToolCall
+        args = {"library": library}
+        if target_date is not None:
+            args["date"] = target_date.isoformat()
         res = None
         for attempt in range(3):
             res = deps.tool_registry.dispatch(
                 ToolCall(id=f"hours-{library}-{attempt}", name="get_hours",
-                         arguments={"library": library})
+                         arguments=dict(args))
             )
             if not res.error and (res.data or {}).get("success"):
                 break
@@ -5664,15 +5814,32 @@ def _named_day_answer(
         return None
     if not _WEEK_HOURS_RE.search(m) and not _OPEN_NOW_RE.search(m):
         return None
-    library = _open_now_library(m, scope)
-    data = _get_hours_data(deps, library)
-    if data is None:
-        return None
-
     import datetime as _datetime
 
     import pytz as _pytz
     now = _datetime.datetime.now(_pytz.timezone("America/New_York"))
+
+    # Resolve the day FIRST, so the week we fetch is the week that contains
+    # it. Asking for the current week and then looking for a date four
+    # weeks out finds nothing, and the row that does match the weekday name
+    # belongs to the wrong week.
+    resolved = _resolve_named_day(m, now)
+    if resolved is None:
+        return None
+    _, target = resolved
+    try:
+        from src.scope.date_window import within_window
+
+        if not within_window(target, today=now.date()):
+            return None     # too far out; the point-to-page path owns it
+    except Exception:  # noqa: BLE001
+        pass
+
+    library = _open_now_library(m, scope)
+    data = _get_hours_data(deps, library, target_date=target)
+    if data is None:
+        return None
+
     name = _LIBRARY_DISPLAY.get(library, library.title())
     line = _named_day_hours_sentence(
         str(data.get("hours") or ""), name, m, now)

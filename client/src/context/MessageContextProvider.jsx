@@ -57,6 +57,14 @@ const MessageContextProvider = ({ children }) => {
       message && typeof message === 'object' && typeof message.confidence === 'string'
         ? message.confidence
         : undefined;
+    // The campus the bot ASSUMED because the question named none, on a
+    // question whose answer differs by campus. Shown as a badge above the
+    // answer rather than as a sentence inside it -- as prose it read as
+    // the bot asking a question back, and it cost 10 of 150 graded cases.
+    const campusAssumed =
+      message && typeof message === 'object' && typeof message.campus_assumed === 'string'
+        ? message.campus_assumed
+        : undefined;
 
     setMessage((prevMessages) => {
       const updatedMessages = [
@@ -69,6 +77,7 @@ const MessageContextProvider = ({ children }) => {
           timestamp: Date.now(),
           citations,
           confidence,
+          campusAssumed,
         },
       ];
       sessionStorage.setItem('chat_messages', JSON.stringify(updatedMessages));

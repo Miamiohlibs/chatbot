@@ -1599,3 +1599,173 @@ def test_a_short_circuit_turn_reports_an_empty_trail_not_a_stale_one() -> None:
     resp = run_turn(TurnRequest(user_message="hours?",
                                 conversation_id="conv-2"), deps)
     assert resp.tools_called == []
+
+
+# --- campus assumption flag ------------------------------------------------
+
+
+def _resp_for_note(intent, source, answer="Most laptops check out for 3 hours.",
+                   is_refusal=False):
+    from src.graph.new_orchestrator import TurnResponse
+    return TurnResponse(
+        answer=answer, is_refusal=is_refusal, refusal_trigger=None,
+        citations=[], intent=intent,
+        scope={"campus": "oxford", "library": None, "source": source},
+        confidence="high", model_used="stub", tokens={},
+        fired_corrections=[], agent_stopped_reason="clean", latency_ms=1,
+        cited_chunk_ids=[],
+    )
+
+
+def test_an_assumed_campus_is_flagged_without_touching_the_answer() -> None:
+    """resolve_scope reads an unspecified campus as Oxford, which is right
+    -- but it was silent, so a Middletown student who asked how long they
+    could keep a borrowed laptop got Oxford's loan period with nothing to
+    suggest it was not theirs (thumbs-down, 2026-08-10).
+
+    Written into the answer it cost 10 of 150 gold cases; it travels as a
+    field so the client can show it and the judge never sees it."""
+    from src.graph.new_orchestrator import _flag_campus_assumption
+
+    out = _flag_campus_assumption(
+        _resp_for_note("tech_checkout", "default"),
+        "how long can I keep a laptop",
+    )
+    assert out.campus_assumed == "Oxford"
+    assert out.answer == "Most laptops check out for 3 hours.", (
+        "the answer text must be untouched"
+    )
+
+
+def test_a_stated_campus_is_not_flagged() -> None:
+    from src.graph.new_orchestrator import _flag_campus_assumption
+
+    for source in ("library_alias", "campus_alias", "session_origin"):
+        out = _flag_campus_assumption(
+            _resp_for_note("tech_checkout", source), "laptop loan")
+        assert out.campus_assumed is None, source
+
+
+def test_intents_that_do_not_vary_by_campus_are_not_flagged() -> None:
+    """The circulation LibGuide says policies "are essentially the same on
+    all Miami University campuses", so a renewal question does not need to
+    name one."""
+    from src.graph.new_orchestrator import _flag_campus_assumption
+
+    for intent in ("circulation_basic", "renewal", "loan_policy",
+                   "databases", "citation_help", "subject_librarian"):
+        out = _flag_campus_assumption(_resp_for_note(intent, "default"), "q")
+        assert out.campus_assumed is None, intent
+
+
+def test_a_question_about_every_campus_is_not_flagged() -> None:
+    """"Can I print at any library?" wants all three listed. Flagging it as
+    an Oxford answer suppressed the two the patron asked about and turned
+    gold xcc_printing_all_campuses from correct to wrong."""
+    from src.graph.new_orchestrator import _flag_campus_assumption
+
+    for q in ("Can I print at any library?",
+              "Do all campuses have printing?",
+              "printing at each campus",
+              "compare study spaces at King and Rentschler",
+              "King vs Rentschler hours"):
+        out = _flag_campus_assumption(_resp_for_note("printing_wifi", "default"), q)
+        assert out.campus_assumed is None, q
+
+
+def test_a_refusal_is_not_flagged() -> None:
+    from src.graph.new_orchestrator import _flag_campus_assumption
+
+    out = _flag_campus_assumption(
+        _resp_for_note("tech_checkout", "default",
+                       answer="Please ask a librarian.", is_refusal=True), "q")
+    assert out.campus_assumed is None
+
+
+def test_an_answer_that_already_names_a_regional_campus_is_not_flagged() -> None:
+    from src.graph.new_orchestrator import _flag_campus_assumption
+
+    for answer in ("Gardner-Harvey Library (Middletown) lends laptops.",
+                   "Rentschler Library in Hamilton has 3 laptops.",
+                   "Loan periods differ at the regional campuses."):
+        out = _flag_campus_assumption(
+            _resp_for_note("tech_checkout", "default", answer=answer), "laptops")
+        assert out.campus_assumed is None, answer
+
+
+def test_an_empty_answer_is_not_flagged() -> None:
+    from src.graph.new_orchestrator import _flag_campus_assumption
+
+    out = _flag_campus_assumption(
+        _resp_for_note("tech_checkout", "default", answer="   "), "q")
+    assert out.campus_assumed is None
+
+
+def test_the_flag_reaches_a_real_turn_and_the_answer_stays_clean() -> None:
+    deps = _build_deps(
+        classification=_classification("hours"),
+        evidence_in_search_kb_result=[_evidence_dict("c1")],
+        synth_citations_n=[1],
+    )
+    resp = run_turn(
+        TurnRequest(user_message="what are the hours", conversation_id="c1"),
+        deps,
+    )
+    assert resp.scope["source"] == "default", "precondition: no campus named"
+    assert resp.campus_assumed == "Oxford"
+    assert "Oxford" not in resp.answer, (
+        "the caveat must not leak into the answer body"
+    )
+
+
+# --- hours: the asked-about date, not the current week --------------------
+
+
+def test_get_hours_is_asked_for_the_week_containing_the_target_day() -> None:
+    """LibCalWeekHoursTool always accepted a date and nothing ever passed
+    one, so every hours answer came out of the CURRENT week. A question
+    about a day past this Sunday had no data behind it at all."""
+    import datetime as _d
+
+    from types import SimpleNamespace
+
+    from src.agent.tool_registry import ToolResult
+    from src.graph.new_orchestrator import _get_hours_data
+
+    seen = []
+
+    class _Reg:
+        def dispatch(self, call):
+            seen.append(dict(call.arguments))
+            return ToolResult(call_id=call.id, name=call.name,
+                              data={"success": True, "hours": "• **Monday (2026-09-07)**: Closed"})
+
+    deps = SimpleNamespace(tool_registry=_Reg())
+
+    _get_hours_data(deps, "king")
+    assert seen[-1] == {"library": "king"}, "no date -> current week, unchanged"
+
+    _get_hours_data(deps, "king", target_date=_d.date(2026, 9, 7))
+    assert seen[-1] == {"library": "king", "date": "2026-09-07"}
+
+
+def test_a_named_day_beyond_the_window_is_left_to_the_hours_page() -> None:
+    """Memorial Day asked in August is nine months out. The date resolves
+    fine, but LibCal is not asked to serve it -- the point-to-page path
+    owns anything past the ~1-month ruling."""
+    from types import SimpleNamespace
+
+    from src.graph.new_orchestrator import _named_day_answer
+
+    called = []
+
+    class _Reg:
+        def dispatch(self, call):
+            called.append(call)
+            raise AssertionError("must not reach LibCal for an out-of-window day")
+
+    deps = SimpleNamespace(tool_registry=_Reg())
+    scope = SimpleNamespace(campus="oxford", library=None, source="default")
+
+    assert _named_day_answer("are you open memorial day", deps, scope) is None
+    assert called == []

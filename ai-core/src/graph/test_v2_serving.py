@@ -22,6 +22,7 @@ and callable so a rename can't silently break the mount.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 import sys
 from pathlib import Path
@@ -340,3 +341,24 @@ def test_wire_tool_trail_defaults_to_empty_and_drops_junk() -> None:
     assert row["tool"] == "get_hours"
     assert row["success"] is True and row["latency_ms"] == 7
     json.dumps(w)
+
+
+def test_wire_carries_the_assumed_campus_separately_from_the_answer() -> None:
+    """Scope metadata, not answer content. As prose inside `answer` this
+    caveat cost 10 of 150 gold cases -- the judge scored it as unsupported
+    campus framing and leading with it read as a clarify prompt. The
+    client renders it above the answer instead."""
+    w = V.turnresponse_to_wire(
+        _resp(answer="Most laptops check out for 3 hours."),
+        message_id="m", conversation_id="c",
+    )
+    assert w["campus_assumed"] is None, "absent unless something was assumed"
+
+    r = _resp(answer="Most laptops check out for 3 hours.")
+    w2 = V.turnresponse_to_wire(
+        dataclasses.replace(r, campus_assumed="Oxford"),
+        message_id="m", conversation_id="c",
+    )
+    assert w2["campus_assumed"] == "Oxford"
+    assert "Oxford" not in w2["message"], "the answer body stays clean"
+    json.dumps(w2)

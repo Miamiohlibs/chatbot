@@ -253,3 +253,35 @@
 .chat-message-container sup {
   line-height: 0;
 }
+
+/* ---------------------------------------------------------------------------
+ * "For Oxford" scope badge
+ *
+ * resolve_scope reads a question that names no campus as Oxford. That is the
+ * right default -- Oxford is the flagship and most of the traffic -- but it
+ * was silent, so a Middletown student who asked how long they could keep a
+ * borrowed laptop got Oxford's loan period with nothing to say it was not
+ * theirs (thumbs-down 2026-08-10).
+ *
+ * It sits ABOVE the answer so that student can stop before reading it, and it
+ * is a badge rather than a sentence inside the answer because as prose the
+ * graders read it as the bot asking a question back -- it cost 10 of 150
+ * graded cases that way.
+ *
+ * Colours are the AAA pass from 2026-08-08: #6b3a00 on #fff4e0 is 8.6:1, and
+ * the 3px rule carries the meaning for anyone who cannot separate the two.
+ * ------------------------------------------------------------------------ */
+.campus-assumed-badge {
+  margin: 0 0 0.6rem;
+  padding: 0.45rem 0.6rem;
+  border-left: 3px solid #a85c00;
+  background-color: #fff4e0;
+  color: #6b3a00;
+  font-size: 0.8125rem;
+  line-height: 1.4;
+  border-radius: 0 4px 4px 0;
+}
+
+.campus-assumed-badge strong {
+  font-weight: 700;
+}

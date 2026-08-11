@@ -206,6 +206,14 @@ def turnresponse_to_wire(
             for t in (resp.tools_called or [])
             if isinstance(t, dict)
         ],
+        # Campus the turn ASSUMED because the patron named none, on a
+        # question whose answer differs by campus. The client shows it
+        # above the answer so a Hamilton or Middletown student can stop
+        # before reading one written for Oxford. Kept out of `answer` on
+        # purpose -- as prose it cost 10 of 150 gold cases.
+        "campus_assumed": (
+            str(resp.campus_assumed) if resp.campus_assumed else None
+        ),
     }
 
 

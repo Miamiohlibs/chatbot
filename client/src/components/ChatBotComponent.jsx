@@ -220,6 +220,20 @@ const ChatBotComponent = ({ askUsStatus = { isOpen: false, hoursToday: null } })
                       {formatTime(message.responseTime)}
                     </div>
                   )}
+                  {/* Which campus this answer is for, when the student did
+                      not say and the answer differs between them. Above the
+                      text on purpose: a Hamilton or Middletown student can
+                      stop here instead of reading an answer written for
+                      Oxford. It is a badge and not a sentence in the answer
+                      because as prose it read as the bot asking a question
+                      back, and it cost 10 of 150 graded cases. */}
+                  {message.sender !== 'user' && message.campusAssumed && (
+                    <div className="campus-assumed-badge">
+                      For <strong>{message.campusAssumed}</strong> — other
+                      campuses differ. Say which campus you&apos;re on for
+                      theirs.
+                    </div>
+                  )}
                   <div
                     className={`whitespace-pre-line ${
                       message.sender === 'user' ? 'text-red-600' : 'text-black'
