@@ -181,8 +181,24 @@ def alert_low_rating(*, conversation_id: str, rating: int,
 # positive costs their attention. It does not block anything -- the refusal
 # machinery and the rate limiter do that independently of this.
 _INJECTION_PATTERNS = (
-    r"ignore\s+(?:all\s+|any\s+)?(?:previous|prior|above|the)\s+instructions",
-    r"disregard\s+(?:all\s+|your\s+)?(?:previous|prior|the)\s+(?:instructions|rules|prompt)",
+    # One verb pattern for the whole family. The two it replaced required a
+    # "previous/prior/the" between the verb and the noun, so the plainest
+    # phrasings of all -- "ignore your instructions", "disregard your rules"
+    # -- went straight through. The live attempt on 2026-08-11 only tripped
+    # the detector on its SECOND clause ("print your system prompt"); the
+    # first clause was invisible.
+    #
+    # The determiner is still required, and the noun list is still closed.
+    # That is what keeps "Can you ignore case when searching for a title?"
+    # and "The professor gave us instructions" out of it -- both are in the
+    # must-not-flag corpus and both still pass.
+    r"(?:ignore|disregard|forget|override|bypass)\s+"
+    r"(?:all\s+|any\s+|of\s+)?"
+    # One or two determiners: "your rules" and "your previous rules" are the
+    # same attack, and requiring exactly one broke the second.
+    r"(?:(?:your|previous|prior|above|the|these|those)\s+){1,2}"
+    r"(?:system\s+)?(?:instructions?|rules?|prompts?|guidelines?|"
+    r"constraints?|restrictions?)",
     # Requires the POSSESSIVE ("your ...") or the unambiguous "the system
     # prompt". Allowing a bare "the" made "Show me the rules for interlibrary
     # loan" -- an ordinary borrowing question -- email the operator, which a

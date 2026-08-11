@@ -81,3 +81,33 @@
 {"intent": "research_consultation", "utterance": "help me find research for my essay", "source": "queue_triage_2026_08_11"}
 {"intent": "research_consultation", "utterance": "where do I start researching my problem set topic", "source": "queue_triage_2026_08_11"}
 {"intent": "research_consultation", "utterance": "what databases should I use for my discussion post", "source": "queue_triage_2026_08_11"}
+
+// --- second pass, after probing the live service ---------------------------
+// Everything above was found by reading the queue. These were found by ASKING
+// the running bot each questionable item again, because the queue is history
+// and some of it had already been fixed. These had not.
+
+// "I have a question about ill" -- a patron announcing a topic rather than
+// asking it. Interlibrary loan is a core service and this was refused as
+// out-of-scope. "ill" is also a word about being unwell, which is why the
+// bare token needs company in the exemplar.
+{"intent": "interlibrary_loan", "utterance": "I have a question about ill", "source": "queue_triage_2026_08_11"}
+{"intent": "interlibrary_loan", "utterance": "I have a question about interlibrary loan", "source": "queue_triage_2026_08_11"}
+{"intent": "interlibrary_loan", "utterance": "question about ILL", "source": "queue_triage_2026_08_11"}
+{"intent": "interlibrary_loan", "utterance": "I need help with an ILL request", "source": "queue_triage_2026_08_11"}
+{"intent": "interlibrary_loan", "utterance": "can I ask about ill", "source": "queue_triage_2026_08_11"}
+
+// "when was king built" -- the library's own history, refused as
+// out-of-scope, which reads as the bot not knowing what building it works in.
+//
+// location_directions is the RETRIEVAL-correct label, not a semantic
+// bullseye: the History section lives on /about/locations/king-library/,
+// which is exactly the page this intent pulls. None of the 38 intents is
+// "about the libraries" -- that is a real gap in the taxonomy, and inventing
+// a 39th here would create a label nothing downstream knows how to route.
+// Worth a proper intent later; mislabelling it in the meantime would be
+// worse than an imperfect one that lands on the right page.
+{"intent": "location_directions", "utterance": "when was king built", "source": "queue_triage_2026_08_11"}
+{"intent": "location_directions", "utterance": "when was King Library built", "source": "queue_triage_2026_08_11"}
+{"intent": "location_directions", "utterance": "how old is King Library", "source": "queue_triage_2026_08_11"}
+{"intent": "location_directions", "utterance": "who is King Library named after", "source": "queue_triage_2026_08_11"}
