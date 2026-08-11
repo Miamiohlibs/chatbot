@@ -27,6 +27,7 @@ const App = () => {
     isOpen: false,
     message: '',
     hoursToday: null,
+    nextOpen: null,
     loading: true
   });
 
@@ -40,6 +41,11 @@ const App = () => {
           isOpen: data.is_open,
           message: data.message || '',
           hoursToday: data.hours_today,
+          // When chat NEXT opens. Without it the closed state showed
+          // TODAY's hours ("available 9:00am - 6:00pm") at 10pm, and a
+          // student on a Friday evening could not tell a two-hour wait
+          // from a 62-hour one.
+          nextOpen: data.next_open || null,
           loading: false
         });
       } else {
@@ -267,10 +273,16 @@ const App = () => {
                 ) : (
                   <div className="text-center text-sm text-gray-500 py-2">
                     <Clock className="inline-block w-4 h-4 mr-1" />
-                    {askUsStatus.hoursToday ? (
-                      <span>Librarian chat available {askUsStatus.hoursToday.open} - {askUsStatus.hoursToday.close}</span>
+                    {askUsStatus.nextOpen ? (
+                      <span>
+                        Librarian chat opens{' '}
+                        {askUsStatus.nextOpen.when === 'later today'
+                          ? ''
+                          : `${askUsStatus.nextOpen.when} `}
+                        at {askUsStatus.nextOpen.time} — or create a ticket now
+                      </span>
                     ) : (
-                      <span>Librarian chat is currently offline</span>
+                      <span>Librarian chat is offline — create a ticket and a librarian will reply</span>
                     )}
                   </div>
                 )}

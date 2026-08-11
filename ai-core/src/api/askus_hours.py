@@ -74,6 +74,90 @@ def _parse_time(time_str: str) -> Optional[datetime]:
         return None
 
 
+def _parse_time_on(day, time_str: str) -> Optional[datetime]:
+    """"9:00am" + a date -> an aware datetime on THAT date.
+
+    `_parse_time` pins every time to today, which is all the is-it-open-now
+    check needs and useless for "when does it next open". Without a
+    date-aware version there is no way to say "Monday at 9:00am", and the
+    status endpoint said "opens at 9:00am" at 10pm on a Monday -- and would
+    say it at 7pm on a Friday, when the true answer is 62 hours away.
+    """
+    if not time_str:
+        return None
+    s = time_str.strip().lower()
+    for fmt in ("%I:%M%p", "%H:%M", "%I%p"):
+        try:
+            t = datetime.strptime(s, fmt)
+        except ValueError:
+            continue
+        return datetime(day.year, day.month, day.day, t.hour, t.minute,
+                        tzinfo=ZoneInfo("America/New_York"))
+    return None
+
+
+async def find_next_open(now: Optional[datetime] = None,
+                         days_ahead: int = 7) -> Optional[Dict[str, Any]]:
+    """The next moment chat opens, or None if nothing is scheduled.
+
+    ONE LibCal request for the whole range. `/askus-hours/week` makes seven
+    sequential calls, which is fine for a page nobody loads in an incident
+    and not fine for the status the widget polls.
+
+    None means "no opening found in the next `days_ahead` days" -- say that
+    plainly rather than inventing a time. Over a long break that is the
+    true answer.
+    """
+    if not LIBCAL_ASKUS_ID:
+        return None
+    est = ZoneInfo("America/New_York")
+    now = now or datetime.now(est)
+    from datetime import timedelta
+
+    start = now.date()
+    end = start + timedelta(days=days_ahead)
+    try:
+        token = await _get_oauth_token()
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.get(
+                f"{LIBCAL_HOUR_URL}/{LIBCAL_ASKUS_ID}",
+                headers={"Authorization": f"Bearer {token}"},
+                params={"from": start.isoformat(), "to": end.isoformat()},
+            )
+            response.raise_for_status()
+            data = response.json()
+    except Exception:  # noqa: BLE001 -- a status widget must not 500
+        return None
+
+    if not data or not isinstance(data, list):
+        return None
+    dates_data = (data[0] or {}).get("dates", {}) or {}
+
+    for i in range(days_ahead + 1):
+        day = start + timedelta(days=i)
+        day_data = dates_data.get(day.isoformat()) or {}
+        if (day_data.get("status") or "").lower() == "closed":
+            continue
+        for rng in (day_data.get("hours") or []):
+            opens = _parse_time_on(day, rng.get("from", ""))
+            if opens is None or opens <= now:
+                continue    # already open or already past; keep looking
+            delta_days = (day - now.date()).days
+            return {
+                "date": day.isoformat(),
+                "day_of_week": day.strftime("%A"),
+                "time": rng.get("from"),
+                "closes": rng.get("to"),
+                "days_away": delta_days,
+                # The words a patron actually needs: "tomorrow" and
+                # "Monday" mean something to them, "2026-08-11" does not.
+                "when": ("later today" if delta_days == 0
+                         else "tomorrow" if delta_days == 1
+                         else day.strftime("%A")),
+            }
+    return None
+
+
 def _is_within_hours(hours_list: list) -> tuple[bool, Optional[str], Optional[str]]:
     """
     Check if current time is within any of the hour ranges.
@@ -232,11 +316,31 @@ async def get_askus_status():
         Simple status object with is_open boolean
     """
     hours_data = await get_askus_hours_for_date()
-    
+    is_open = hours_data.get("is_open", False)
+
+    # When it NEXT opens, not when it opened today. The old message read
+    # "Chat service opens at 9:00am" whenever today was a service day, with
+    # no check that 9am had already been and gone -- reproduced live at
+    # 22:22 on a Monday. On a Friday evening it points a student at a
+    # librarian who will not be there until Monday.
+    next_open = None if is_open else await find_next_open()
+    if is_open:
+        message = hours_data.get("message", "")
+    elif next_open:
+        when = next_open["when"]
+        message = (f"Librarian chat opens {when} at {next_open['time']}"
+                   if when != "later today"
+                   else f"Librarian chat opens at {next_open['time']}")
+    else:
+        # Say what is true rather than name a time we cannot support.
+        message = ("Librarian chat has no hours scheduled in the next 7 "
+                   "days. Create a ticket and a librarian will reply.")
+
     return {
-        "is_open": hours_data.get("is_open", False),
-        "message": hours_data.get("message", ""),
+        "is_open": is_open,
+        "message": message,
         "hours_today": hours_data.get("current_period"),
+        "next_open": next_open,
         "timestamp": datetime.now(ZoneInfo("America/New_York")).isoformat()
     }
 
