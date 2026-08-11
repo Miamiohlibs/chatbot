@@ -443,3 +443,80 @@ def test_tools_used_summary_falls_back_for_pre_v2_conversations() -> None:
     )
     d = _run(conversation_detail(db, "c1"))
     assert d["tools_used_summary"] == ["search_website"]
+
+
+def test_the_flagged_list_shows_what_the_bot_classified_the_question_as() -> None:
+    """Every assistant message carries an intent -- 1,204 of 1,204 in
+    August -- and none of it was rendered, so triaging the queue meant
+    opening a conversation to find out what the bot thought it was being
+    asked."""
+    from fastapi import FastAPI
+    from starlette.testclient import TestClient
+
+    db = _StubDB(msgs=[_msg(id="m1", type="assistant", intent="room_booking",
+                            scopeCampus="middletown",
+                            scopeLibrary="gardner_harvey",
+                            isPositiveRated=False)])
+    g = make_token_guard("k")
+    app = FastAPI()
+    app.include_router(build_review_view_router(
+        {"db": db, "guard": g, "require_librarian": g}))
+    body = TestClient(app).get("/admin/review?key=k").text
+
+    assert "tag intent" in body
+    assert "room_booking" in body
+
+
+def test_the_conversation_page_shows_the_whole_decision_not_just_the_text() -> None:
+    from fastapi import FastAPI
+    from starlette.testclient import TestClient
+
+    db = _StubDB(
+        msgs=[_msg(id="u1", type="user", content="book a room",
+                   conversationId="c1"),
+              _msg(id="a1", type="assistant", content="Here is how",
+                   conversationId="c1", intent="room_booking",
+                   scopeCampus="oxford", scopeLibrary="king",
+                   confidence="high", modelUsed="gpt-5.6-luna")],
+        conv=SimpleNamespace(createdAt="c", updatedAt="u", toolUsed=[]),
+    )
+    g = make_token_guard("k")
+    app = FastAPI()
+    app.include_router(build_review_view_router(
+        {"db": db, "guard": g, "require_librarian": g}))
+    body = TestClient(app).get("/admin/review/c1?key=k").text
+
+    assert "room_booking" in body
+    assert "oxford / king" in body
+    assert "gpt-5.6-luna" in body
+
+    # The badges belong to the ANSWER's block, not floating somewhere on
+    # the page and not attached to the patron's question.
+    import re
+
+    blocks = re.findall(r"<div class='msg'>.*?</pre>", body, re.S)
+    answer_block = next(b for b in blocks if "Here is how" in b)
+    question_block = next(b for b in blocks if "book a room" in b)
+    assert "room_booking" in answer_block
+    assert "oxford / king" in answer_block
+    assert "tag intent" not in question_block
+
+
+def test_a_user_message_gets_no_decision_badges() -> None:
+    """The patron did not classify anything; tagging their line with an
+    intent would read as if they had."""
+    from fastapi import FastAPI
+    from starlette.testclient import TestClient
+
+    db = _StubDB(
+        msgs=[_msg(id="u1", type="user", content="hi", conversationId="c1",
+                   intent="greeting", modelUsed=None, confidence=None,
+                   scopeCampus=None, scopeLibrary=None)],
+        conv=SimpleNamespace(createdAt="c", updatedAt="u", toolUsed=[]),
+    )
+    g = make_token_guard("k")
+    app = FastAPI()
+    app.include_router(build_review_view_router(
+        {"db": db, "guard": g, "require_librarian": g}))
+    body = TestClient(app).get("/admin/review/c1?key=k").text
+    assert "tag intent" not in body

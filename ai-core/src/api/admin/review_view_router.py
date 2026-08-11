@@ -127,6 +127,21 @@ def build_review_view_router(deps: dict) -> Any:
             cid = r.get("conversation_id") or ""
             mid = r.get("message_id") or ""
             flags = []
+            # The classifier's verdict, first, so the row reads "the bot
+            # took this as X -- and here is what went wrong with it". It
+            # was recorded on every turn already (1,204 of 1,204 August
+            # assistant messages carry one) and simply never shown, so
+            # working the queue meant opening a conversation to find out
+            # what the bot thought it was being asked.
+            if r.get("intent"):
+                scope_bits = " / ".join(
+                    x for x in (r.get("scope_campus"), r.get("scope_library"))
+                    if x
+                )
+                title = f"classified intent{f' — scope {scope_bits}' if scope_bits else ''}"
+                flags.append(
+                    f"<span class='tag intent' title='{_e(title)}'>"
+                    f"{_e(r.get('intent'))}</span>")
             if r.get("is_positive_rated") is False:
                 flags.append("<span class='tag down'>&#128078; thumbs-down</span>")
             elif r.get("is_positive_rated") is True:
@@ -256,11 +271,41 @@ def build_review_view_router(deps: dict) -> Any:
             return ("<div><small class='dim'>Passages this answer came "
                     f"from</small><ul class='sources'>{items}</ul></div>")
 
+        def _turn_badges(m: dict) -> str:
+            """What the bot DECIDED about this turn, before what went wrong.
+
+            intent, scope, confidence and model are recorded on every
+            assistant message -- 1,204 of 1,204 in August carry all four --
+            and none of them were ever rendered, so answering "why did it
+            say that" meant reading the transcript and guessing which
+            branch it took.
+            """
+            if m.get("role") != "assistant":
+                return ""
+            out = []
+            if m.get("intent"):
+                out.append(f"<span class='tag intent' title='classified "
+                           f"intent'>{_e(m['intent'])}</span>")
+            scope_bits = " / ".join(
+                x for x in (m.get("scope_campus"), m.get("scope_library")) if x)
+            if scope_bits:
+                out.append(f"<span class='tag all' title='resolved scope'>"
+                           f"{_e(scope_bits)}</span>")
+            if m.get("confidence"):
+                cls = "low-conf" if m["confidence"] == "low" else "all"
+                out.append(f"<span class='tag {cls}' title='synthesizer "
+                           f"confidence'>{_e(m['confidence'])}</span>")
+            if m.get("model_used"):
+                out.append(f"<span class='tag all' title='model that "
+                           f"answered'>{_e(m['model_used'])}</span>")
+            return "".join(out)
+
         msgs = "".join(
             f"<div class='msg'>"
             f"<div class='msg-hd'>"
             f"<span class='role'>{_e(m['role'])}</span>"
             f"<small class='time'>{_e(m['time'])}</small>"
+            + _turn_badges(m)
             + ("<span class='tag refuse'>refusal: "
                f"{_e(m['refusal_trigger'])}</span>" if m['was_refusal']
                else "")

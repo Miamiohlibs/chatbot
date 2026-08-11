@@ -159,6 +159,14 @@ pre{white-space:pre-wrap;word-break:break-word;overflow-wrap:break-word;
 .tag.flagged{background:var(--warn-bg);color:var(--warn)}
 .tag.low-conf{background:var(--open-bg);color:var(--open)}
 .tag.all{background:#f3f4f6;color:var(--muted)}
+/* What the classifier decided this question was. Deliberately a different
+   shape from the problem chips beside it -- square-ish, monospace, no
+   colour of its own -- because "the bot read this as room_booking" is a
+   FACT about the turn, not something wrong with it. Reading it as a
+   warning is exactly the confusion to avoid. */
+.tag.intent{background:#eef1f6;color:#33415c;border-radius:4px;
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.72rem;
+  letter-spacing:0}
 .filter-bar{display:flex;gap:.4rem;flex-wrap:wrap;margin:.6rem 0 1rem}
 .filter-bar a.tag{padding:.25rem .7rem;text-decoration:none;border-color:var(--line)}
 .filter-bar a.tag:hover{filter:brightness(.95);border-color:var(--muted)}
