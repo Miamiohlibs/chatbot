@@ -285,3 +285,41 @@
 .campus-assumed-badge strong {
   font-weight: 700;
 }
+
+/* ---------------------------------------------------------------------------
+ * "The chatbot can be wrong" notice
+ *
+ * Librarians reported that as `text-xs pt-2 text-gray-500` this read as fine
+ * print nobody sees -- the opposite of its job. It is the one line that tells
+ * a student not to act on a wrong answer, and the librarians' whole worry is
+ * that a wrong answer becomes their cleanup.
+ *
+ * So it gets weight: a warning rule, an icon, and body-size text. Colours are
+ * the same AAA pair the campus badge uses -- #6b3a00 on #fff4e0 is 8.64:1,
+ * well past the 7:1 the rest of this widget is held to -- and the rule and
+ * icon carry the meaning for anyone who cannot separate the two colours.
+ * ------------------------------------------------------------------------ */
+.chat-disclaimer {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  padding: 0.55rem 0.7rem;
+  border-left: 3px solid #a85c00;
+  background-color: #fff4e0;
+  color: #6b3a00;
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  border-radius: 0 4px 4px 0;
+}
+
+.chat-disclaimer strong {
+  font-weight: 700;
+}
+
+.chat-disclaimer-icon {
+  flex: 0 0 auto;
+  width: 1rem;
+  height: 1rem;
+  margin-top: 0.1rem;
+}

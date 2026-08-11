@@ -11,7 +11,7 @@ import { Input } from '@/components/ui/input';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import './ChatBotComponent.css';
 
-const ChatBotComponent = ({ askUsStatus = { isOpen: false, hoursToday: null } }) => {
+const ChatBotComponent = ({ askUsStatus = { isOpen: false, hoursToday: null, nextOpen: null } }) => {
   const { socketContextValues } = useContext(SocketContext);
   const { messageContextValues } = useContext(MessageContext);
   const chatRef = useRef();
@@ -340,13 +340,24 @@ const ChatBotComponent = ({ askUsStatus = { isOpen: false, hoursToday: null } })
           </Button>
         </div>
       </form>
-      <p className="text-xs pt-2 text-gray-500">
-        Chatbot can make mistakes. 
-        {askUsStatus.isOpen 
-          ? ' Talk to a librarian during business hours if needed.'
-          : askUsStatus.hoursToday 
-            ? ` Librarian chat available ${askUsStatus.hoursToday.open} - ${askUsStatus.hoursToday.close}. Submit a ticket for off-hours help.`
-            : ' Submit a ticket for assistance.'}
+      {/* Librarians reported this read as fine print nobody sees, which is
+          the opposite of what it is for -- it is the one line telling a
+          student not to act on a wrong answer. Given weight: an alert
+          role, a warning rule, an icon, and text at body size rather than
+          text-xs grey. Colours are the AAA pair used elsewhere in the
+          widget (#6b3a00 on #fff4e0, 8.6:1). */}
+      <p role="note" className="chat-disclaimer">
+        <AlertTriangle className="chat-disclaimer-icon" aria-hidden="true" />
+        <span>
+          <strong>The chatbot can be wrong.</strong> Check anything that
+          matters with a librarian.
+          {askUsStatus.isOpen
+            ? ' Chat is open now.'
+            : askUsStatus.nextOpen
+              ? ` Chat opens ${askUsStatus.nextOpen.when === 'later today'
+                  ? '' : `${askUsStatus.nextOpen.when} `}at ${askUsStatus.nextOpen.time}.`
+              : ' Submit a ticket and one will reply.'}
+        </span>
       </p>
     </>
   );

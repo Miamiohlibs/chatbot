@@ -267,7 +267,7 @@ const App = () => {
                 
                 {/* Show the librarian button only during business hours */}
                 {askUsStatus.isOpen ? (
-                  <Button variant="secondary" onClick={() => setStep('humanLibrarian')}>
+                  <Button variant="miamiOutline" onClick={() => setStep('humanLibrarian')}>
                     Talk to a librarian
                   </Button>
                 ) : (
@@ -279,15 +279,15 @@ const App = () => {
                         {askUsStatus.nextOpen.when === 'later today'
                           ? ''
                           : `${askUsStatus.nextOpen.when} `}
-                        at {askUsStatus.nextOpen.time} — or create a ticket now
+                        at {askUsStatus.nextOpen.time}
                       </span>
                     ) : (
-                      <span>Librarian chat is offline — create a ticket and a librarian will reply</span>
+                      <span>Librarian chat is offline — create a ticket below</span>
                     )}
                   </div>
                 )}
                 
-                <Button variant="secondary" onClick={() => setStep('ticket')}>
+                <Button variant="miamiOutline" onClick={() => setStep('ticket')}>
                   Create a ticket
                 </Button>
               </div>
@@ -331,7 +331,7 @@ const App = () => {
           {step === 'services' && (
             <Button
               size="sm"
-              variant="miami"
+              variant="miamiOutline"
               className="fixed bottom-10 right-20 mr-4 absolute right-0 bottom-0 mb-2"
               onClick={() => askUsStatus.isOpen ? setStep('humanLibrarian') : setStep('ticket')}
             >

@@ -19,6 +19,21 @@ const buttonVariants = cva(
         ghost: "hover:bg-accent hover:text-accent-foreground",
         link: "text-primary underline-offset-4 hover:underline",
         miami: "bg-miami-red text-white shadow hover:bg-miami-red-dark",
+        // Red outline at rest, filled red on hover. The handoff buttons
+        // ("Talk to a librarian", "Submit a ticket") were solid red, which
+        // put them at the same visual weight as the primary action and
+        // made the panel read as three competing red bars. A new variant
+        // rather than an edit to `secondary`, which other surfaces use.
+        //
+        // The DARK brand red, not the bright one: #c41230 on white is
+        // 6.04:1, which passes AA and fails the 7:1 this widget is held
+        // to. #9e0f28 is 8.23:1 both ways -- red text on white at rest,
+        // white text on red on hover -- and is already a brand token, so
+        // nothing new was invented to get there.
+        miamiOutline:
+          "border border-miami-red-dark text-miami-red-dark bg-transparent " +
+          "hover:bg-miami-red-dark hover:text-white " +
+          "focus-visible:ring-miami-red-dark",
       },
       size: {
         default: "h-9 px-4 py-2",
