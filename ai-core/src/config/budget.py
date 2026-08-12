@@ -81,21 +81,48 @@ def _i_env(name: str, default: int) -> int:
         return default
 
 
-def _date_env(name: str) -> "Optional[_dt.date]":
-    """An ISO date from the environment, or None.
+def _f_opt_env(name: str) -> "Optional[float]":
+    """A float from the environment, or None if it is not set at all.
 
-    A typo returns None and logs, which keeps the PRE-launch split. That is
-    the safe direction: too little student budget shows up as students being
-    throttled and someone complaining, while too much shows up as an invoice.
+    None means "leave this one alone", which is different from "set it to the
+    same number": if the pre-launch figure is later changed, an unset
+    post-launch figure follows it instead of silently pinning an old value.
     """
     raw = (os.getenv(name) or "").strip()
     if not raw:
         return None
     try:
-        return _dt.date.fromisoformat(raw)
+        return float(raw)
     except ValueError:
-        log.error("%s=%r is not an ISO date (YYYY-MM-DD) -- keeping the "
-                  "pre-launch budget split", name, raw)
+        log.warning("%s=%r is not a number -- treating it as unset", name, raw)
+        return None
+
+
+def _moment_env(name: str) -> "Optional[_dt.datetime]":
+    """A launch MOMENT from the environment, in library-local time, or None.
+
+    Accepts `2026-08-13T18:00` and also a bare `2026-08-13`, which means
+    midnight. A time of day matters here: a beta that opens at 6pm on a day
+    that is still a test day until then must not get the student ceiling
+    eighteen hours early.
+
+    A typo returns None and logs, which keeps the PRE-launch split. That is
+    the safe direction: too little student budget shows up as a throttled
+    student and a complaint, while too much shows up as an invoice.
+    """
+    raw = (os.getenv(name) or "").strip()
+    if not raw:
+        return None
+    try:
+        return _dt.datetime.fromisoformat(raw)
+    except ValueError:
+        pass
+    try:
+        d = _dt.date.fromisoformat(raw)
+        return _dt.datetime(d.year, d.month, d.day)
+    except ValueError:
+        log.error("%s=%r is neither an ISO datetime (YYYY-MM-DDTHH:MM) nor an "
+                  "ISO date -- keeping the pre-launch budget split", name, raw)
         return None
 
 
@@ -123,8 +150,13 @@ def _date_env(name: str) -> "Optional[_dt.date]":
 
 _PRELAUNCH_SERVING_USD = _f_env("BUDGET_MONTHLY_SERVING_USD", 75.00)
 _PRELAUNCH_EVAL_USD = _f_env("BUDGET_MONTHLY_EVAL_USD", 25.00)
-_POSTLAUNCH_SERVING_USD = _f_env("BUDGET_POSTLAUNCH_SERVING_USD", 95.00)
-_POSTLAUNCH_EVAL_USD = _f_env("BUDGET_POSTLAUNCH_EVAL_USD", 5.00)
+
+# Either post-launch figure left unset means that purse does not change at
+# launch. The operator's instruction on 2026-08-12 was to move the student
+# purse to $45 and leave the eval purse alone, which is exactly this: set the
+# serving one, leave the eval one unset.
+_POSTLAUNCH_SERVING_USD = _f_opt_env("BUDGET_POSTLAUNCH_SERVING_USD")
+_POSTLAUNCH_EVAL_USD = _f_opt_env("BUDGET_POSTLAUNCH_EVAL_USD")
 
 # What one full 234-case eval run costs, measured 2026-08-04 ($5.74 at
 # gpt-5.6-terra rates). Used to refuse a run that would breach the purse
@@ -164,31 +196,55 @@ def library_today() -> "_dt.date":
     return _dt.datetime.now(pytz.timezone(LIBRARY_TZ)).date()
 
 
-# --- the split, resolved for today ---------------------------------------
+# --- the split, resolved for right now ------------------------------------
 
-LAUNCH_DATE = _date_env("BUDGET_LAUNCH_DATE")
+LAUNCH_AT = _moment_env("BUDGET_LAUNCH_AT")
 
 
-def split_for(when: "Optional[_dt.date]" = None) -> "tuple[float, float]":
-    """(student purse, eval purse) for a given day.
+def library_now() -> "_dt.datetime":
+    """Now in the libraries' own timezone, naive, to compare against
+    LAUNCH_AT -- which is written in that timezone too. Same reason
+    library_today() exists: the box runs UTC and Oxford does not."""
+    import pytz
+    return _dt.datetime.now(pytz.timezone(LIBRARY_TZ)).replace(tzinfo=None)
 
-    Kept as a function so the flip can be tested for dates either side of
-    launch without touching the clock; the module constants below are just
-    this, resolved for today at import.
+
+def split_for(when: "Any" = None) -> "tuple[float, float]":
+    """(student purse, eval purse) at a given moment.
+
+    Accepts a datetime, a date (treated as midnight), or None for now. Kept
+    as a function so the flip can be tested either side of launch without
+    touching the clock; the module constants below are this, resolved at
+    import.
+
+    An unset post-launch figure means that purse is unchanged rather than
+    zero -- see _POSTLAUNCH_*.
     """
-    d = when or library_today()
-    if LAUNCH_DATE is not None and d >= LAUNCH_DATE:
-        return _POSTLAUNCH_SERVING_USD, _POSTLAUNCH_EVAL_USD
-    return _PRELAUNCH_SERVING_USD, _PRELAUNCH_EVAL_USD
+    if LAUNCH_AT is None:
+        return _PRELAUNCH_SERVING_USD, _PRELAUNCH_EVAL_USD
+    if when is None:
+        moment = library_now()
+    elif isinstance(when, _dt.datetime):
+        moment = when
+    else:                                    # a plain date means midnight
+        moment = _dt.datetime(when.year, when.month, when.day)
+    if moment < LAUNCH_AT:
+        return _PRELAUNCH_SERVING_USD, _PRELAUNCH_EVAL_USD
+    return (
+        _PRELAUNCH_SERVING_USD if _POSTLAUNCH_SERVING_USD is None
+        else _POSTLAUNCH_SERVING_USD,
+        _PRELAUNCH_EVAL_USD if _POSTLAUNCH_EVAL_USD is None
+        else _POSTLAUNCH_EVAL_USD,
+    )
 
 
 MONTHLY_SERVING_USD, MONTHLY_EVAL_USD = split_for()
 MONTHLY_TOTAL_USD = MONTHLY_SERVING_USD + MONTHLY_EVAL_USD
 
-if LAUNCH_DATE is None:
-    log.warning("BUDGET_LAUNCH_DATE is not set -- the budget split will "
-                "never change on its own (students ${:.2f}, eval ${:.2f})"
-                .format(MONTHLY_SERVING_USD, MONTHLY_EVAL_USD))
+if LAUNCH_AT is None:
+    log.warning("BUDGET_LAUNCH_AT is not set -- the budget split will never "
+                "change on its own (students $%.2f, eval $%.2f)",
+                MONTHLY_SERVING_USD, MONTHLY_EVAL_USD)
 
 
 def days_in_month(when: "Optional[_dt.date]" = None) -> int:

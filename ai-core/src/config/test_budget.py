@@ -251,54 +251,95 @@ def test_every_rung_says_what_changes():
 
 def test_no_launch_date_means_the_split_never_moves() -> None:
     """The default must be inert. A date nobody set must not flip anything."""
-    assert B._date_env("BUDGET_NO_SUCH_VAR_AT_ALL") is None
-    saved = B.LAUNCH_DATE
+    assert B._moment_env("BUDGET_NO_SUCH_VAR_AT_ALL") is None
+    saved = B.LAUNCH_AT
     try:
-        B.LAUNCH_DATE = None
+        B.LAUNCH_AT = None
         assert B.split_for(_dt.date(2026, 9, 4)) == B.split_for(_dt.date(2026, 1, 1))
     finally:
-        B.LAUNCH_DATE = saved
+        B.LAUNCH_AT = saved
 
 
-def test_the_split_flips_on_the_launch_date_itself() -> None:
-    saved = B.LAUNCH_DATE
+def test_the_split_flips_at_the_launch_MOMENT_not_that_midnight() -> None:
+    """The beta opens at 6pm on a day that is a test day until then, so the
+    student ceiling must not arrive eighteen hours early."""
+    saved = (B.LAUNCH_AT, B._POSTLAUNCH_SERVING_USD, B._POSTLAUNCH_EVAL_USD)
     try:
-        B.LAUNCH_DATE = _dt.date(2026, 9, 4)
-        before = B.split_for(_dt.date(2026, 9, 3))
-        on_the_day = B.split_for(_dt.date(2026, 9, 4))
-        after = B.split_for(_dt.date(2026, 12, 25))
-        assert before == (B._PRELAUNCH_SERVING_USD, B._PRELAUNCH_EVAL_USD)
-        assert on_the_day == (B._POSTLAUNCH_SERVING_USD, B._POSTLAUNCH_EVAL_USD)
-        assert after == on_the_day, "the flip is permanent, not a one-day event"
-        # The whole point: students get MORE after launch, not less.
-        assert on_the_day[0] > before[0]
+        B.LAUNCH_AT = _dt.datetime(2026, 8, 13, 18, 0)
+        B._POSTLAUNCH_SERVING_USD = 45.0
+        B._POSTLAUNCH_EVAL_USD = None          # eval purse deliberately untouched
+        pre = B._PRELAUNCH_SERVING_USD
+
+        assert B.split_for(_dt.datetime(2026, 8, 13, 17, 59))[0] == pre, \
+            "one minute before launch is still a test day"
+        assert B.split_for(_dt.datetime(2026, 8, 13, 18, 0))[0] == 45.0, \
+            "the flip happens AT the moment, not after it"
+        assert B.split_for(_dt.datetime(2026, 8, 13, 0, 1))[0] == pre, \
+            "midnight on launch day must NOT flip -- that is the whole point"
+        assert B.split_for(_dt.datetime(2026, 12, 25))[0] == 45.0, \
+            "the flip is permanent, not a one-day event"
     finally:
-        B.LAUNCH_DATE = saved
+        B.LAUNCH_AT, B._POSTLAUNCH_SERVING_USD, B._POSTLAUNCH_EVAL_USD = saved
+
+
+def test_an_unset_post_launch_figure_leaves_that_purse_alone() -> None:
+    """Unset means UNCHANGED, not zero. The operator asked for the student
+    purse to move and the eval purse to be left alone; getting this wrong
+    would silently cut the eval purse to nothing at launch."""
+    saved = (B.LAUNCH_AT, B._POSTLAUNCH_SERVING_USD, B._POSTLAUNCH_EVAL_USD)
+    try:
+        B.LAUNCH_AT = _dt.datetime(2026, 8, 13, 18, 0)
+        B._POSTLAUNCH_SERVING_USD = 45.0
+        B._POSTLAUNCH_EVAL_USD = None
+        serving, evl = B.split_for(_dt.datetime(2026, 8, 14))
+        assert serving == 45.0
+        assert evl == B._PRELAUNCH_EVAL_USD, \
+            "the eval purse must be untouched, not zeroed"
+        # and the mirror case
+        B._POSTLAUNCH_SERVING_USD = None
+        B._POSTLAUNCH_EVAL_USD = 5.0
+        serving, evl = B.split_for(_dt.datetime(2026, 8, 14))
+        assert serving == B._PRELAUNCH_SERVING_USD
+        assert evl == 5.0
+    finally:
+        B.LAUNCH_AT, B._POSTLAUNCH_SERVING_USD, B._POSTLAUNCH_EVAL_USD = saved
+
+
+def test_a_bare_date_still_works_and_means_midnight() -> None:
+    saved = B.LAUNCH_AT
+    try:
+        assert B._moment_env("BUDGET_NO_SUCH_VAR") is None
+        import os
+        os.environ["BUDGET_TEST_MOMENT"] = "2026-08-13"
+        assert B._moment_env("BUDGET_TEST_MOMENT") == _dt.datetime(2026, 8, 13, 0, 0)
+        os.environ["BUDGET_TEST_MOMENT"] = "2026-08-13T18:00"
+        assert B._moment_env("BUDGET_TEST_MOMENT") == _dt.datetime(2026, 8, 13, 18, 0)
+        del os.environ["BUDGET_TEST_MOMENT"]
+    finally:
+        B.LAUNCH_AT = saved
 
 
 def test_a_mistyped_launch_date_keeps_the_pre_launch_split(monkeypatch) -> None:
     """Failing towards LESS student budget is the safe direction: it shows up
     as a throttled student and a complaint, not as an invoice."""
-    monkeypatch.setenv("BUDGET_LAUNCH_DATE", "Sept 4th")
-    assert B._date_env("BUDGET_LAUNCH_DATE") is None
-    monkeypatch.setenv("BUDGET_LAUNCH_DATE", "2026-13-45")
-    assert B._date_env("BUDGET_LAUNCH_DATE") is None
-    monkeypatch.setenv("BUDGET_LAUNCH_DATE", "2026-09-04")
-    assert B._date_env("BUDGET_LAUNCH_DATE") == _dt.date(2026, 9, 4)
+    monkeypatch.setenv("BUDGET_LAUNCH_AT", "Sept 4th")
+    assert B._moment_env("BUDGET_LAUNCH_AT") is None
+    monkeypatch.setenv("BUDGET_LAUNCH_AT", "2026-13-45")
+    assert B._moment_env("BUDGET_LAUNCH_AT") is None
+    monkeypatch.setenv("BUDGET_LAUNCH_AT", "2026-09-04")
+    assert B._moment_env("BUDGET_LAUNCH_AT") == _dt.datetime(2026, 9, 4)
 
 
-def test_the_daily_line_follows_the_flip() -> None:
-    """The daily line is the student purse over the month, so it has to move
-    with the split -- otherwise the ladder throttles against the old figure."""
-    saved = B.LAUNCH_DATE
-    try:
-        B.LAUNCH_DATE = _dt.date(2026, 9, 4)
-        pre, post = B._PRELAUNCH_SERVING_USD, B._POSTLAUNCH_SERVING_USD
-        # daily_serving_line reads the module constant, which is resolved at
-        # import for today -- so assert the relationship the function encodes
-        # rather than a value that depends on when the suite happens to run.
-        assert B.split_for(_dt.date(2026, 9, 3))[0] == pre
-        assert B.split_for(_dt.date(2026, 9, 4))[0] == post
-        assert post / 30 > pre / 30 if post > pre else True
-    finally:
-        B.LAUNCH_DATE = saved
+def test_the_ceiling_actually_refuses_at_one_hundred_percent() -> None:
+    """$45 has to be a wall, not a suggestion: the operator is spending it to
+    collect real student data and needs to know the ladder ends in refusal."""
+    # level_for measures against the module's own purse, so assert at 100%
+    # of whatever that currently is rather than hardcoding a figure.
+    purse = B.MONTHLY_SERVING_USD
+    lvl, why = B.level_for(serving_today=0.0, serving_mtd=purse,
+                           when=_dt.date(2026, 8, 20))
+    assert lvl == B.L_REFUSE, f"at 100% of ${purse:.2f} the ladder said {why}"
+    # and one cent under the wall is not refusal
+    lvl_under, _ = B.level_for(serving_today=0.0, serving_mtd=purse * 0.96,
+                               when=_dt.date(2026, 8, 20))
+    assert lvl_under < B.L_REFUSE
