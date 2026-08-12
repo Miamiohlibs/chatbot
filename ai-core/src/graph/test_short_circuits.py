@@ -3192,11 +3192,19 @@ def test_ill_turnaround_names_no_number_of_days():
 
 
 def test_ill_turnaround_says_the_owning_institution_sets_the_loan_period():
+    """CORRECTED 2026-08-12. This used to require "six-week" in the answer to
+    an ILL question -- but six weeks is OHIOLINK's loan period, and the test
+    was therefore pinning the very conflation Circulation reported. An ILL
+    answer states ILL's facts; the OhioLINK figure belongs in the OhioLINK
+    answer, which the assertion below now checks separately."""
     out, cites = _ill_turnaround_answer("how long does an interlibrary loan take")
     low = out.lower()
     assert "owns the item" in low or "owning institution" in low
-    assert "six-week" in low
-    assert cites[0]["url"].endswith("loan-periods-ohiolink-ill")
+    assert "six-week" not in low, "OhioLINK's loan period in an ILL answer"
+    assert any(c["url"].endswith("loan-periods-ohiolink-ill") for c in cites)
+
+    ohio = _ill_turnaround_answer("how many days for an ohiolink book")[0].lower()
+    assert "six weeks" in ohio or "six-week" in ohio
 
 
 def test_ill_turnaround_does_not_repeat_golds_unsourced_media_figure():

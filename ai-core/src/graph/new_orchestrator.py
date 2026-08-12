@@ -910,6 +910,11 @@ def _run_turn(
             # here costs the patron money. The synthesizer had the policy
             # page and still said "any Miami University library".
             ("ill_return", _ill_return_answer),
+            # Before ill_turnaround, and before anything ILL-shaped: "how do
+            # I request a book from OhioLINK" was being answered with the
+            # INTERLIBRARY LOAN form, which is a different service and a
+            # different form. Circulation reported the two being conflated.
+            ("ohiolink_request", _ohiolink_request_answer),
             # Before fee_policy for the same reason as ill_return: the agent
             # answered this one with the HOME DELIVERY page's day counts,
             # which are real numbers for a different service.
@@ -4432,6 +4437,58 @@ _ILL_TURNAROUND_RE = re.compile(
 )
 
 
+_OHIOLINK_REQUEST_RE = re.compile(
+    r"\b(ohio\s*link|search\s*ohio)\b[^.?!]{0,40}"
+    r"\b(request|order|get|borrow|obtain|ask\s+for)\b"
+    r"|\b(how\s+do\s+i|how\s+to|where\s+do\s+i|can\s+i)\b[^.?!]{0,40}"
+    r"\b(request|order|get|borrow)\b[^.?!]{0,40}\b(ohio\s*link|search\s*ohio)\b",
+    re.IGNORECASE,
+)
+
+
+def _ohiolink_request_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
+    """HOW to place an OhioLINK request -- which is not how to place an ILL.
+
+    Circulation reported the two being used interchangeably, and this was the
+    damaging case: "how do I request a book from OhioLINK" was answered with
+    "use the Interlibrary Loan page to submit the request", which sends a
+    student to the wrong form entirely. OhioLINK requests are placed inside
+    the catalogue.
+
+    The classifier has no OhioLINK intent -- there are 38 and none of them is
+    this -- so the question lands on interlibrary_loan and everything
+    downstream is ILL-flavoured. Rather than invent an intent days before a
+    beta, this answers the question directly and says where ILL DOES apply,
+    which is the distinction the student actually needs.
+    """
+    m = message or ""
+    if not _OHIOLINK_REQUEST_RE.search(m):
+        return None
+    # "how long until my OhioLINK request arrives" is a turnaround question
+    # and has its own answer.
+    if _LOAN_ARRIVAL_RE.search(m) or re.search(r"\bhow\s+long\b", m, re.I):
+        return None
+    return (
+        "OhioLINK requests are placed in the catalogue, not on the "
+        "interlibrary loan form. Search for the item, and if another Ohio "
+        "library has it available, use **Request Item** [1]. It arrives at "
+        "the campus library you choose and you are emailed when it is ready "
+        "for pickup.\n\n"
+        "The loan is six weeks, renewable up to two more six-week terms "
+        "unless another patron requests it [2].\n\n"
+        "Interlibrary loan is the *other* service, for items no OhioLINK "
+        "library holds -- that one does go through the ILL form, and some "
+        "items take three weeks or longer to arrive [1].",
+        [
+            {"n": 1, "url": _REQUESTING_BOOKS_URL,
+             "snippet": "Requesting books Miami does not own"},
+            {"n": 2, "url": _LOAN_OHIOLINK_ILL_URL,
+             "snippet": "Loan periods: OhioLINK, SearchOHIO and Interlibrary "
+                        "Loan"},
+        ],
+    )
+
+
 def _ill_turnaround_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
     """"How long does ILL take?" -- without inventing a number of days.
 
@@ -4451,26 +4508,66 @@ def _ill_turnaround_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
     It states no turnaround at all. So this names no number of days, and does
     not repeat gold's "1 week media" figure either -- that phrase is not in the
     corpus and would be the same mistake in the other direction.
+
+    UPDATED 2026-08-12. Circulation reported OhioLINK and ILL being used
+    interchangeably, and this answer was one of the places doing it: the same
+    paragraph came back for "when will my OhioLINK request arrive?" and "how
+    long does an ILL request take", which are two different services with
+    two different answers.
+
+    They are also not equally unpublished. The requesting guide states that
+    "some items requested by ILL take 3 weeks or longer to arrive" -- so the
+    blanket "there is no published turnaround time" was true of OhioLINK and
+    wrong about ILL. It now says the figure where there is one and declines
+    where there is not, per service.
     """
     m = message or ""
     if not _ILL_TURNAROUND_RE.search(m):
         return None
     if _ILL_RETURN_RE.search(m):
         return None          # a return question, which has its own answer
+
+    _low = m.lower()
+    _named_ohiolink = bool(re.search(r"\bohio\s*link\b|\bsearch\s*ohio\b", _low))
+    _named_ill = bool(re.search(r"\bill\b|\binter-?library\b", _low))
+
+    _ill_part = (
+        "**Interlibrary loan** requests go through the ILL form, and the "
+        "Libraries say some ILL items take **3 weeks or longer** to arrive "
+        "[2]. The loan period is then set by the institution that owns the "
+        "item, not by Miami [1]."
+    )
+    _ohiolink_part = (
+        "**OhioLINK** requests are placed in the catalogue itself -- find the "
+        "item, and if another library has it available, use *Request Item* "
+        "[2]. No arrival time is published for OhioLINK; it depends which "
+        "library sends it and how far it travels, so I would rather not guess "
+        "at a number of days. The loan is six weeks, renewable up to two more "
+        "six-week terms unless someone else has requested it [1]."
+    )
+
+    if _named_ohiolink and not _named_ill:
+        body = _ohiolink_part
+    elif _named_ill and not _named_ohiolink:
+        body = _ill_part
+    else:
+        body = (
+            "These are two different services and they behave differently.\n\n"
+            f"- {_ohiolink_part}\n\n- {_ill_part}"
+        )
+
     return (
-        "There is no published turnaround time -- how long a request takes "
-        "depends on which library sends the item and how far it travels, so I "
-        "would rather not guess at a number of days.\n\n"
-        "What the policy does say is that the **loan period** is set by the "
-        "institution that owns the item, not by Miami [1]. OhioLINK items run "
-        "on six-week terms and can be renewed up to two more six-week periods "
-        "unless someone else has requested them [1].\n\n"
-        "For a specific request that is already placed, the interlibrary loan "
-        "office can tell you where it is; you will also get an email when it "
-        "is ready for pickup.",
-        [{"n": 1, "url": _LOAN_OHIOLINK_ILL_URL,
-          "snippet": "Miami University Libraries — Loan Periods: OhioLINK, "
-                     "SearchOHIO and Interlibrary Loan"}],
+        body
+        + "\n\nFor a request you have already placed, you will get an email "
+        "when it is ready for pickup, and the interlibrary loan office can "
+        "tell you where it is.",
+        [
+            {"n": 1, "url": _LOAN_OHIOLINK_ILL_URL,
+             "snippet": "Loan periods: OhioLINK, SearchOHIO and Interlibrary "
+                        "Loan"},
+            {"n": 2, "url": _REQUESTING_BOOKS_URL,
+             "snippet": "Requesting books Miami does not own"},
+        ],
     )
 
 
@@ -4685,6 +4782,13 @@ def _course_reserves_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
 _LOAN_OHIOLINK_ILL_URL = (
     "https://libguides.lib.miamioh.edu/mul-circulation-policies/"
     "loan-periods-ohiolink-ill"
+)
+
+# Where the request procedure and the ILL arrival figure actually live.
+# The circulation policy page covers loan periods and renewals but states
+# neither -- checked 2026-08-12.
+_REQUESTING_BOOKS_URL = (
+    "https://libguides.lib.miamioh.edu/c.php?g=1009317&p=7311851"
 )
 _MYACCOUNT_URL = (
     "https://ohiolink-mu.primo.exlibrisgroup.com/discovery/account"

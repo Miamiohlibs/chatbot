@@ -2082,3 +2082,70 @@ def test_equipment_and_reserves_keep_their_own_loan_periods() -> None:
               "how long can I keep a reserve textbook",
               "how long do I get a dvd for"):
         assert _renewal_paths_answer(q) is None, f"wrong period for: {q}"
+
+
+# --- OhioLINK and ILL are two services, not one ---------------------------
+#
+# Circulation reported them being used interchangeably. The turnaround answer
+# was one of the places doing it: the identical paragraph came back for
+# "when will my OhioLINK request arrive?" and "how long does an ILL request
+# take". They are also not equally unpublished -- the requesting guide gives
+# ILL a figure ("3 weeks or longer") and OhioLINK none.
+
+
+def test_ohiolink_and_ill_turnaround_are_different_answers() -> None:
+    from src.graph.new_orchestrator import _ill_turnaround_answer
+    ohio = _ill_turnaround_answer("When will my OhioLINK request arrive?")
+    ill = _ill_turnaround_answer("how long does an ILL request take")
+    assert ohio is not None and ill is not None
+    assert ohio[0] != ill[0], "the two services still share one answer"
+
+    # ILL has a published figure; saying it has none was wrong
+    assert "3 weeks or longer" in ill[0]
+    # OhioLINK has none, and must not borrow ILL's
+    assert "3 weeks or longer" not in ohio[0]
+    assert "would rather not guess" in ohio[0]
+
+
+def test_each_service_is_told_where_its_request_is_placed() -> None:
+    """Answering 'how do I request from OhioLINK' with the ILL form sends a
+    student to the wrong place -- OhioLINK is requested in the catalogue."""
+    from src.graph.new_orchestrator import _ill_turnaround_answer
+    ohio = _ill_turnaround_answer("when will my OhioLINK book arrive")[0]
+    assert "Request Item" in ohio and "catalogue" in ohio
+    ill = _ill_turnaround_answer("how long until my interlibrary loan arrives")[0]
+    assert "ILL form" in ill
+
+
+def test_naming_both_services_explains_both() -> None:
+    from src.graph.new_orchestrator import _ill_turnaround_answer
+    both = _ill_turnaround_answer(
+        "how long do OhioLINK and interlibrary loan take")[0]
+    assert "OhioLINK" in both and "Interlibrary loan" in both
+    assert "two different services" in both
+
+
+def test_ohiolink_requests_are_not_sent_to_the_ILL_form() -> None:
+    """The damaging case Circulation reported: "how do I request a book from
+    OhioLINK" was answered with "use the Interlibrary Loan page", which is a
+    different service and a different form."""
+    from src.graph.new_orchestrator import _ohiolink_request_answer
+    for q in ("how do I request a book from OhioLINK",
+              "how do I get a book through ohiolink",
+              "can I request a book from SearchOhio",
+              "where do I order a book from ohiolink"):
+        hit = _ohiolink_request_answer(q)
+        assert hit is not None, f"not answered: {q}"
+        body = hit[0]
+        assert "Request Item" in body, "the actual procedure is missing"
+        assert "catalogue" in body
+        # it must NOT tell them to use the ILL form for this
+        assert "not on the interlibrary loan form" in body.lower()
+
+
+def test_the_ohiolink_request_answer_leaves_turnaround_alone() -> None:
+    from src.graph.new_orchestrator import _ohiolink_request_answer
+    for q in ("when will my OhioLINK request arrive?",
+              "how long does OhioLINK take",
+              "how long until my ohiolink book gets here"):
+        assert _ohiolink_request_answer(q) is None, f"stole a turnaround: {q}"
