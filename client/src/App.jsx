@@ -157,7 +157,10 @@ const App = () => {
 
   return (
     <ErrorBoundaryComponent onLibrarianHelp={handleLibrarianHelp}>
-      {/* Welcome background */}
+      {/* Welcome background.
+          `inert` when the dialog is open: aria-hidden alone hid it from
+          screen readers but left it in the tab order, so a keyboard user
+          could still reach the content behind an open dialog. */}
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
         <div
           className={`text-center mb-8 transition-all duration-300 ${
@@ -170,6 +173,7 @@ const App = () => {
               setIsOpen(true);
             }
           } : undefined}
+          inert={isOpen || undefined}
           tabIndex={!isOpen ? 0 : -1}
           role={!isOpen ? 'button' : undefined}
           aria-label={!isOpen ? 'Open Smart Chatbot services' : undefined}
@@ -224,7 +228,7 @@ const App = () => {
               <Button
                 variant="outline"
                 size="xs"
-                className="ml-[7%] text-miami-red border-miami-red hover:bg-miami-red hover:text-white"
+                className="ml-[7%] text-miami-red-dark border-miami-red-dark hover:bg-miami-red-dark hover:text-white"
                 onClick={() => setStep('initial')}
               >
                 <ArrowLeft className="h-3 w-3 mr-1" />
@@ -271,7 +275,9 @@ const App = () => {
                     Talk to a librarian
                   </Button>
                 ) : (
-                  <div className="text-center text-sm text-gray-500 py-2">
+                  <div className="text-center text-sm text-gray-700 py-2">
+                    {/* gray-500 measured 4.83:1 on white -- passes AA and
+                        fails the 7:1 this widget is held to. */}
                     <Clock className="inline-block w-4 h-4 mr-1" />
                     {askUsStatus.nextOpen ? (
                       <span>

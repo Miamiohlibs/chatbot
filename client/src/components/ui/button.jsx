@@ -4,7 +4,7 @@ import { cva } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
+  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium min-h-11 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
   {
     variants: {
       variant: {
@@ -18,7 +18,12 @@ const buttonVariants = cva(
           "bg-secondary text-secondary-foreground shadow-sm hover:bg-secondary/80",
         ghost: "hover:bg-accent hover:text-accent-foreground",
         link: "text-primary underline-offset-4 hover:underline",
-        miami: "bg-miami-red text-white shadow hover:bg-miami-red-dark",
+        // The DARK brand red for the same reason miamiOutline uses it:
+        // #c41230 on white is 6.04:1, which passes AA and fails the 7:1
+        // this widget is held to. #9e0f28 is 8.23:1 with white text.
+        // Hover darkens with a filter rather than a lighter red, which
+        // would have moved the contrast the wrong way.
+        miami: "bg-miami-red-dark text-white shadow hover:brightness-90",
         // Red outline at rest, filled red on hover. The handoff buttons
         // ("Talk to a librarian", "Submit a ticket") were solid red, which
         // put them at the same visual weight as the primary action and
@@ -40,7 +45,7 @@ const buttonVariants = cva(
         sm: "h-8 rounded-md px-3 text-xs",
         lg: "h-10 rounded-md px-8",
         xs: "h-7 rounded-md px-2 text-xs",
-        icon: "h-9 w-9",
+        icon: "h-9 w-9 min-w-11",
       },
     },
     defaultVariants: {
