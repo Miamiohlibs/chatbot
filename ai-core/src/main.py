@@ -76,7 +76,10 @@ from src.observability.metrics_middleware import MetricsMiddleware
 from src.observability.sentry import init_sentry
 from src.api.rate_limit import (
     MessageRejected,
+    check_ip_rate,
     check_rate,
+    client_ip_from_environ,
+    connection_allowed,
     validate_message,
 )
 
@@ -565,9 +568,16 @@ socketio_cors = "*" if node_env == "development" else cors_origins
 # Store conversation mappings for Socket.IO clients
 client_conversations = {}
 
-# Per-socket rate-limiter trip counts, feeding the abuse alert. In-process and
-# reset on restart, which is fine -- it only decides whether to send an email,
-# never whether to serve a request.
+# Rate-limiter trip counts, feeding the abuse alert. In-process and reset on
+# restart, which is fine -- it only decides whether to send an email, never
+# whether to serve a request.
+#
+# Keyed by ADDRESS where we know it, not by socket. Counting per socket meant
+# the one actor worth emailing about could never reach the threshold: a script
+# that reconnects for each message presents a new session id every time, so its
+# count restarted at one forever. Entries for an address deliberately survive
+# disconnect -- that persistence is the whole point -- and are bounded by the
+# number of distinct addresses rather than by every socket ever opened.
 _rate_trips: dict[str, int] = {}
 _RATE_TRIPS_BEFORE_ALERT = 5
 
@@ -630,6 +640,12 @@ def _get_v2_deps():
 # bound them either way. It exists so the budget means what it says.
 _DEV_ORIGIN_HINTS = ("localhost", "127.0.0.1", "0.0.0.0", "[::1]")
 client_is_dev: dict = {}
+
+# Source address per live socket, captured at connect because the handshake
+# environ (where the proxy headers live) is not available later. The per-socket
+# rate limit alone is defeated by reconnecting, so the message handler needs
+# to know where a socket came from, not just that it exists.
+client_ips: dict = {}
 
 
 def _looks_like_dev_client(environ: dict) -> bool:
@@ -695,6 +711,16 @@ async def persist_tool_trail(conversation_id: str, wire: dict) -> int:
 
 
 async def _v2_connect(sid, environ):
+    # Address first, and the connection-rate check BEFORE create_conversation:
+    # accepting a socket writes a Conversation row, so a connection flood costs
+    # database writes even if no message ever arrives. Refusing here costs
+    # nothing. Returning False rejects the handshake.
+    ip = client_ip_from_environ(environ or {})
+    if not connection_allowed(ip):
+        logging.warning("[v2] refused connection from %s: opening sockets "
+                        "too fast", ip)
+        return False
+    client_ips[sid] = ip
     dev = _looks_like_dev_client(environ or {})
     client_is_dev[sid] = dev
     logging.info(f"🔌 [v2] Client connected: {sid}"
@@ -712,9 +738,12 @@ async def _v2_disconnect(sid):
     logging.info(f"🔌 [v2] Client disconnected: {sid}")
     client_conversations.pop(sid, None)
     client_is_dev.pop(sid, None)
-    # Without this the trip counter grows for the lifetime of the process --
-    # one entry per socket that ever connected. Small, but it is a leak, and
-    # this box has 4 GB.
+    client_ips.pop(sid, None)
+    # Only the socket-keyed fallback entry is dropped here. Address-keyed
+    # counts must OUTLIVE the socket, or a script that reconnects per message
+    # resets its own abuse count and never trips the alert -- which is exactly
+    # what happened before 2026-08-12.
+    _rate_trips.pop(f"ws:{sid}", None)
     _rate_trips.pop(sid, None)
 
 
@@ -751,18 +780,26 @@ async def _v2_message(sid, data):
 
     try:
         text_input = validate_message(text_input)
+        # Two limits, deliberately both. The per-socket one stops a person
+        # clicking fast; only the per-address one stops the script this
+        # module exists to stop, because a session id is per connection and
+        # reconnecting hands out a fresh quota.
         check_rate(f"ws:{sid}")
+        check_ip_rate(client_ips.get(sid, ""))
     except MessageRejected as _mr:
         # Operator told colleagues that hacking attempts / suspicious activity
         # alert them. A limiter trip on its own is normal (someone clicking
-        # fast), so only REPEATED trips from one socket count as abuse.
-        _n = _rate_trips.get(sid, 0) + 1
-        _rate_trips[sid] = _n
+        # fast), so only REPEATED trips count as abuse -- counted against the
+        # address, which survives the reconnects a script uses.
+        _who = client_ips.get(sid) or ""
+        _key = f"ip:{_who}" if _who and _who != "unknown" else f"ws:{sid}"
+        _n = _rate_trips.get(_key, 0) + 1
+        _rate_trips[_key] = _n
         if _n >= _RATE_TRIPS_BEFORE_ALERT:
             try:
                 from src.observability.incident_alerts import alert_rate_limit_abuse
                 await asyncio.to_thread(
-                    alert_rate_limit_abuse, client_key=f"ws:{sid}",
+                    alert_rate_limit_abuse, client_key=_key,
                     hits=_n, window_seconds=60)
             except Exception as _e:  # noqa: BLE001
                 logging.warning(f"rate-abuse alert failed: {_e}")

@@ -56,6 +56,28 @@ RATE_WINDOW_S = _int_env("CHAT_RATE_WINDOW_S", 60)
 # conversation from being driven forever.
 MAX_TURNS_PER_CONVERSATION = _int_env("CHAT_MAX_TURNS_PER_CONVERSATION", 80)
 
+# --- the same limits, per source ADDRESS ----------------------------------
+#
+# RATE_MAX above is enforced per Socket.IO session id, which stops one person
+# clicking fast in one tab and nothing else: a session id is per CONNECTION,
+# so a script that opens a fresh socket for every message draws a fresh quota
+# every time. Measured against production on 2026-08-12 -- 30 messages down
+# 30 connections, 30 answered, zero throttled. The per-socket limit had no
+# effect on the exact actor this module was written to stop.
+#
+# So the address gets its own budget. The ceiling is deliberately well above
+# the per-socket one because Miami students share campus NAT egress: a limit
+# tuned to one person would throttle a floor of King Library. 120/min needs
+# roughly sixty simultaneously-active people behind one address before it
+# bites, which a script passes in seconds and a beta cohort will not.
+IP_RATE_MAX = _int_env("CHAT_IP_RATE_MAX", 120)
+
+# Every accepted connection writes a Conversation row before a single message
+# arrives, so connection floods cost database writes even when no message is
+# ever sent. A real browser opens one socket and keeps it; thirty per minute
+# is loose enough for a flapping phone network and tight enough to matter.
+CONN_RATE_MAX = _int_env("CHAT_CONN_RATE_MAX", 30)
+
 
 class SlidingWindowLimiter:
     """In-memory sliding-window counter. asyncio-single-threaded, so
@@ -96,6 +118,14 @@ class SlidingWindowLimiter:
 
 # Module-level singletons -- one process-wide limiter per surface.
 _chat_limiter = SlidingWindowLimiter(RATE_MAX, RATE_WINDOW_S)
+_ip_limiter = SlidingWindowLimiter(IP_RATE_MAX, RATE_WINDOW_S)
+_conn_limiter = SlidingWindowLimiter(CONN_RATE_MAX, RATE_WINDOW_S)
+
+# How much more an address may send than a single socket. Derived rather than
+# hardcoded so that lowering CHAT_RATE_MAX tightens BOTH limits together --
+# otherwise an operator dropping the per-socket limit in an incident would
+# leave the address ceiling untouched and wonder why nothing changed.
+_IP_MULTIPLIER = max(1, IP_RATE_MAX // RATE_MAX)
 
 
 class MessageRejected(Exception):
@@ -164,6 +194,75 @@ def check_rate(client_key: str) -> None:
         return
 
 
+def check_ip_rate(ip: str) -> None:
+    """Raise MessageRejected(429) if this ADDRESS is over its rate.
+
+    Enforced in addition to check_rate, not instead of it: the two catch
+    different actors. One socket over its limit is a person clicking; one
+    address over its limit is either a script or a genuinely busy building,
+    and the ceiling is set so that only the first reaches it.
+
+    FAIL-OPEN, like everything else here.
+    """
+    try:
+        if not ip or ip == "unknown":
+            # An address we could not determine must not become a shared
+            # bucket that throttles everyone at once.
+            return
+        budget_ceiling, _ = _budget_limits()
+        ceiling = min(_ip_limiter.max_events, budget_ceiling * _IP_MULTIPLIER)
+        if not _ip_limiter.allow(f"ip:{ip}", max_events=ceiling):
+            raise MessageRejected(
+                "You're sending messages too quickly. Please wait a "
+                "few seconds and try again.",
+                code=429,
+            )
+    except MessageRejected:
+        raise
+    except Exception:  # noqa: BLE001 -- never let the guard 500 the bot
+        return
+
+
+def connection_allowed(ip: str) -> bool:
+    """False if this address is opening connections too fast.
+
+    Checked before the connection is accepted, so a refused one costs no
+    Conversation row. FAIL-OPEN: an error here admits the connection.
+    """
+    try:
+        if not ip or ip == "unknown":
+            return True
+        return _conn_limiter.allow(f"conn:{ip}")
+    except Exception:  # noqa: BLE001
+        return True
+
+
+def client_ip_from_environ(environ: dict) -> str:
+    """Best-effort client IP for a Socket.IO connection.
+
+    The socket handshake arrives as a WSGI-style environ, so the proxy
+    headers are HTTP_-prefixed and upper-cased rather than the neat mapping
+    an HTTP request object gives. nginx sets both X-Forwarded-For and
+    X-Real-IP on the /smartchatbot/socket.io/ location (checked 2026-08-12);
+    without them every client would look like 127.0.0.1 and share one bucket.
+
+    Honours the FIRST hop of X-Forwarded-For, which is the client as seen by
+    our own proxy. Never raises.
+    """
+    try:
+        if not environ:
+            return "unknown"
+        xff = (environ.get("HTTP_X_FORWARDED_FOR") or "").strip()
+        if xff:
+            return xff.split(",")[0].strip() or "unknown"
+        real = (environ.get("HTTP_X_REAL_IP") or "").strip()
+        if real:
+            return real
+        return (environ.get("REMOTE_ADDR") or "").strip() or "unknown"
+    except Exception:  # noqa: BLE001
+        return "unknown"
+
+
 def conversation_turn_exceeded(turn_count: int) -> bool:
     """True if this conversation has hit the hard turn ceiling."""
     return turn_count >= _budget_limits()[1]
@@ -183,12 +282,17 @@ def client_ip_from_request(request) -> str:
 
 
 __all__ = [
+    "CONN_RATE_MAX",
+    "IP_RATE_MAX",
     "MAX_MESSAGE_CHARS",
     "MAX_TURNS_PER_CONVERSATION",
     "MessageRejected",
     "SlidingWindowLimiter",
+    "check_ip_rate",
     "check_rate",
+    "client_ip_from_environ",
     "client_ip_from_request",
+    "connection_allowed",
     "conversation_turn_exceeded",
     "validate_message",
 ]

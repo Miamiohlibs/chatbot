@@ -242,3 +242,78 @@ def test_a_browser_is_a_student_and_a_test_harness_is_not():
                 {"HTTP_ORIGIN": "http://localhost:8081"},
                 {"HTTP_ORIGIN": "http://127.0.0.1:5173"}):
         assert _looks_like_dev_client(env) is True, env
+
+
+# --- the bypass this module existed to stop, and did not ------------------
+#
+# Measured against production on 2026-08-12: 30 messages down 30 fresh
+# connections were all answered and none throttled. The per-socket limit is
+# real, but a session id is per CONNECTION, so reconnecting drew a fresh
+# quota every time. These pin the address-keyed limits that close it.
+
+
+def test_a_new_socket_does_not_reset_the_address_quota() -> None:
+    """The attack, reduced: same address, a different session id each time."""
+    RL._ip_limiter.reset("ip:10.0.0.7")
+    blocked = 0
+    for i in range(RL.IP_RATE_MAX + 10):
+        try:
+            # a brand-new session id on every single message
+            RL.check_rate(f"ws:socket-{i}")
+            RL.check_ip_rate("10.0.0.7")
+        except MessageRejected:
+            blocked += 1
+    assert blocked >= 10, (
+        f"reconnecting still bypassed the limit: only {blocked} of "
+        f"{RL.IP_RATE_MAX + 10} were refused")
+    RL._ip_limiter.reset("ip:10.0.0.7")
+
+
+def test_two_students_behind_one_campus_nat_are_independent_of_a_script():
+    """The cost of keying on address: shared egress. The ceiling has to sit
+    above what a busy building does and below what a script does."""
+    RL._ip_limiter.reset("ip:134.53.1.1")
+    # Twenty people on one NAT address, five questions each, is normal use.
+    for i in range(100):
+        RL.check_ip_rate("134.53.1.1")     # must not raise
+    RL._ip_limiter.reset("ip:134.53.1.1")
+
+
+def test_an_unknown_address_is_not_one_shared_bucket() -> None:
+    """If address extraction ever breaks, every client must not land in the
+    same bucket and throttle each other."""
+    for _ in range(RL.IP_RATE_MAX * 2):
+        RL.check_ip_rate("")               # must not raise
+        RL.check_ip_rate("unknown")        # must not raise
+
+
+def test_connection_flood_is_refused_before_a_conversation_row() -> None:
+    RL._conn_limiter.reset("conn:10.0.0.9")
+    allowed = sum(1 for _ in range(RL.CONN_RATE_MAX + 20)
+                  if RL.connection_allowed("10.0.0.9"))
+    assert allowed == RL.CONN_RATE_MAX, (
+        f"expected exactly {RL.CONN_RATE_MAX} connections to be admitted, "
+        f"got {allowed}")
+    RL._conn_limiter.reset("conn:10.0.0.9")
+
+
+def test_the_socketio_handshake_environ_yields_the_real_client() -> None:
+    """Behind nginx every socket's REMOTE_ADDR is 127.0.0.1, so reading the
+    proxy headers is what makes the address limit mean anything at all."""
+    assert RL.client_ip_from_environ(
+        {"HTTP_X_FORWARDED_FOR": "134.53.4.9, 10.1.1.1",
+         "REMOTE_ADDR": "127.0.0.1"}) == "134.53.4.9"
+    assert RL.client_ip_from_environ(
+        {"HTTP_X_REAL_IP": "134.53.4.9", "REMOTE_ADDR": "127.0.0.1"}) == "134.53.4.9"
+    assert RL.client_ip_from_environ({"REMOTE_ADDR": "134.53.4.9"}) == "134.53.4.9"
+    assert RL.client_ip_from_environ({}) == "unknown"
+    assert RL.client_ip_from_environ(None) == "unknown"
+
+
+def test_tightening_the_socket_limit_tightens_the_address_limit_too() -> None:
+    """An operator who drops CHAT_RATE_MAX during an incident must not find
+    the address ceiling untouched."""
+    assert RL._IP_MULTIPLIER >= 1
+    assert RL.IP_RATE_MAX >= RL.RATE_MAX, (
+        "the address ceiling must not be stricter than the per-socket one, "
+        "or shared campus NAT throttles before a single tab does")
