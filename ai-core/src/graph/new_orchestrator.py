@@ -5089,14 +5089,33 @@ def _renewal_paths_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
             "to graduate students, a year to faculty, and 6 weeks to other "
             "patrons [1]. "
         )
+    # LEAD WITH WHAT WAS ASKED.
+    #
+    # "How do I renew a book?" and "how long can I keep a book?" both land
+    # here, and both used to open with the loan-period table -- so somebody
+    # asking HOW got three sentences of how-LONG before the instruction they
+    # came for. Same shape as the count questions Circulation reported:
+    # answering an adjacent question first is not far off answering the wrong
+    # one. A how-to opens with the step; a duration question opens with the
+    # duration.
+    _how_to = bool(_RENEW_HOWTO_RE.search(m)) and not _LOAN_PERIOD_RE.search(m)
+    _steps = (
+        "Sign in to your library account (MyAccount) and renew there [3]. "
+        "If you have hit the renewal limit, or the item has been requested "
+        "by someone else, the circulation desk can help on (513) 529-4141."
+    )
+    _limits = (
+        "Renewal limits depend on where the item came from: Miami materials "
+        "are on the circulation policy page [1], and OhioLINK, SearchOhio "
+        "and interlibrary loan items each have their own on the OhioLINK & "
+        "ILL page [2]."
+    )
+    if _how_to:
+        body = f"{_steps} {_limits}"
+    else:
+        body = f"{opening}{_limits} {_steps}"
     return (
-        opening
-        + "Renewal works differently depending on where the item came from: "
-        "for Miami materials the renewal limits are on that same page [1], "
-        "and for OhioLINK and interlibrary loan items see the OhioLINK & ILL "
-        "loan periods page [2]. Either way you renew by signing in to your "
-        "library account (MyAccount) [3]. If you've reached the renewal "
-        "limit, contact the circulation desk at (513) 529-4141.",
+        body,
         [
             {"n": 1, "url": _LOAN_FINES_URL,
              "snippet": "Miami University Libraries — loan periods & fines"},

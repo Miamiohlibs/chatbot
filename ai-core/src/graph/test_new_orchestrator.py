@@ -2149,3 +2149,25 @@ def test_the_ohiolink_request_answer_leaves_turnaround_alone() -> None:
               "how long does OhioLINK take",
               "how long until my ohiolink book gets here"):
         assert _ohiolink_request_answer(q) is None, f"stole a turnaround: {q}"
+
+
+def test_a_how_to_renew_question_leads_with_the_step() -> None:
+    """Both "how do I renew" and "how long can I keep" land in the same
+    answer, and it used to open with the loan-period table either way -- so
+    somebody asking HOW got three sentences of how-LONG first. Answering an
+    adjacent question first is not far off answering the wrong one."""
+    from src.graph.new_orchestrator import _renewal_paths_answer
+    for q in ("How do I renew a book?", "how do I renew online",
+              "where can I renew my books"):
+        body = _renewal_paths_answer(q)[0]
+        assert body.startswith("Sign in"), f"buries the step: {body[:70]}"
+    for q in ("how long can I keep a book?", "what is the loan period for books?"):
+        body = _renewal_paths_answer(q)[0]
+        assert "circulate for" in body[:160], f"buries the duration: {body[:70]}"
+
+
+def test_a_stated_borrower_type_still_gets_their_own_figure_first() -> None:
+    from src.graph.new_orchestrator import _renewal_paths_answer
+    body = _renewal_paths_answer("as a grad student how long can I keep a book")[0]
+    assert body.startswith("For graduate students")
+    assert "undergraduates" not in body.split(".")[0]
