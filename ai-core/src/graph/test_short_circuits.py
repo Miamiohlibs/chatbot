@@ -3232,3 +3232,37 @@ def test_ill_turnaround_yields_to_the_return_question():
               "how long can i keep a Miami library book",
               "how long does printing take"):
         assert _ill_turnaround_answer(q) is None, q
+
+
+# --- "nursing" is a degree as well as a room (2026-08-12) -----------------
+
+
+def test_the_nursing_librarian_is_not_answered_with_lactation_rooms():
+    """Measured against the running service: "who is the nursing librarian"
+    returned "King Library does not have a dedicated nursing or lactation
+    room". The facility matcher runs before the liaison logic, so the word
+    alone was enough. A student asking for their subject librarian and being
+    told about lactation rooms is exactly the reply a service desk then has
+    to recover."""
+    from src.graph.facility_facts import nursing_room_answer
+    for q in ("who is the nursing librarian",
+              "who is the liaison for nursing",
+              "nursing databases",
+              "nursing journals",
+              "I need help with nursing research",
+              "best databases for nursing students"):
+        assert nursing_room_answer(q) is None, f"answered as a room: {q}"
+
+
+def test_the_room_question_still_gets_the_honest_no():
+    """The operator's answer exists because a parent needs to know before
+    they travel; disambiguation must not cost them it."""
+    from src.graph.facility_facts import nursing_room_answer
+    for q in ("is there a nursing room",
+              "where can I breastfeed",
+              "lactation room in king",
+              "do you have a mother's room",
+              "is there a pumping room"):
+        hit = nursing_room_answer(q)
+        assert hit is not None, f"lost the room answer: {q}"
+        assert "does **not** have" in hit[0]

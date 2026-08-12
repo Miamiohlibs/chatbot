@@ -94,6 +94,22 @@ _NURSING_RE = re.compile(
     re.IGNORECASE,
 )
 
+# "Nursing" is also a DEGREE, and this matcher runs before the liaison
+# logic, so "who is the nursing librarian" was answered with "King Library
+# does not have a dedicated nursing or lactation room" -- measured against
+# the running service 2026-08-12. A student asking for their subject
+# librarian being told about lactation rooms is exactly the kind of reply
+# that has to be recovered by a person at a service desk.
+#
+# Everything here is the academic sense of the word. The room question is
+# never phrased with any of them.
+_NURSING_IS_THE_SUBJECT_RE = re.compile(
+    r"\b(librarian|liaison|subject\s+specialist|research|"
+    r"database|databases|journals?|articles?|citation|literature|"
+    r"program|programme|major|degree|course|class|students?|faculty|school)\b",
+    re.IGNORECASE,
+)
+
 _PRINT_SCAN_WIFI_RE = re.compile(
     r"\b(print|prints|printing|printer|printers|photocopy|copier|"
     r"scan|scans|scanning|scanner|scanners|"
@@ -198,8 +214,11 @@ def nursing_room_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
     An honest no, with a route to someone who can help, beats both a refusal
     and a hedge. A parent needs to know before they travel, not after.
     """
-    if not _NURSING_RE.search(message or ""):
+    m = message or ""
+    if not _NURSING_RE.search(m):
         return None
+    if _NURSING_IS_THE_SUBJECT_RE.search(m):
+        return None          # the DEGREE, not the room -- see the pattern
     return (
         "King Library does **not** have a dedicated nursing or lactation "
         "room.\n\n"

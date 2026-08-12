@@ -64,6 +64,7 @@ from scripts.etl import (  # noqa: E402  (sys.path mutation above)
     extract,
     gate,
     libanswers,
+    navigation,
     upsert,
 )
 
@@ -511,8 +512,27 @@ def _build_prod_pipeline() -> Pipeline:
         upsert_chunks=upsert.make_upsert_step(weaviate),
         tombstone=upsert.make_tombstone_step(weaviate),
         update_allowlist=upsert.make_allowlist_step(urlseen),
-        extra_docs_fn=libanswers.load,
+        extra_docs_fn=_extra_documents,
     )
+
+
+
+def _extra_documents() -> "list[tuple[extract.ExtractedDoc, classify.DocMetadata]]":
+    """Sources that hand over finished documents instead of being crawled.
+
+    Each is isolated: LibAnswers reaches the network and can fail, and when
+    it does the navigation pointers -- which touch nothing and cannot fail --
+    must still be indexed. Sharing one try/except would have let a FAQ API
+    outage silently drop them too.
+    """
+    docs: list = []
+    for name, source in (("libanswers-api", libanswers.load),
+                         ("navigation", navigation.load)):
+        try:
+            docs.extend(source())
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("extra document source %s failed: %s", name, exc)
+    return docs
 
 
 def _setup_logging(verbose: bool) -> None:
@@ -648,7 +668,7 @@ def main() -> int:
         # Read-only, same as the crawl: prepare has to see this source or
         # the diff the operator approves would not describe the corpus
         # that apply then writes.
-        extra_docs_fn=libanswers.load,
+        extra_docs_fn=_extra_documents,
     )
 
     try:

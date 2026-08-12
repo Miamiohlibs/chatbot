@@ -1422,6 +1422,11 @@ def _run_turn(
 
     if classification.intent in ("subject_librarian", "research_consultation"):
         _liaison = _subject_liaison_short_circuit(agent_outcome, scope)
+        if _liaison is None:
+            # The agent may simply not have looked. Do it ourselves rather
+            # than refuse a question whose answer is one lookup away.
+            _liaison = _liaison_lookup_when_agent_skipped(
+                request, deps, scope, agent_outcome)
         if _liaison is not None:
             _ans, _cites = _liaison
             latency_ms = int((time.monotonic() - turn_start) * 1000)
@@ -5400,6 +5405,66 @@ def _format_staff_contact(
     answer += _provenance_note(people)
     return answer, [{"n": 1, "url": _STAFF_DIRECTORY_URL,
                      "snippet": "Miami University Libraries — staff directory"}]
+
+
+def _liaison_lookup_when_agent_skipped(
+    request: "TurnRequest", deps: "OrchestratorDeps", scope: "Scope",
+    agent_outcome: "AgentOutcome",
+) -> "Optional[tuple[str, list[dict]]]":
+    """Do the liaison lookup ourselves when the agent did not.
+
+    _subject_liaison_short_circuit below is deterministic, but it only runs
+    on a lookup the AGENT chose to make -- so the determinism started one
+    step too late. Measured 2026-08-12 against the running service: "who is
+    the nursing librarian" classified correctly as subject_librarian, called
+    NO tool at all, and was refused; the same question minutes earlier had
+    called the tool and answered correctly. Five of twelve referral
+    questions were refused that way, every one of them answerable -- the
+    LibGuides API was returning the right people in ~100ms throughout.
+
+    Refusing a question whose answer is one lookup away is the failure the
+    Head of Advise & Instruct was worried about, in its quieter form: not a
+    wrong referral, but staff having to field a question the bot should have
+    routed. So whether to look up is no longer the model's decision.
+
+    Returns the formatted answer, or None to leave things exactly as they
+    were. The lookup result is handed to the existing short circuit rather
+    than formatted here, so there is one implementation of campus labelling,
+    co-liaison handling and the no-liaison wording -- two would drift.
+    """
+    for turn in (agent_outcome.turns or []):
+        for res in (turn.tool_results or []):
+            if res.name == "lookup_librarian":
+                return None          # the agent did it; nothing to add
+
+    subject = _subject_named_with_librarian(request.user_message)
+    if not subject:
+        return None
+
+    try:
+        from src.agent.tool_registry import ToolCall
+
+        call = ToolCall(id="liaison-fallback", name="lookup_librarian",
+                        arguments={"subject": subject,
+                                   "campus": scope.campus or ""})
+        res = deps.tool_registry.dispatch(call)
+    except Exception as exc:  # noqa: BLE001 -- a fallback must not break a turn
+        log.warning("liaison fallback lookup failed: %s", exc)
+        return None
+    if res is None or res.error:
+        return None
+
+    # Hand it to the existing formatter in the shape it already reads.
+    class _Turn:
+        tool_calls = [call]
+        tool_results = [res]
+
+    class _Outcome:
+        turns = [_Turn()]
+
+    log.info("liaison fallback: agent skipped lookup_librarian, looked up %r",
+             subject)
+    return _subject_liaison_short_circuit(_Outcome(), scope)
 
 
 def _subject_liaison_short_circuit(
