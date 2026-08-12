@@ -46,10 +46,10 @@ def test_patron_roster_csv_is_blocked():
     """The leak, reproduced: a spreadsheet of people."""
     assert _verdict("patrons.csv", """
 name,email,phone
-Alice Nguyen,nguyena3@miamioh.edu,513-555-0142
-Ben Ortiz,ortizb@miamioh.edu,513-555-0198
-Chen Wu,wuc12@miamioh.edu,513-555-0110
-Dana Silva,silvad2@miamioh.edu,513-555-0177
+Patron One,patron-one@miamioh.edu,513-555-0142
+Patron Two,patron-two@miamioh.edu,513-555-0198
+Patron Three,patron-three@miamioh.edu,513-555-0110
+Patron Four,patron-four@miamioh.edu,513-555-0177
 """) == "blocked-bulk"
 
 
@@ -57,10 +57,10 @@ def test_transcript_export_jsonl_is_blocked():
     """Same data, a file extension that no spreadsheet rule would catch.
     This is why bulk counting exists alongside the suffix check."""
     assert _verdict("chats.jsonl", """
-{"user":"nguyena3@miamioh.edu","q":"can i renew my books"}
-{"user":"ortizb@miamioh.edu","q":"where is king library"}
-{"user":"wuc12@miamioh.edu","q":"printing on regionals"}
-{"user":"silvad2@miamioh.edu","q":"3d printer hours"}
+{"user":"patron-one@miamioh.edu","q":"can i renew my books"}
+{"user":"patron-two@miamioh.edu","q":"where is king library"}
+{"user":"patron-three@miamioh.edu","q":"printing on regionals"}
+{"user":"patron-four@miamioh.edu","q":"3d printer hours"}
 """) == "blocked-bulk"
 
 
@@ -76,7 +76,7 @@ def test_patron_ip_addresses_count_as_people():
 
 def test_one_api_key_is_enough():
     assert _verdict("config.py",
-                    'OPENAI_API_KEY = "sk-proj-9xKq2mVn4pLdR7wZaB3cYe6tUiOp1sDf"'
+                    'OPENAI_API_KEY = "sk-proj-NOTAREALKEYNOTAREALKEY000000"'
                     ) == "blocked-credential"
 
 
@@ -109,11 +109,11 @@ def test_operator_allowlist_test_passes():
     allowlist. At a flat threshold of 8 this blocked, and replaying real
     commits is how that was caught."""
     assert _verdict("src/api/admin/test_killswitch.py", """
-ALLOWED = "qum@miamioh.edu,bomholmm@miamioh.edu,maderir@miamioh.edu"
+ALLOWED = "op-one@miamioh.edu,op-two@miamioh.edu,op-three@miamioh.edu"
 def test_rejects_stranger():
     assert not check("stranger@miamioh.edu")
 def test_case_insensitive():
-    assert check("QUM@miamioh.edu") and check("Qum@MiamiOH.edu")
+    assert check("OP-ONE@miamioh.edu") and check("Op-One@MiamiOH.edu")
 def test_blank_is_refused():
     assert not check("") and not check("a@miamioh.edu") and not check("b@miamioh.edu")
 """) == "pass"
@@ -131,7 +131,7 @@ KILLSWITCH_PASSPHRASE=REPLACE-ME
 def test_subject_librarian_answer_passes():
     """Naming the right librarian IS the answer to a subject question."""
     assert _verdict("src/tools/subject_aliases.py", """
-HISTORY = ("Jenny Presnell", "presnejl@miamioh.edu")
+HISTORY = ("A Subject Librarian", "subject-librarian@miamioh.edu")
 """) == "pass"
 
 
