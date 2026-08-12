@@ -1034,6 +1034,30 @@ def _run_turn(
     # AFTER the limitation check so bot-as-actor phrasings ('renew it for
     # me') keep the explicit "I can't do that" template. How-to renewal
     # questions get the material-type-split policy answer.
+    # 2.44. "How many times" and "how many books" are COUNT questions, and
+    # they have to be answered before the loan-PERIOD short circuit below,
+    # which otherwise swallows both and replies with a duration. Circulation
+    # reported both as unanswered on 2026-08-12.
+    if not booking_flow:
+        for _counter in (_renewal_count_answer, _checkout_limit_answer):
+            _hit = _counter(request.user_message)
+            if _hit is None:
+                continue
+            _ans, _cites = _hit
+            latency_ms = int((time.monotonic() - turn_start) * 1000)
+            record_request(endpoint="/chat", status=_counter.__name__,
+                           latency_s=latency_ms / 1000)
+            return TurnResponse(
+                answer=_ans, is_refusal=False, refusal_trigger=None,
+                citations=_cites, confidence="high",
+                intent=classification.intent, scope=scope.as_filter(),
+                model_used=model_basic,
+                tokens={"input": 0, "cached_input": 0, "output": 0},
+                fired_corrections=[],
+                agent_stopped_reason=f"{_counter.__name__}_short_circuit",
+                latency_ms=latency_ms, cited_chunk_ids=[],
+            )
+
     if not booking_flow:
         _renew = _renewal_paths_answer(request.user_message)
         if _renew is not None:
@@ -4785,6 +4809,95 @@ _RENEW_ACTOR_RE = re.compile(
     r"|\bplease\s+renew\b|\bfor\s+me\b",
     re.IGNORECASE,
 )
+
+
+# --- "how many", not "how long" -------------------------------------------
+#
+# Circulation reported on 2026-08-12 that neither "how many times can I renew
+# a book?" nor "how many books can I check out?" was answered, and guessed
+# the website did not cover them. It does, twice, and both pages are already
+# indexed -- LibAnswers 281805 and 343505. The questions were being swallowed
+# by the loan-PERIOD short circuit below: "can ... renew" matches
+# _RENEW_HOWTO_RE and "how many ... check out" matches _LOAN_PERIOD_RE, so a
+# question about a COUNT was answered with a DURATION. Both of these run
+# first for that reason.
+
+_RENEW_COUNT_RE = re.compile(
+    r"\bhow\s+many\s+times\b[^.?!]*\brenew"
+    r"|\bhow\s+many\s+renewals?\b"
+    r"|\brenew(al|als|ed|s)?\b[^.?!]{0,24}\b(limit|maximum|max|cap)\b"
+    r"|\b(limit|maximum|max)\b[^.?!]{0,24}\brenew",
+    re.IGNORECASE,
+)
+
+_CHECKOUT_LIMIT_RE = re.compile(
+    # "how many books can I check out" -- a COUNT of items, never a duration,
+    # so the noun list deliberately excludes days/weeks/times.
+    r"\bhow\s+many\s+(books?|items?|things?|materials?|dvds?|videos?)\b"
+    r"[^.?!]{0,34}\b(check\s*out|checkout|borrow|take\s+out|have\s+out)\b"
+    r"|\b(how\s+many|maximum|max|limit)\b[^.?!]{0,34}"
+    r"\b(at\s+(one|a)\s+time|at\s+once)\b"
+    r"|\b(check\s*out|checkout|borrowing)\s+(limit|maximum|max)\b",
+    re.IGNORECASE,
+)
+
+_FAQ_RENEW_COUNT_URL = "https://libanswers.lib.miamioh.edu/faq/281805"
+_FAQ_CHECKOUT_LIMIT_URL = "https://libanswers.lib.miamioh.edu/faq/343505"
+
+
+def _renewal_count_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
+    """HOW MANY TIMES an item renews -- not how long it is out for.
+
+    Figures from LibAnswers 281805. 999 is the system's stand-in for "no
+    practical limit", so it is said both ways: quoting only the number reads
+    as a real ceiling somebody might try to count towards, and quoting only
+    "unlimited" would not match what the FAQ says if a student checks.
+    """
+    m = message or ""
+    if not _RENEW_COUNT_RE.search(m):
+        return None
+    if _LOAN_PERIOD_EXCLUDE_RE.search(m):
+        return None
+    if _RENEW_ACTOR_RE.search(m):        # "can you renew it for me"
+        return None
+    return (
+        "It depends where the item came from. Miami University items renew up "
+        "to 999 times -- effectively no limit -- unless another patron has "
+        "requested them. OhioLINK and SearchOhio items renew up to 5 times "
+        "after the initial checkout, again unless someone else has requested "
+        "them. Interlibrary loan items may or may not be renewable at all: "
+        "that is the lending institution's decision, and they will rarely "
+        "agree once the item is overdue. [1] You renew by signing in to your "
+        "library account (MyAccount) [2].",
+        [
+            {"n": 1, "url": _FAQ_RENEW_COUNT_URL,
+             "snippet": "How many times can a library book be renewed?"},
+            {"n": 2, "url": _MYACCOUNT_URL,
+             "snippet": "MyAccount -- OhioLINK library account"},
+        ],
+    )
+
+
+def _checkout_limit_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
+    """HOW MANY ITEMS at once. Figures from LibAnswers 343505."""
+    m = message or ""
+    if not _CHECKOUT_LIMIT_RE.search(m):
+        return None
+    # Equipment, reserves and the rest have their own separate limits.
+    if _LOAN_PERIOD_EXCLUDE_RE.search(m):
+        return None
+    return (
+        "The maximum depends on your borrower type: faculty, emeritus faculty "
+        "and graduate students can have 999 items out at once -- effectively "
+        "no limit; undergraduate students and staff, 200; affiliated patrons "
+        "at Oxford, 20; and Friends of the Library at Hamilton and "
+        "Middletown, 5. [1]",
+        [
+            {"n": 1, "url": _FAQ_CHECKOUT_LIMIT_URL,
+             "snippet": "How many books or other items can be checked out at "
+                        "one time?"},
+        ],
+    )
 
 
 def _renewal_paths_answer(message: str) -> "Optional[tuple[str, list[dict]]]":

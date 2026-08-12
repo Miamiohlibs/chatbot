@@ -1944,3 +1944,100 @@ def test_ordinary_library_questions_do_not_trip_the_gate() -> None:
         resp = rt(TurnRequest(user_message=ok, conversation_id="c1"),
                   _plain_deps())
         assert resp.refusal_trigger != "injection_attempt", ok
+
+
+# --- circulation asked for counts and got durations (2026-08-12) -----------
+#
+# The Circulation Supervisor reported that neither "how many times can I renew
+# a book?" nor "how many books can I check out?" was answered, and guessed the
+# website did not cover them. Both are covered, on pages already indexed
+# (LibAnswers 281805 and 343505). The questions were being swallowed by the
+# loan-PERIOD short circuit: "can ... renew" matches _RENEW_HOWTO_RE and
+# "how many ... check out" matches _LOAN_PERIOD_RE, so a COUNT question got a
+# DURATION answer -- the same text for both, six times out of six.
+
+
+def test_how_many_times_can_i_renew_is_answered_with_a_count() -> None:
+    from src.graph.new_orchestrator import _renewal_count_answer
+    for q in ("how many times can I renew a book?",
+              "how many renewals do I get",
+              "what's the renewal limit",
+              "is there a limit on renewals"):
+        hit = _renewal_count_answer(q)
+        assert hit is not None, f"not answered: {q}"
+        answer = hit[0]
+        assert "999" in answer, "the Miami figure is missing"
+        assert "5 times" in answer, "the OhioLINK/SearchOhio figure is missing"
+        # the three sources have DIFFERENT limits; blurring them is the bug
+        # Circulation reported separately
+        assert "Interlibrary loan" in answer
+
+
+def test_how_many_books_can_i_check_out_is_answered_with_a_count() -> None:
+    from src.graph.new_orchestrator import _checkout_limit_answer
+    for q in ("How many books can I check out?",
+              "how many items can I borrow",
+              "how many books can I have out at one time",
+              "what is the checkout limit"):
+        hit = _checkout_limit_answer(q)
+        assert hit is not None, f"not answered: {q}"
+        answer = hit[0]
+        for figure in ("999", "200", "20", "5"):
+            assert figure in answer, f"borrower-type figure {figure} missing"
+
+
+def test_the_count_answers_do_not_steal_duration_questions() -> None:
+    """The loan-period and how-to-renew answers must keep their questions."""
+    from src.graph.new_orchestrator import (
+        _checkout_limit_answer, _renewal_count_answer, _renewal_paths_answer,
+    )
+    for q in ("how long can I keep a book?",
+              "what is the loan period for books?",
+              "how do I renew a book?"):
+        assert _renewal_count_answer(q) is None, f"stolen from loan period: {q}"
+        assert _checkout_limit_answer(q) is None, f"stolen from loan period: {q}"
+        assert _renewal_paths_answer(q) is not None, f"no longer answered: {q}"
+
+
+def test_do_it_for_me_still_gets_the_capability_answer() -> None:
+    """'Can you renew it for me' is a request to ACT, not a policy question,
+    and must keep reaching the 'I can't do that' template."""
+    from src.graph.new_orchestrator import _renewal_count_answer
+    assert _renewal_count_answer("can you renew it for me") is None
+
+
+def test_equipment_keeps_its_own_limits() -> None:
+    """Laptops and reserves have separate rules; the book figures would be
+    wrong for them."""
+    from src.graph.new_orchestrator import _checkout_limit_answer
+    assert _checkout_limit_answer(
+        "how many laptops can I check out at one time") is None
+    assert _checkout_limit_answer(
+        "how many reserve books can I check out at once") is None
+
+
+def test_the_count_short_circuits_survive_the_whole_turn() -> None:
+    """Through run_turn, not just the helper.
+
+    The helper-only tests above all passed while the live service returned
+    "I ran into a problem on my end" for both questions: the short circuit
+    built a TurnResponse without agent_stopped_reason and raised TypeError.
+    1,349 tests were green. Nothing exercised the CONSTRUCTION of the
+    response, only the text it was built from -- so this drives the real
+    path and touches the fields a caller reads.
+    """
+    for q, must_contain in (
+        ("how many times can I renew a book?", "999"),
+        ("How many books can I check out?", "200"),
+    ):
+        deps = _build_deps(
+            classification=_classification("loan_policy"),
+            evidence_in_search_kb_result=[_evidence_dict("c1")],
+        )
+        resp = run_turn(TurnRequest(user_message=q, conversation_id="conv-1"), deps)
+        assert not resp.is_refusal, f"{q!r} refused"
+        assert must_contain in resp.answer, f"{q!r} -> {resp.answer[:120]}"
+        assert resp.agent_stopped_reason.endswith("_short_circuit")
+        assert resp.tokens["input"] == 0, "a canned answer must cost no tokens"
+        assert resp.citations, "an answer with figures in it must cite them"
+        assert resp.latency_ms >= 0
