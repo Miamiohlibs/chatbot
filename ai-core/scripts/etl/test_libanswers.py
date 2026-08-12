@@ -217,3 +217,42 @@ def test_the_boilerplate_floor_still_applies_to_crawled_pages():
     assert chunker.chunk_document(scraped, classify.DocMetadata(
         topic="about", campus="oxford", library=None, audience=[],
         featured_service=None)) == []
+
+
+# --- FAQs the live site contradicts must not be indexed --------------------
+
+
+def test_a_suppressed_faq_is_not_indexed_by_id() -> None:
+    """The operator's rule from 2026-08-12: the live page wins. FAQ 170601
+    says undergraduates get a 3-week loan; the live circulation page says 6,
+    and three student phrasings retrieved the stale chunk and answered 3."""
+    faq = {"faqid": "170601", "question": "What are the loan periods for books?",
+           "answer": "Undergraduate Students - 3 Weeks"}
+    assert libanswers.is_suppressed(faq) is True
+    assert libanswers.to_document(faq) is None
+
+
+def test_a_suppressed_faq_is_caught_by_url_when_the_id_is_absent() -> None:
+    """`url.public` is authoritative when present, and a FAQ carrying it need
+    not repeat its id -- so matching on the id alone would let it back in."""
+    faq = {"url": {"public": "https://libanswers.lib.miamioh.edu/faq/170601"},
+           "question": "What are the loan periods for books?",
+           "answer": "Undergraduate Students - 3 Weeks"}
+    assert libanswers.is_suppressed(faq) is True
+    assert libanswers.to_document(faq) is None
+
+
+def test_an_ordinary_faq_is_still_indexed() -> None:
+    faq = {"faqid": "281805", "question": "How many times can a book be renewed?",
+           "answer": "Miami University items may be renewed up to 999 times."}
+    assert libanswers.is_suppressed(faq) is False
+    assert libanswers.to_document(faq) is not None
+
+
+def test_every_suppression_carries_a_reason() -> None:
+    """An id with no explanation cannot be reviewed later, and the entry is
+    meant to be deleted once the FAQ is corrected."""
+    assert libanswers.SUPPRESSED_FAQ_IDS, "the list should not be empty silently"
+    for faq_id, why in libanswers.SUPPRESSED_FAQ_IDS.items():
+        assert faq_id.isdigit(), f"{faq_id!r} is not a FAQ id"
+        assert len(why) > 40, f"{faq_id} has no usable reason recorded"

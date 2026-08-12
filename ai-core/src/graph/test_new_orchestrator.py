@@ -1966,11 +1966,18 @@ def test_how_many_times_can_i_renew_is_answered_with_a_count() -> None:
         hit = _renewal_count_answer(q)
         assert hit is not None, f"not answered: {q}"
         answer = hit[0]
-        assert "999" in answer, "the Miami figure is missing"
-        assert "5 times" in answer, "the OhioLINK/SearchOhio figure is missing"
-        # the three sources have DIFFERENT limits; blurring them is the bug
-        # Circulation reported separately
+        # The four sources have DIFFERENT limits, which is the whole point --
+        # Circulation reported OhioLINK and ILL being used interchangeably.
+        # Figures are the LIVE page's, not the FAQ's: the FAQ says OhioLINK
+        # and SearchOhio both renew "5 times", a number the live page does
+        # not contain, and it lumps two services that differ.
+        assert "2 renewals" in answer, "OhioLINK's live limit is missing"
+        assert "3 renewals" in answer, "SearchOhio's live limit is missing"
+        assert "6 for faculty" in answer, "the faculty distinction is missing"
         assert "Interlibrary loan" in answer
+        assert "SearchOhio" in answer
+        assert "5 times" not in answer, (
+            "the stale FAQ figure is back -- the live page governs")
 
 
 def test_how_many_books_can_i_check_out_is_answered_with_a_count() -> None:
@@ -2027,7 +2034,7 @@ def test_the_count_short_circuits_survive_the_whole_turn() -> None:
     path and touches the fields a caller reads.
     """
     for q, must_contain in (
-        ("how many times can I renew a book?", "999"),
+        ("how many times can I renew a book?", "2 renewals"),
         ("How many books can I check out?", "200"),
     ):
         deps = _build_deps(
@@ -2041,3 +2048,37 @@ def test_the_count_short_circuits_survive_the_whole_turn() -> None:
         assert resp.tokens["input"] == 0, "a canned answer must cost no tokens"
         assert resp.citations, "an answer with figures in it must cite them"
         assert resp.latency_ms >= 0
+
+
+def test_loan_period_covers_the_phrasings_that_leaked_a_stale_figure() -> None:
+    """Three wordings fell through to retrieval on 2026-08-12 and came back
+    with 3 WEEKS, from a LibAnswers FAQ the live circulation page contradicts
+    (it says 6). The stale chunk is a separate problem; a question this common
+    should not depend on retrieval when the figure is known."""
+    from src.graph.new_orchestrator import _renewal_paths_answer
+    for q in ("what's the checkout duration for undergrads",
+              "as an undergraduate how long do I get a book for",
+              "tell me the borrowing period for students",
+              "what's the lending period"):
+        assert _renewal_paths_answer(q) is not None, f"still falls to RAG: {q}"
+
+
+def test_how_long_to_KEEP_is_not_how_long_to_ARRIVE() -> None:
+    """Widening the loan-period pattern also caught delivery questions, which
+    would answer 'how long until my ILL arrives' with a loan period -- and
+    delivery time is one of the things Circulation reported as confused."""
+    from src.graph.new_orchestrator import _renewal_paths_answer
+    for q in ("how long is the wait for an ILL book",
+              "how long does it take to get a book from OhioLINK",
+              "when will my OhioLINK request arrive?",
+              "how long until my ILL arrives",
+              "how soon will the book be here"):
+        assert _renewal_paths_answer(q) is None, f"arrival answered as loan: {q}"
+
+
+def test_equipment_and_reserves_keep_their_own_loan_periods() -> None:
+    from src.graph.new_orchestrator import _renewal_paths_answer
+    for q in ("how long can I keep a laptop",
+              "how long can I keep a reserve textbook",
+              "how long do I get a dvd for"):
+        assert _renewal_paths_answer(q) is None, f"wrong period for: {q}"

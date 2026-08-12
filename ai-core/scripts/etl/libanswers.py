@@ -214,8 +214,50 @@ def topic_for(faq: dict) -> str:
     return "service"
 
 
+# FAQs the live site contradicts. These are NOT indexed.
+#
+# The operator's standing rule, set 2026-08-12: where a LibAnswers FAQ and a
+# live library page disagree, the live page wins. The FAQs are maintained by
+# hand, so a policy change updates the website and leaves a FAQ behind, and
+# the bot then has two sources and no way to prefer one.
+#
+# Suppressing a whole FAQ over one stale figure is deliberate. A page whose
+# headline fact is out of date has not earned trust for the rest of it, and
+# in the one case here the remaining content was already covered by the live
+# page anyway.
+#
+# id -> what is wrong, and where the right answer lives. Keep the reason:
+# an id with no explanation is impossible to review later, and re-indexing a
+# page that has since been corrected is the whole point of revisiting this.
+SUPPRESSED_FAQ_IDS: "dict[str, str]" = {
+    "170601": (
+        "loan periods: says undergraduates get 3 weeks, live circulation page "
+        "says 6 (libguides mul-circulation-policies/loan-periods-fines). "
+        "Measured 2026-08-12: three student phrasings retrieved this chunk "
+        "and answered 3 weeks. Delete this entry once the FAQ is corrected."
+    ),
+}
+
+
+def is_suppressed(faq: dict) -> bool:
+    """True if this FAQ is on the stale list and must not be indexed.
+
+    Checks the id field the API actually returns (`faqid` -- not `id`, which
+    it does not have) and falls back to the citable URL, because a FAQ whose
+    `url.public` is set does not have to carry an id anywhere else.
+    """
+    faq_id = str(faq.get("faqid") or "").strip()
+    if faq_id and faq_id in SUPPRESSED_FAQ_IDS:
+        return True
+    url = public_url(faq) or ""
+    return any(f"/faq/{i}" in url for i in SUPPRESSED_FAQ_IDS)
+
+
 def to_document(faq: dict) -> Optional[extract.ExtractedDoc]:
     """One FAQ -> one ExtractedDoc, or None if there is nothing to index."""
+    if is_suppressed(faq):
+        return None
+
     question = html_to_text(faq.get("question") or "")
     answer = html_to_text(faq.get("answer") or faq.get("details") or "")
     if not question or not answer:

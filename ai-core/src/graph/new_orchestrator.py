@@ -4715,7 +4715,19 @@ _LOAN_PERIOD_RE = re.compile(
     r"|\bhow\s+many\s+(days?|weeks?|times?|months?)?\b[^.?!]{0,30}"
     r"\b(keep|borrow|check\s*out|have)\b"
     r"|\bloan\s+(period|length|time)\b"
-    r"|\b(book|item|material)s?\s+due\s+(back|in)\b",
+    r"|\b(book|item|material)s?\s+due\s+(back|in)\b"
+    # 2026-08-12: three phrasings fell through to retrieval and came back
+    # with 3 WEEKS, from a LibAnswers FAQ the live circulation page
+    # contradicts (it says 6). Retrieval reaching a stale page is not a
+    # phrasing problem to be patched one wording at a time -- the stale
+    # chunk is dealt with separately -- but a question this common should
+    # not depend on retrieval at all when the figure is known.
+    #   "what's the checkout duration for undergrads"
+    #   "tell me the borrowing period for students"
+    r"|\b(check\s*out|checkout|borrowing|circulation|lending)\s+"
+    r"(period|duration|length|time)\b"
+    #   "as an undergraduate how long do I get a book for"
+    r"|\bhow\s+long\b[^.?!]{0,40}\b(book|item|material|dvd|video)s?\b",
     re.IGNORECASE,
 )
 # The figures above are for BOOKS. Everything in this list has its own,
@@ -4848,10 +4860,20 @@ _FAQ_CHECKOUT_LIMIT_URL = "https://libanswers.lib.miamioh.edu/faq/343505"
 def _renewal_count_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
     """HOW MANY TIMES an item renews -- not how long it is out for.
 
-    Figures from LibAnswers 281805. 999 is the system's stand-in for "no
-    practical limit", so it is said both ways: quoting only the number reads
-    as a real ceiling somebody might try to count towards, and quoting only
-    "unlimited" would not match what the FAQ says if a student checks.
+    FIGURES COME FROM THE LIVE CIRCULATION PAGES, NOT THE FAQ.
+
+    The first version of this took them from LibAnswers 281805 and was wrong
+    within the hour. That FAQ says OhioLINK and SearchOhio items "renew up to
+    5 times", lumping the two together; the live policy page gives them
+    DIFFERENT limits and the number 5 appears on it nowhere. The operator's
+    standing rule, given 2026-08-12, is that the live site wins any conflict
+    because the FAQs are hand-maintained and go stale -- and this is a clean
+    example of exactly that.
+
+    Miami's own items are the one figure the live page does not put a number
+    on: it says only "may be renewed unless another patron has placed a
+    request". So that is what this says, with the FAQ's 999 offered as the
+    practical reading rather than as the headline.
     """
     m = message or ""
     if not _RENEW_COUNT_RE.search(m):
@@ -4861,25 +4883,40 @@ def _renewal_count_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
     if _RENEW_ACTOR_RE.search(m):        # "can you renew it for me"
         return None
     return (
-        "It depends where the item came from. Miami University items renew up "
-        "to 999 times -- effectively no limit -- unless another patron has "
-        "requested them. OhioLINK and SearchOhio items renew up to 5 times "
-        "after the initial checkout, again unless someone else has requested "
-        "them. Interlibrary loan items may or may not be renewable at all: "
-        "that is the lending institution's decision, and they will rarely "
-        "agree once the item is overdue. [1] You renew by signing in to your "
-        "library account (MyAccount) [2].",
+        "It depends where the item came from, and the four are different:\n\n"
+        "- **Miami University items** renew freely unless another patron has "
+        "requested the item -- there is no practical limit [1].\n"
+        "- **OhioLINK** items are a six-week loan with up to 2 renewals; "
+        "OhioLINK media are one week with up to 3 [2].\n"
+        "- **SearchOhio** items are a three-week loan with up to 3 renewals "
+        "for students and staff, 6 for faculty; SearchOhio media cannot be "
+        "renewed at all [2].\n"
+        "- **Interlibrary loan** items are at the lending institution's "
+        "discretion, and renewals are rarely granted once an item is "
+        "overdue [2].\n\n"
+        "In every case a renewal is refused if someone else has requested "
+        "the item. You renew by signing in to your library account "
+        "(MyAccount) [3].",
         [
-            {"n": 1, "url": _FAQ_RENEW_COUNT_URL,
-             "snippet": "How many times can a library book be renewed?"},
-            {"n": 2, "url": _MYACCOUNT_URL,
+            {"n": 1, "url": _LOAN_FINES_URL,
+             "snippet": "Miami University Libraries -- loan periods & fines"},
+            {"n": 2, "url": _LOAN_OHIOLINK_ILL_URL,
+             "snippet": "OhioLINK, SearchOhio & ILL loan periods and renewals"},
+            {"n": 3, "url": _MYACCOUNT_URL,
              "snippet": "MyAccount -- OhioLINK library account"},
         ],
     )
 
 
 def _checkout_limit_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
-    """HOW MANY ITEMS at once. Figures from LibAnswers 343505."""
+    """HOW MANY ITEMS at once.
+
+    LibAnswers 343505 is the ONLY source for these -- checked 2026-08-12,
+    neither live circulation page carries a maximum. That is why the FAQ is
+    used here even though the standing rule prefers the live site: the rule
+    settles conflicts, and there is no conflict to settle. If a live page
+    ever grows these figures, it wins and these must be re-checked.
+    """
     m = message or ""
     if not _CHECKOUT_LIMIT_RE.search(m):
         return None
@@ -4900,9 +4937,27 @@ def _checkout_limit_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
     )
 
 
+# "How long" is two completely different questions and they must not share an
+# answer: how long I may KEEP it, versus how long until it ARRIVES. Widening
+# _LOAN_PERIOD_RE to catch "how long do I get a book for" also caught "how
+# long is the wait for an ILL book", which would have told a student their
+# loan period when they asked about delivery -- and delivery time is one of
+# the things Circulation reported as confused in the first place.
+_LOAN_ARRIVAL_RE = re.compile(
+    r"\bwait(ing)?\b|\barriv(e|al|es|ing)\b|\bdeliver(y|ed|ies)?\b"
+    r"|\btake[sn]?\s+to\s+(get|arrive|come|receive|ship)"
+    r"|\bhow\s+soon\b|\bturn[\s-]?around\b|\bship(ping|ped)?\b"
+    r"|\bto\s+(get|receive)\s+(here|it|them|my|an?\b)"
+    r"|\bwhen\s+will\b.{0,30}\b(arrive|come|be\s+(here|ready|in))\b",
+    re.IGNORECASE,
+)
+
+
 def _renewal_paths_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
     m = message or ""
     if not (_RENEW_HOWTO_RE.search(m) or _LOAN_PERIOD_RE.search(m)):
+        return None
+    if _LOAN_ARRIVAL_RE.search(m):
         return None
     if _RENEW_ACTOR_RE.search(m):
         return None
