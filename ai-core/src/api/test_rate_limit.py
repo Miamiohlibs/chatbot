@@ -107,14 +107,21 @@ def test_conversation_turn_ceiling() -> None:
 
 
 def test_client_ip_xff_and_fallback_and_safe() -> None:
+    """This test used to assert the FIRST hop of X-Forwarded-For, which is the
+    one value in the header a client writes itself. It was not testing a
+    safeguard, it was pinning a bypass: reading it let one forged header buy a
+    fresh rate-limit quota. Corrected 2026-08-12 after confirming against the
+    running service that a forged 203.0.113.99 came back out unchanged.
+    """
     class _R:
         def __init__(self, headers, host):
             self.headers = headers
             self.client = type("C", (), {"host": host})()
 
+    # nginx appends the true peer, so the LAST hop is its own observation
     assert client_ip_from_request(
         _R({"x-forwarded-for": "203.0.113.7, 10.0.0.1"}, "10.0.0.1")
-    ) == "203.0.113.7"
+    ) == "10.0.0.1"
     assert client_ip_from_request(_R({}, "198.51.100.4")) == "198.51.100.4"
     # Garbage object -> never raises, returns 'unknown'
     assert client_ip_from_request(object()) == "unknown"
@@ -301,13 +308,58 @@ def test_the_socketio_handshake_environ_yields_the_real_client() -> None:
     """Behind nginx every socket's REMOTE_ADDR is 127.0.0.1, so reading the
     proxy headers is what makes the address limit mean anything at all."""
     assert RL.client_ip_from_environ(
-        {"HTTP_X_FORWARDED_FOR": "134.53.4.9, 10.1.1.1",
-         "REMOTE_ADDR": "127.0.0.1"}) == "134.53.4.9"
-    assert RL.client_ip_from_environ(
         {"HTTP_X_REAL_IP": "134.53.4.9", "REMOTE_ADDR": "127.0.0.1"}) == "134.53.4.9"
     assert RL.client_ip_from_environ({"REMOTE_ADDR": "134.53.4.9"}) == "134.53.4.9"
     assert RL.client_ip_from_environ({}) == "unknown"
     assert RL.client_ip_from_environ(None) == "unknown"
+
+
+def test_a_forged_x_forwarded_for_cannot_buy_a_fresh_quota() -> None:
+    """The bug that made the address limit worthless for a day.
+
+    nginx builds X-Forwarded-For as `<whatever the client claimed>, <true
+    peer>`, so the FIRST hop is the client's own words. Reading it meant one
+    header per request bought a new bucket -- no reconnecting required.
+    Confirmed against the running service on 2026-08-12: a forged
+    203.0.113.99 came straight back out as the derived address.
+    """
+    forged = "203.0.113.99"
+    truth = "134.53.4.9"
+    # what nginx actually produces when a client sends its own header
+    env = {"HTTP_X_FORWARDED_FOR": f"{forged}, {truth}",
+           "REMOTE_ADDR": "127.0.0.1"}
+    got = RL.client_ip_from_environ(env)
+    assert got != forged, "a client's own X-Forwarded-For must never be trusted"
+    assert got == truth
+
+    # X-Real-IP wins, because proxy_set_header REPLACES a forged one. Verified
+    # through the real nginx path: a forged X-Real-IP came back as the peer.
+    assert RL.client_ip_from_environ({
+        "HTTP_X_REAL_IP": truth,
+        "HTTP_X_FORWARDED_FOR": f"{forged}, {truth}",
+    }) == truth
+
+    # a long forged chain does not help either
+    assert RL.client_ip_from_environ({
+        "HTTP_X_FORWARDED_FOR": "1.1.1.1, 2.2.2.2, 3.3.3.3, " + truth,
+    }) == truth
+
+
+def test_the_http_helper_has_the_same_rule() -> None:
+    """It has no callers, which is why it was worth fixing rather than leaving
+    as a trap for the next HTTP entry point."""
+    class _Req:
+        def __init__(self, headers, host=None):
+            self.headers = headers
+            self.client = type("C", (), {"host": host})() if host else None
+
+    assert RL.client_ip_from_request(
+        _Req({"x-forwarded-for": "203.0.113.99, 134.53.4.9"})) == "134.53.4.9"
+    assert RL.client_ip_from_request(
+        _Req({"x-real-ip": "134.53.4.9",
+              "x-forwarded-for": "203.0.113.99, 134.53.4.9"})) == "134.53.4.9"
+    assert RL.client_ip_from_request(_Req({}, host="134.53.4.9")) == "134.53.4.9"
+    assert RL.client_ip_from_request(_Req({})) == "unknown"
 
 
 def test_tightening_the_socket_limit_tightens_the_address_limit_too() -> None:

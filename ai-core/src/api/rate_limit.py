@@ -238,26 +238,48 @@ def connection_allowed(ip: str) -> bool:
 
 
 def client_ip_from_environ(environ: dict) -> str:
-    """Best-effort client IP for a Socket.IO connection.
+    """The client IP for a Socket.IO connection, from headers a client cannot
+    forge.
 
-    The socket handshake arrives as a WSGI-style environ, so the proxy
-    headers are HTTP_-prefixed and upper-cased rather than the neat mapping
-    an HTTP request object gives. nginx sets both X-Forwarded-For and
-    X-Real-IP on the /smartchatbot/socket.io/ location (checked 2026-08-12);
-    without them every client would look like 127.0.0.1 and share one bucket.
+    THE FIRST VERSION OF THIS WAS SPOOFABLE, which made the address rate
+    limit worthless -- one header per request bought a fresh quota, no
+    reconnecting needed. It trusted the FIRST hop of X-Forwarded-For, on the
+    strength of a comment elsewhere in the codebase saying the bot sits
+    behind the Miami reverse proxy. It does not: nginx's own access log shows
+    real client addresses as the peer (134.53.x.x, residential ISPs,
+    scanners), so there is nothing in front of it. Verified 2026-08-12 by
+    forging the header through the real nginx path and reading back the
+    address the app derived: 203.0.113.99, exactly as supplied.
 
-    Honours the FIRST hop of X-Forwarded-For, which is the client as seen by
-    our own proxy. Never raises.
+    What a client CANNOT forge, in order of preference:
+
+      1. X-Real-IP -- nginx sets it with proxy_set_header, which REPLACES any
+         value the client sent. Forging it was tested and the app saw the
+         true peer, not the forgery.
+      2. The LAST hop of X-Forwarded-For -- nginx builds that header as
+         `$proxy_add_x_forwarded_for`, i.e. whatever the client claimed with
+         the true peer APPENDED. So the last entry is nginx's own
+         observation and the first is the client's claim.
+      3. REMOTE_ADDR, for a request that never went through nginx at all.
+
+    IF A PROXY OR CDN IS EVER PUT IN FRONT OF NGINX this becomes wrong in the
+    other direction -- the address would be the proxy's, and every student
+    would share one bucket. The symptom would be legitimate users being
+    throttled together, and the fix is to skip the known proxy hops.
+
+    Never raises.
     """
     try:
         if not environ:
             return "unknown"
-        xff = (environ.get("HTTP_X_FORWARDED_FOR") or "").strip()
-        if xff:
-            return xff.split(",")[0].strip() or "unknown"
         real = (environ.get("HTTP_X_REAL_IP") or "").strip()
         if real:
             return real
+        xff = (environ.get("HTTP_X_FORWARDED_FOR") or "").strip()
+        if xff:
+            hops = [h.strip() for h in xff.split(",") if h.strip()]
+            if hops:
+                return hops[-1]
         return (environ.get("REMOTE_ADDR") or "").strip() or "unknown"
     except Exception:  # noqa: BLE001
         return "unknown"
@@ -269,13 +291,26 @@ def conversation_turn_exceeded(turn_count: int) -> bool:
 
 
 def client_ip_from_request(request) -> str:
-    """Best-effort client IP for HTTP. The bot sits behind the Miami
-    reverse proxy, so honor X-Forwarded-For's FIRST hop; fall back to
-    the socket peer. Never raises."""
+    """The client IP for an HTTP request, from headers a client cannot forge.
+
+    Same rule and the same reasoning as client_ip_from_environ -- see there.
+    This one had the identical spoofable bug (first hop of X-Forwarded-For,
+    justified by a claim about a Miami reverse proxy that the access log
+    disproves). It has no callers today, which is exactly why it was worth
+    fixing rather than leaving as a trap for whoever wires up the next HTTP
+    entry point.
+
+    Never raises.
+    """
     try:
-        xff = request.headers.get("x-forwarded-for")
+        real = (request.headers.get("x-real-ip") or "").strip()
+        if real:
+            return real
+        xff = (request.headers.get("x-forwarded-for") or "").strip()
         if xff:
-            return xff.split(",")[0].strip()
+            hops = [h.strip() for h in xff.split(",") if h.strip()]
+            if hops:
+                return hops[-1]
         return getattr(getattr(request, "client", None), "host", "") or "unknown"
     except Exception:  # noqa: BLE001
         return "unknown"
