@@ -185,7 +185,7 @@ const App = () => {
             Welcome to the Smart Chatbot
           </h2>
           <p className="text-base text-gray-600">
-            Get help with research, ask questions, or talk to a librarian
+            Get help with quick information, or talk to a librarian for research questions.
           </p>
           {!isOpen && (
             <p className="text-sm text-blue-500 mt-3 font-semibold">
