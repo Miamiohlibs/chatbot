@@ -1037,6 +1037,22 @@ def _mark_target_row(hours_text: str, target: "_dt.date") -> str:
 _TARGET_TAG = "  <-- THE DAY ASKED ABOUT"
 
 
+# Operator-provided and WebFetch-verified 2026-05-16: 200, title "Library
+# Hours | Miami University Libraries", canonical hours hub, no redirect.
+# (Earlier guesses /about/hours/ -> 404 and /about/locations/ -> 302 were
+# rejected; never ship an unverified deep link as a cited URL.)
+_HOURS_HUB_URL = "https://www.lib.miamioh.edu/about/locations/hours/"
+
+# Spaces INSIDE a building whose own hours differ from their building's.
+# Citing the hub for these sends a student to a page that contradicts the
+# answer they were just given. Both are already in the UrlSeen allowlist,
+# so the validator accepts them.
+_HOURS_SOURCE_URL = {
+    "makerspace": "https://www.lib.miamioh.edu/use/spaces/makerspace/",
+    "special": "https://spec.lib.miamioh.edu/home/",
+}
+
+
 def _make_get_hours() -> Callable[..., dict]:
     from src.tools.libcal_comprehensive_tools import LibCalWeekHoursTool
 
@@ -1110,15 +1126,15 @@ def _make_get_hours() -> Callable[..., dict]:
             "target_date": (
                 _target_date.isoformat() if _target_date is not None else None
             ),
-            # Operator-provided and WebFetch-verified 2026-05-16:
-            # 200, title "Library Hours | Miami University Libraries",
-            # canonical hours hub, no redirect. (Earlier guesses
-            # /about/hours/ -> 404 and /about/locations/ -> 302 were
-            # rejected; never ship an unverified deep link as a cited
-            # URL.) The hours VALUE's authority is still the LibCal
-            # live API (the [LIVE] trust tier); this URL is where a
-            # user verifies it themselves.
-            "source_url": "https://www.lib.miamioh.edu/about/locations/hours/",
+            # Where a patron verifies this for themselves. The hours VALUE's
+            # authority is the live LibCal API; this is the page to send
+            # them to -- and for a space that HAS its own page, the hours
+            # hub is the wrong one. It lists building hours, so a student
+            # sent there after asking about the MakerSpace finds King's
+            # 7:30am-9pm and not the MakerSpace's 9am-4pm by appointment.
+            # Gold requires the space's own page for exactly that reason.
+            "source_url": _HOURS_SOURCE_URL.get(
+                canon, _HOURS_HUB_URL),
         }
 
     return get_hours
