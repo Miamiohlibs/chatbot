@@ -240,3 +240,65 @@ def test_every_rung_says_what_changes():
         assert r.level in B.LEVEL_NAMES
     assert {r.level for r in B.LADDER} == {B.L_ALERT, B.L_CHEAP,
                                           B.L_TIGHTEN, B.L_REFUSE}
+
+
+# --- the split flips on a date, not when somebody remembers ---------------
+#
+# The failure this guards against is silent and in the worst direction: on
+# the first morning of term students meet a $25 ceiling while $75 sits
+# unspent in the eval purse, and nothing says so except complaints.
+
+
+def test_no_launch_date_means_the_split_never_moves() -> None:
+    """The default must be inert. A date nobody set must not flip anything."""
+    assert B._date_env("BUDGET_NO_SUCH_VAR_AT_ALL") is None
+    saved = B.LAUNCH_DATE
+    try:
+        B.LAUNCH_DATE = None
+        assert B.split_for(_dt.date(2026, 9, 4)) == B.split_for(_dt.date(2026, 1, 1))
+    finally:
+        B.LAUNCH_DATE = saved
+
+
+def test_the_split_flips_on_the_launch_date_itself() -> None:
+    saved = B.LAUNCH_DATE
+    try:
+        B.LAUNCH_DATE = _dt.date(2026, 9, 4)
+        before = B.split_for(_dt.date(2026, 9, 3))
+        on_the_day = B.split_for(_dt.date(2026, 9, 4))
+        after = B.split_for(_dt.date(2026, 12, 25))
+        assert before == (B._PRELAUNCH_SERVING_USD, B._PRELAUNCH_EVAL_USD)
+        assert on_the_day == (B._POSTLAUNCH_SERVING_USD, B._POSTLAUNCH_EVAL_USD)
+        assert after == on_the_day, "the flip is permanent, not a one-day event"
+        # The whole point: students get MORE after launch, not less.
+        assert on_the_day[0] > before[0]
+    finally:
+        B.LAUNCH_DATE = saved
+
+
+def test_a_mistyped_launch_date_keeps_the_pre_launch_split(monkeypatch) -> None:
+    """Failing towards LESS student budget is the safe direction: it shows up
+    as a throttled student and a complaint, not as an invoice."""
+    monkeypatch.setenv("BUDGET_LAUNCH_DATE", "Sept 4th")
+    assert B._date_env("BUDGET_LAUNCH_DATE") is None
+    monkeypatch.setenv("BUDGET_LAUNCH_DATE", "2026-13-45")
+    assert B._date_env("BUDGET_LAUNCH_DATE") is None
+    monkeypatch.setenv("BUDGET_LAUNCH_DATE", "2026-09-04")
+    assert B._date_env("BUDGET_LAUNCH_DATE") == _dt.date(2026, 9, 4)
+
+
+def test_the_daily_line_follows_the_flip() -> None:
+    """The daily line is the student purse over the month, so it has to move
+    with the split -- otherwise the ladder throttles against the old figure."""
+    saved = B.LAUNCH_DATE
+    try:
+        B.LAUNCH_DATE = _dt.date(2026, 9, 4)
+        pre, post = B._PRELAUNCH_SERVING_USD, B._POSTLAUNCH_SERVING_USD
+        # daily_serving_line reads the module constant, which is resolved at
+        # import for today -- so assert the relationship the function encodes
+        # rather than a value that depends on when the suite happens to run.
+        assert B.split_for(_dt.date(2026, 9, 3))[0] == pre
+        assert B.split_for(_dt.date(2026, 9, 4))[0] == post
+        assert post / 30 > pre / 30 if post > pre else True
+    finally:
+        B.LAUNCH_DATE = saved

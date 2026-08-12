@@ -1,12 +1,23 @@
 """The spend ceiling, and what the service does as it approaches it.
 
-Operator decision 2026-08-04: $100/month total, split
-  * $75 for students  (serving traffic)
-  * $25 for the eval  (development)
+Operator decision 2026-08-04: $100/month total, in two separate purses --
+one for students (serving traffic), one for the eval (development).
 
-Two separate purses, because they fail differently and need different
-controls. Student spend arrives continuously and is throttled; eval spend
-arrives in ~$6 lumps and is simply refused once the purse is empty.
+Two purses, because they fail differently and need different controls.
+Student spend arrives continuously and is throttled; eval spend arrives in
+~$6 lumps and is simply refused once the purse is empty.
+
+THE SPLIT IS DIFFERENT BEFORE AND AFTER LAUNCH
+----------------------------------------------
+Through development the money goes almost entirely to the eval; from the day
+students arrive it goes almost entirely to them. Set BUDGET_LAUNCH_DATE and
+the flip happens on that date by itself -- see split_for(). Leave it unset
+and the split never changes, which the module warns about at import.
+
+This is a date rather than a task on purpose. Done by hand it has to be
+remembered on one specific morning, and forgetting is silent in the worst
+direction: students meet the development-sized ceiling in the first week of
+term and are turned away, while the larger purse sits unspent.
 
 WHY A DAILY LINE AND NOT JUST A MONTHLY ONE
 -------------------------------------------
@@ -70,11 +81,50 @@ def _i_env(name: str, default: int) -> int:
         return default
 
 
-# --- the two purses ------------------------------------------------------
+def _date_env(name: str) -> "Optional[_dt.date]":
+    """An ISO date from the environment, or None.
 
-MONTHLY_SERVING_USD = _f_env("BUDGET_MONTHLY_SERVING_USD", 75.00)
-MONTHLY_EVAL_USD = _f_env("BUDGET_MONTHLY_EVAL_USD", 25.00)
-MONTHLY_TOTAL_USD = MONTHLY_SERVING_USD + MONTHLY_EVAL_USD
+    A typo returns None and logs, which keeps the PRE-launch split. That is
+    the safe direction: too little student budget shows up as students being
+    throttled and someone complaining, while too much shows up as an invoice.
+    """
+    raw = (os.getenv(name) or "").strip()
+    if not raw:
+        return None
+    try:
+        return _dt.date.fromisoformat(raw)
+    except ValueError:
+        log.error("%s=%r is not an ISO date (YYYY-MM-DD) -- keeping the "
+                  "pre-launch budget split", name, raw)
+        return None
+
+
+# --- the two purses ------------------------------------------------------
+#
+# The split is not the same before and after the beta opens, and the change
+# is a DATE, not a task. Through development almost all of the money goes to
+# the eval; from the day students arrive almost all of it goes to them. Doing
+# that by hand means someone has to remember on the right morning, and the
+# failure is silent in the worst direction: students hit a $25 ceiling in the
+# first week of term and are turned away while $75 sits unspent in the eval
+# purse.
+#
+# So the effective split is computed from today's date, below, once
+# library_today() exists. Set BUDGET_LAUNCH_DATE and it takes care of itself;
+# leave it unset and nothing ever changes.
+#
+# This works without restarting the service because every consumer of these
+# numbers is a SHORT-LIVED process -- budget_guard (every 15 minutes),
+# budget_report, eval_budget_gate, run_eval -- each of which re-imports this
+# module and re-reads the date. The long-running server never touches them:
+# it asks current_state(), which reads the state file that budget_guard
+# writes. Checked 2026-08-12; if that ever stops being true, these have to
+# become functions.
+
+_PRELAUNCH_SERVING_USD = _f_env("BUDGET_MONTHLY_SERVING_USD", 75.00)
+_PRELAUNCH_EVAL_USD = _f_env("BUDGET_MONTHLY_EVAL_USD", 25.00)
+_POSTLAUNCH_SERVING_USD = _f_env("BUDGET_POSTLAUNCH_SERVING_USD", 95.00)
+_POSTLAUNCH_EVAL_USD = _f_env("BUDGET_POSTLAUNCH_EVAL_USD", 5.00)
 
 # What one full 234-case eval run costs, measured 2026-08-04 ($5.74 at
 # gpt-5.6-terra rates). Used to refuse a run that would breach the purse
@@ -112,6 +162,33 @@ def library_today() -> "_dt.date":
     """
     import pytz
     return _dt.datetime.now(pytz.timezone(LIBRARY_TZ)).date()
+
+
+# --- the split, resolved for today ---------------------------------------
+
+LAUNCH_DATE = _date_env("BUDGET_LAUNCH_DATE")
+
+
+def split_for(when: "Optional[_dt.date]" = None) -> "tuple[float, float]":
+    """(student purse, eval purse) for a given day.
+
+    Kept as a function so the flip can be tested for dates either side of
+    launch without touching the clock; the module constants below are just
+    this, resolved for today at import.
+    """
+    d = when or library_today()
+    if LAUNCH_DATE is not None and d >= LAUNCH_DATE:
+        return _POSTLAUNCH_SERVING_USD, _POSTLAUNCH_EVAL_USD
+    return _PRELAUNCH_SERVING_USD, _PRELAUNCH_EVAL_USD
+
+
+MONTHLY_SERVING_USD, MONTHLY_EVAL_USD = split_for()
+MONTHLY_TOTAL_USD = MONTHLY_SERVING_USD + MONTHLY_EVAL_USD
+
+if LAUNCH_DATE is None:
+    log.warning("BUDGET_LAUNCH_DATE is not set -- the budget split will "
+                "never change on its own (students ${:.2f}, eval ${:.2f})"
+                .format(MONTHLY_SERVING_USD, MONTHLY_EVAL_USD))
 
 
 def days_in_month(when: "Optional[_dt.date]" = None) -> int:
