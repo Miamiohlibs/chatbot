@@ -80,6 +80,7 @@ from src.api.rate_limit import (
     check_rate,
     client_ip_from_environ,
     connection_allowed,
+    conversation_turn_exceeded,
     validate_message,
 )
 
@@ -641,6 +642,12 @@ def _get_v2_deps():
 _DEV_ORIGIN_HINTS = ("localhost", "127.0.0.1", "0.0.0.0", "[::1]")
 client_is_dev: dict = {}
 
+# Turns served in each live conversation, for the per-conversation ceiling.
+# Keyed by conversation rather than socket because the ceiling is a property
+# of the conversation; dropped on disconnect, since a reconnect starts a new
+# one anyway.
+_conversation_turns: dict = {}
+
 # Source address per live socket, captured at connect because the handshake
 # environ (where the proxy headers live) is not available later. The per-socket
 # rate limit alone is defeated by reconnecting, so the message handler needs
@@ -736,6 +743,7 @@ async def _v2_connect(sid, environ):
 
 async def _v2_disconnect(sid):
     logging.info(f"🔌 [v2] Client disconnected: {sid}")
+    _conversation_turns.pop(client_conversations.get(sid, ""), None)
     client_conversations.pop(sid, None)
     client_is_dev.pop(sid, None)
     client_ips.pop(sid, None)
@@ -828,6 +836,36 @@ async def _v2_message(sid, data):
     if not conversation_id:
         conversation_id = await create_conversation()
         client_conversations[sid] = conversation_id
+
+    # Hard ceiling on turns in ONE conversation. Checked here, before the
+    # model call, because the whole point is that it costs nothing.
+    #
+    # This was configured (CHAT_MAX_TURNS_PER_CONVERSATION=80), tightened by
+    # the budget ladder (to 20 at level 3), written into the state file, and
+    # unit-tested -- and never called. Measured 2026-08-12: 85 turns down one
+    # conversation, 85 answered, nothing stopped. The limit existed everywhere
+    # except in the path that serves a student.
+    #
+    # Counted in-process rather than by a COUNT(*) per message: the number
+    # only has to bound one live conversation, and a database round trip on
+    # every turn to enforce a ceiling nobody normally reaches is the wrong
+    # trade. Restarting resets it, which is acceptable for the same reason.
+    _turns = _conversation_turns.get(conversation_id, 0) + 1
+    _conversation_turns[conversation_id] = _turns
+    if conversation_turn_exceeded(_turns):
+        logging.warning("[v2] conversation %s hit the turn ceiling at %d",
+                        conversation_id, _turns)
+        await sio_v2.emit("message", json_serializable({
+            "message": (
+                "We've covered a lot in this conversation. Please start a new "
+                "chat to keep going -- or for something involved, Ask Us will "
+                "put you with a librarian: "
+                "https://www.lib.miamioh.edu/research/research-support/ask/"
+            ),
+            "conversationId": conversation_id,
+            "error": True,
+        }), to=sid)
+        return
     try:
         # Conversation logging + history are BEST-EFFORT: a DB blip must NOT
         # crash the turn. The bot can still classify and answer; we only lose
