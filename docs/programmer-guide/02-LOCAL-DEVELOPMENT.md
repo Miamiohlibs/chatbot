@@ -21,9 +21,16 @@ If you don't have the prod tunnel credentials AND don't want to run local Postgr
 ### 1. Clone the repo
 
 ```bash
-git clone https://github.com/Meng-V/chatbot.git
+git clone https://github.com/Miamiohlibs/chatbot.git
 cd chatbot
+bash scripts/setup_hooks.sh
 ```
+
+`setup_hooks.sh` is not optional and it is not automatic. Git will not run a
+hook that a repo installs by itself -- cloning must never execute the cloned
+code -- so every clone needs this one command. It points git at the tracked
+hooks in `scripts/hooks/`, which refuse a commit carrying patron data or a
+credential. Skip it and you are committing with no check at all.
 
 ### 2. Set up the SSH tunnels (if using prod data)
 

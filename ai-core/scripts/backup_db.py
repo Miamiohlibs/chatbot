@@ -35,11 +35,11 @@ NO PASSWORD ANYWHERE
     to leak into a log, a process list, or this file.
 
 WEAVIATE IS NOT COVERED
-    Deliberately, and it is not an oversight -- see the note at the bottom
-    of this docstring's companion, docs/OPS-BACKUP.md. Weaviate's backup
-    module is not enabled on this container, so snapshotting it needs either
-    a restart with ENABLE_MODULES=backup-filesystem or a brief stop, and a
-    restart of production is the operator's call, not this script's.
+    Deliberately, and it is not an oversight -- see docs/OPS-BACKUP.md.
+    Weaviate's backup module is not enabled on this container, so
+    snapshotting it needs either a restart with
+    ENABLE_MODULES=backup-filesystem or a brief stop, and a restart of
+    production is the operator's call, not this script's.
 
 USAGE
     python -m scripts.backup_db                 # take one, verify, prune

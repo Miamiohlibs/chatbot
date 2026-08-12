@@ -36,7 +36,7 @@ failure**, so the script just checks exit codes — no string-grepping:
 set -euo pipefail
 
 APP_DIR=/opt/chatbot
-REPO=https://github.com/Meng-V/chatbot.git
+REPO=https://github.com/Miamiohlibs/chatbot.git
 PORT=8081
 SERVICE=smartchatbot_backend.service        # <-- Puppet: confirm exact unit name
 TS=$(date +%Y%m%d%H%M%S)
