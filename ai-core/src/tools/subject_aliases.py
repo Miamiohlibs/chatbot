@@ -19,6 +19,20 @@ SUBJECT_ALIASES = {
     # -> the Business Librarian). An alias is query understanding, not
     # personnel data, so code is the right home for it
     # (see docs/07-DATA-SOURCES.md).
+    # Topics a student names instead of the subject. Added 2026-08-12 after
+    # "who do I contact about special collections" and "I need help with
+    # competitive intelligence research" answered correctly only 2/3 and 1/3
+    # of the time: nothing resolved them to a subject, so whether a liaison
+    # was named came down to whether the model called the lookup by itself.
+    # Canonical names verified against the Subject table.
+    "special collections": "Special Collections",
+    "special collection": "Special Collections",
+    "rare books": "Special Collections",
+    "university archives": "Special Collections",
+    "competitive intelligence": "Business",
+    "market research": "Marketing",
+    "market share": "Marketing",
+
     "zoology": "Biology",
     "botany": "Biology",
     "japanese": "Asian/Asian-American Studies",
