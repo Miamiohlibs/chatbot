@@ -1709,6 +1709,27 @@ _DISCLAIMER_EXEMPT_REASONS = frozenset({
     "staff_directory_short_circuit",
     "my_librarian_ask_subject_short_circuit",
     "injection_backstop",
+    # The Special Collections department's own logistics answers. Every one
+    # is a factual notice -- where the lockers are, what may come into the
+    # Reading Room, who may use it, what the three archives cover, the URL --
+    # and none is research help. But `special_collections` IS in
+    # _RESEARCH_DISCLAIMER_INTENTS, so all five inherited the banner:
+    # measured on the deployed bot 2026-08-13, "are there lockers in special
+    # collections" came back led by "If this is a research question you
+    # should consult a librarian". That is the same redundancy the operator
+    # removed from `find_resource` on 2026-07-30 after the first live student
+    # hit it.
+    #
+    # Note for whoever reads the comment above _RESEARCH_DISCLAIMER: it says
+    # every deterministic short-circuit returns BEFORE this point. That is
+    # true of the earlier groups, NOT of the 2.15 verified-pointer group,
+    # which reaches here and needs an explicit exemption.
+    "sc_lockers_short_circuit",
+    "sc_dropins_short_circuit",
+    "sc_learn_more_short_circuit",
+    "sc_reading_room_items_short_circuit",
+    "sc_who_may_use_short_circuit",
+    "sc_other_collections_short_circuit",
 })
 
 

@@ -267,6 +267,29 @@ HER_QUESTIONS = [
 ]
 
 
+def test_every_sc_short_circuit_is_exempt_from_the_research_banner():
+    """These are factual notices, not research help.
+
+    `special_collections` is in _RESEARCH_DISCLAIMER_INTENTS, so without an
+    explicit exemption every one of these answers gets "If this is a research
+    question you should consult a librarian" pasted in front of it. Measured
+    on the deployed bot 2026-08-13: "are there lockers in special collections"
+    did exactly that.
+
+    The exemption is matched by STRING, so a typo in either place silently
+    does nothing -- which is the failure mode that has bitten this repo
+    before (a rate limit configured, documented, unit-tested and never
+    called). Deriving both sides from the source is what makes that
+    impossible.
+    """
+    from src.graph.new_orchestrator import _DISCLAIMER_EXEMPT_REASONS
+
+    missing = [f"{name}_short_circuit" for name in _registered_order()
+               if f"{name}_short_circuit" not in _DISCLAIMER_EXEMPT_REASONS]
+    assert not missing, (
+        "these short-circuits will get the research banner: " + str(missing))
+
+
 def test_her_questions_route_to_the_right_answer():
     wrong = []
     for question, expected in HER_QUESTIONS:
