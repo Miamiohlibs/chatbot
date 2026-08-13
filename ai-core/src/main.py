@@ -445,6 +445,15 @@ def _build_readiness_probes():
 
 app.include_router(build_readiness_router({"probes": _build_readiness_probes()}))
 
+# /health/service -- "is the bot in service?", public and unguarded, so the
+# widget can SAY it is out of service instead of waiting for the patron to
+# type a question and get a maintenance reply. Mounted outside the admin
+# block on purpose: the pause state has to be visible whether or not
+# ADMIN_API_TOKEN is configured.
+from src.api.admin.killswitch_router import build_service_status_router  # noqa: E402
+
+app.include_router(build_service_status_router())
+
 
 def _smoketest_ask_v2_bot(question: str) -> dict:
     """Sync wrapper around the rebuilt orchestrator (run_turn) for

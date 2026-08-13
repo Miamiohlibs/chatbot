@@ -61,10 +61,14 @@ _FLAG_PATH = Path(
               str(Path(__file__).resolve().parents[3] / "data" / "SERVICE_PAUSED"))
 )
 
+ASK_US_URL = "https://www.lib.miamioh.edu/research/research-support/ask/"
+"""Where a patron goes when the bot cannot help. Named because the widget's
+out-of-service panel links to it too, and one wrong copy of a URL in two
+places is how a maintenance notice ends up pointing at a 404."""
+
 PAUSED_MESSAGE = (
     "The library chatbot is temporarily unavailable for maintenance. "
-    "For help right now, please use Ask Us to reach a librarian: "
-    "https://www.lib.miamioh.edu/research/research-support/ask/"
+    f"For help right now, please use Ask Us to reach a librarian: {ASK_US_URL}"
 )
 
 
@@ -138,6 +142,69 @@ def check_operator(email: str, password: str) -> Optional[str]:
     if not hmac.compare_digest((password or "").strip(), secret):
         return "Wrong passphrase."
     return None
+
+
+def paused_since() -> str:
+    """The `paused_at` stamp from the flag file, or "" if unreadable.
+
+    Only the timestamp. `paused_by` is an operator's email and this feeds a
+    PUBLIC endpoint -- who took the bot down is an internal accountability
+    record, not something to hand to every visitor.
+    """
+    for line in pause_reason().splitlines():
+        if line.startswith("paused_at:"):
+            return line.split(":", 1)[1].strip()
+    return ""
+
+
+def build_service_status_router():
+    """`GET /health/service` -- is the bot in service? Public, unauthenticated.
+
+    WHY THIS IS SEPARATE FROM THE ADMIN ROUTER
+        The admin router is mounted only when ADMIN_API_TOKEN is set. The
+        widget needs to know the bot is out of service whether or not the
+        admin surface happens to be configured, so this mounts on its own
+        and behind no guard.
+
+    WHY IT IS PUBLIC
+        Operator, 2026-08-13: "when the bot has been shut down, a user cannot
+        be expected to send a message to find out". Before this, the ONLY
+        signal was the maintenance reply -- so the launcher looked healthy,
+        the three buttons looked live, and a patron learned the bot was down
+        by typing a question and waiting for the answer. The widget now polls
+        this and says so up front.
+
+        Nothing here is sensitive: that the bot is in maintenance is exactly
+        what we want patrons to see. The operator email in the flag file is
+        deliberately not included -- see `paused_since`.
+
+    WHY IT LIVES UNDER /health
+        nginx already proxies `location /health` to the backend, so this
+        works on the live site without an nginx change. Adding a `location`
+        block means an nginx edit and reload on launch day; this does not.
+
+    COST
+        `is_paused()` is one stat call. Safe to poll.
+    """
+    from fastapi import APIRouter  # type: ignore
+
+    router = APIRouter(tags=["ops"])
+
+    @router.get("/health/service")
+    async def service_status() -> dict:
+        paused = is_paused()
+        return {
+            # `in_service` as well as `paused` so a client that misses the
+            # field entirely (old cached bundle, a proxy that mangles it)
+            # cannot silently read absence as "paused" and hide a working bot.
+            "in_service": not paused,
+            "paused": paused,
+            "since": paused_since() if paused else None,
+            "message": PAUSED_MESSAGE if paused else None,
+            "ask_us_url": ASK_US_URL,
+        }
+
+    return router
 
 
 def build_killswitch_router(deps: dict):
@@ -243,5 +310,6 @@ def build_killswitch_router(deps: dict):
     return router
 
 
-__all__ = ["PAUSED_MESSAGE", "build_killswitch_router", "is_paused",
-           "pause", "pause_reason", "resume"]
+__all__ = ["ASK_US_URL", "PAUSED_MESSAGE", "build_killswitch_router",
+           "build_service_status_router", "is_paused", "pause", "pause_reason",
+           "paused_since", "resume"]
