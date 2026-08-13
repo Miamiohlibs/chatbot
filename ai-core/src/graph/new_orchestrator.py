@@ -911,6 +911,11 @@ def _run_turn(
             ("always_open_hours", _always_open_answer),
             ("research_appointment", _research_appointment_answer),
             ("peer_reviewed", _peer_review_answer),
+            # BEFORE makerspace_equipment, and this whole group runs before
+            # the hours short-circuits -- which is the point. "Can I schedule
+            # a workshop for my class in the makerspace?" was answered with
+            # opening hours (Kevin Messner, 2/5).
+            ("makerspace_instruction", _makerspace_instruction_answer),
             ("makerspace_equipment", _makerspace_equipment_answer),
             ("course_reserves", _course_reserves_answer),
             ("digital_exhibits", _digital_exhibits_answer),
@@ -4108,6 +4113,69 @@ def _makerspace_equipment_answer(message: str) -> "Optional[tuple[str, list[dict
         "check there for the item you're looking for [1].",
         [{"n": 1, "url": _MAKERSPACE_EQUIPMENT_URL,
           "snippet": "LibCal — MakerSpace equipment"}],
+    )
+
+
+# "Can I schedule a workshop for my class in the makerspace?" -- Kevin
+# Messner rated this 2/5 on 2026-08-13: "Response kind of missed point of
+# question, but pointed to relevant page." The bot answered with the
+# MakerSpace's OPENING HOURS. A faculty member asking to bring a class was
+# told what time the door is unlocked.
+#
+# The MakerSpace guide answers this precisely, and it names a person. From
+# libguides.lib.miamioh.edu/create/makerspace (live index, 2026-08-13):
+#
+#     "For Faculty: Want to use maker equipment for existing assignments or
+#      incorporate making into your curriculum? Contact Sarah Nagle, the
+#      Creation and Innovation Services Librarian or call (513) 529-7205"
+#     "General Questions? Email: create@miamioh.edu  Phone: (513) 529-2871"
+#
+# Sarah Nagle is corroborated in our own Librarian table -- same title, same
+# phone -- so this is a named referral we can stand behind, which is the
+# opposite of the "computer -> Roger Justus" failure. Room 303 is from
+# libanswers 174593; the operator supplied the same details independently.
+_MS_INSTRUCTION_RE = re.compile(
+    r"\b(workshop|workshops|class\s+visit|class\s+session|instruction\s+"
+    r"session|bring\s+my\s+(class|students)|for\s+my\s+(class|course|"
+    r"students)|teach|teaching|curriculum|assignment|assignments|"
+    r"demo|demonstration|orientation|tour|train(ing)?\s+(my|a)\s+"
+    r"(class|group|students)|group\s+visit|field\s+trip)\b",
+    re.IGNORECASE,
+)
+_MS_NAGLE_PHONE = "(513) 529-7205"
+_MS_GENERAL_EMAIL = "create@miamioh.edu"
+_MS_GENERAL_PHONE = "(513) 529-2871"
+# _MAKERSPACE_GUIDE_URL is already defined above (line ~2575) -- reused, not
+# redeclared, so the two cannot drift.
+_MAKERSPACE_PAGE_URL = "https://www.lib.miamioh.edu/use/spaces/makerspace/"
+"""The Libraries' own MakerSpace page, which the hours answer already cites."""
+
+
+def _makerspace_instruction_answer(
+    message: str,
+) -> "Optional[tuple[str, list[dict]]]":
+    """Bringing a class, or building making into a course -> Sarah Nagle."""
+    m = message or ""
+    if not _MAKERSPACE_WORD_RE.search(m):
+        return None
+    if not _MS_INSTRUCTION_RE.search(m):
+        return None
+    return (
+        "Yes -- that's something the MakerSpace does, and there's a specific "
+        "person for it.\n\n"
+        "For using maker equipment in an assignment, bringing a class in, or "
+        "building making into your curriculum, contact **Sarah Nagle, "
+        f"Creation and Innovation Services Librarian** on {_MS_NAGLE_PHONE} "
+        "[1]. That's the right first call for a class workshop -- she can "
+        "work out the session with you.\n\n"
+        f"For anything more general, the MakerSpace is on {_MS_GENERAL_EMAIL} "
+        f"or {_MS_GENERAL_PHONE} [1].\n\n"
+        "It's on the **third floor of King Library, room 303** [2], open "
+        "Monday-Friday 9am-4pm by appointment.",
+        [{"n": 1, "url": _MAKERSPACE_GUIDE_URL,
+          "snippet": "Miami University Libraries — MakerSpace guide"},
+         {"n": 2, "url": _MAKERSPACE_PAGE_URL,
+          "snippet": "Miami University Libraries — MakerSpace"}],
     )
 
 

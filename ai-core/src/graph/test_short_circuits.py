@@ -3521,3 +3521,65 @@ def test_king_room_answers_are_unchanged_by_the_armstrong_branch():
     # A real King transaction still falls through to the booking flow.
     assert _room_reservation_answer(
         "book me a study room at King tomorrow from 2pm to 4pm") is None
+
+
+# --- MakerSpace class workshops (Kevin, 2/5: answered with hours) ------------
+
+
+def test_makerspace_class_workshop_names_the_right_person():
+    """Kevin Messner, 2026-08-13, 2/5: "Response kind of missed point of
+    question, but pointed to relevant page." A faculty member asking to bring
+    a class was told what time the door is unlocked.
+
+    The guide answers it and names a person -- and unlike the "computer ->
+    Roger Justus" failure, this referral is corroborated: Sarah Nagle is in
+    our own Librarian table with the SAME title and SAME phone as the guide
+    page (checked 2026-08-13).
+    """
+    from src.graph.new_orchestrator import _makerspace_instruction_answer
+
+    answer, cites = _makerspace_instruction_answer(
+        "Can I schedule a workshop for my class in the makerspace?")
+    low = answer.lower()
+    assert "sarah nagle" in low
+    assert "creation and innovation services librarian" in low
+    assert "(513) 529-7205" in answer
+    assert "create@miamioh.edu" in answer
+    assert "room 303" in low
+    # It must lead with the answer, not the hours.
+    assert answer.lstrip().lower().startswith("yes")
+    assert len(cites) == 2
+
+
+def test_makerspace_instruction_covers_the_faculty_phrasings():
+    from src.graph.new_orchestrator import _makerspace_instruction_answer
+
+    for q in ("can I bring my class to the makerspace",
+              "makerspace workshop for my students",
+              "can we get a makerspace demo for my course",
+              "I'd like a makerspace orientation for my class"):
+        assert _makerspace_instruction_answer(q) is not None, q
+
+
+def test_makerspace_instruction_leaves_the_other_makerspace_answers_alone():
+    """Hours, equipment and 3D printing each have their own better answer;
+    this must not swallow them."""
+    from src.graph.new_orchestrator import _makerspace_instruction_answer
+
+    for q in ("what are the makerspace hours",
+              "is the makerspace open saturday",
+              "does the makerspace have a laser cutter",
+              "how do I 3d print"):
+        assert _makerspace_instruction_answer(q) is None, q
+
+
+def test_a_general_instruction_request_is_not_claimed_by_the_makerspace():
+    """"Incorporate making into my curriculum" with no MakerSpace named is a
+    general instruction request -- Advise & Instruct's, not the MakerSpace's.
+    Requiring the MakerSpace word is deliberate."""
+    from src.graph.new_orchestrator import _makerspace_instruction_answer
+
+    assert _makerspace_instruction_answer(
+        "I want to incorporate making into my curriculum") is None
+    assert _makerspace_instruction_answer(
+        "can you do a library instruction session for my class") is None
