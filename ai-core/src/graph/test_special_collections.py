@@ -282,10 +282,10 @@ def test_every_sc_short_circuit_is_exempt_from_the_research_banner():
     called). Deriving both sides from the source is what makes that
     impossible.
     """
-    from src.graph.new_orchestrator import _DISCLAIMER_EXEMPT_REASONS
+    from src.graph.new_orchestrator import _is_disclaimer_exempt
 
     missing = [f"{name}_short_circuit" for name in _registered_order()
-               if f"{name}_short_circuit" not in _DISCLAIMER_EXEMPT_REASONS]
+               if not _is_disclaimer_exempt(f"{name}_short_circuit")]
     assert not missing, (
         "these short-circuits will get the research banner: " + str(missing))
 
@@ -322,3 +322,37 @@ def test_hours_rider_carries_the_semester_split_and_drops_appointment_only():
     # The wording the department contradicts must be gone.
     assert "access is by appointment" not in r
     assert "Drop-ins are welcome" in r
+
+
+def test_the_disclaimer_exemption_is_a_rule_not_a_list():
+    """The hand-list went stale on every addition, three times in one day.
+
+    Kevin Messner quoted the last of them back: "I need to renew a book I have
+    checked out from OhioLink" opened with "If this is a research question you
+    should consult a librarian" on a pure logistics answer, because
+    `renewal_paths_short_circuit` was not in the list.
+
+    The rule now matches the design intent already written above
+    _RESEARCH_DISCLAIMER -- a pattern-matched answer never inherits an intent
+    guess -- so a short-circuit added tomorrow is covered with nothing to
+    remember.
+    """
+    from src.graph.new_orchestrator import _is_disclaimer_exempt
+
+    # The one Kevin hit.
+    assert _is_disclaimer_exempt("renewal_paths_short_circuit")
+    # The ones added 2026-08-13.
+    for r in ("computer_help_short_circuit",
+              "makerspace_instruction_short_circuit",
+              "sc_lockers_short_circuit"):
+        assert _is_disclaimer_exempt(r), r
+    # Pre-existing, previously listed by hand.
+    assert _is_disclaimer_exempt("closed_library_short_circuit")
+    # Non-suffix reasons still work off the explicit set.
+    assert _is_disclaimer_exempt("injection_backstop")
+    # And a real synthesised answer still GETS the banner -- otherwise this
+    # change would have quietly disabled the feature the librarians asked for.
+    assert not _is_disclaimer_exempt(None)
+    assert not _is_disclaimer_exempt("")
+    assert not _is_disclaimer_exempt("max_turns")
+    assert not _is_disclaimer_exempt("model_self_flagged")

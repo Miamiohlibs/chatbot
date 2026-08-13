@@ -1707,40 +1707,53 @@ is a banner nobody reads -- which would cost us the research questions it
 exists for."""
 
 
+# EVERY DETERMINISTIC SHORT-CIRCUIT IS EXEMPT. See `_is_disclaimer_exempt`.
+#
+# This used to be a hand-maintained list of reason strings, and it went stale
+# every single time a short-circuit was added -- because nothing made it fail.
+# Found three times over, all on 2026-08-13:
+#
+#   * the Special Collections answers: "are there lockers in special
+#     collections" came back led by "If this is a research question you
+#     should consult a librarian", because `special_collections` is in
+#     _RESEARCH_DISCLAIMER_INTENTS and none of the new reasons were listed
+#   * the MakerSpace and computer-help answers added the same day: same gap
+#   * `renewal_paths_short_circuit`, which Kevin Messner quoted back in his
+#     rated list -- "I need to renew a book I have checked out from OhioLink"
+#     opened with the research banner on a pure logistics answer
+#
+# The comment above _RESEARCH_DISCLAIMER states the ACTUAL design intent:
+# "every deterministic short-circuit and every live-API answer returns BEFORE
+# reaching" this. That was the plan; it just was not true of the 2.15
+# verified-pointer group, and the hand-list existed only to patch the
+# difference one name at a time.
+#
+# So the rule now IS the intent: a `*_short_circuit` reason means the answer
+# was produced by a matched message pattern, not composed by the LLM from
+# evidence, and a pattern answer must never inherit a bad intent guess. New
+# short-circuits are covered the day they are written, with nothing to
+# remember.
 _DISCLAIMER_EXEMPT_REASONS = frozenset({
-    # Factual notices, not research help. These fire on their own
-    # message patterns and are right regardless of the classifier, so a
-    # misclassification must not drag the banner in: "Where is the music
-    # library?" scores as `databases` (live check 2026-07-27) but the
-    # answer is a closure notice.
-    "closed_library_short_circuit",
-    "staff_contact_short_circuit",
-    "greeting_short_circuit",
-    "staff_directory_short_circuit",
-    "my_librarian_ask_subject_short_circuit",
+    # Reasons that do NOT end in `_short_circuit` and still must be exempt.
+    # Kept explicit; the suffix rule below covers everything else.
     "injection_backstop",
-    # The Special Collections department's own logistics answers. Every one
-    # is a factual notice -- where the lockers are, what may come into the
-    # Reading Room, who may use it, what the three archives cover, the URL --
-    # and none is research help. But `special_collections` IS in
-    # _RESEARCH_DISCLAIMER_INTENTS, so all five inherited the banner:
-    # measured on the deployed bot 2026-08-13, "are there lockers in special
-    # collections" came back led by "If this is a research question you
-    # should consult a librarian". That is the same redundancy the operator
-    # removed from `find_resource` on 2026-07-30 after the first live student
-    # hit it.
-    #
-    # Note for whoever reads the comment above _RESEARCH_DISCLAIMER: it says
-    # every deterministic short-circuit returns BEFORE this point. That is
-    # true of the earlier groups, NOT of the 2.15 verified-pointer group,
-    # which reaches here and needs an explicit exemption.
-    "sc_lockers_short_circuit",
-    "sc_dropins_short_circuit",
-    "sc_learn_more_short_circuit",
-    "sc_reading_room_items_short_circuit",
-    "sc_who_may_use_short_circuit",
-    "sc_other_collections_short_circuit",
 })
+
+
+def _is_disclaimer_exempt(reason: "Optional[str]") -> bool:
+    """Should this answer skip the research banner?
+
+    Any `*_short_circuit` reason: the answer came from a matched message
+    pattern, so it is right regardless of what the classifier guessed, and a
+    wrong guess must not drag the banner in. "Where is the music library?"
+    scores as `databases` (live check 2026-07-27) and the answer is a closure
+    notice.
+
+    A suffix rule rather than a list, because the list silently went stale on
+    every addition -- see the comment on _DISCLAIMER_EXEMPT_REASONS.
+    """
+    r = reason or ""
+    return r in _DISCLAIMER_EXEMPT_REASONS or r.endswith("_short_circuit")
 
 
 # LOGISTICS IS NOT REFERENCE.
@@ -2048,7 +2061,7 @@ def _add_research_disclaimer(
         return response
     if response.is_refusal:
         return response
-    if response.agent_stopped_reason in _DISCLAIMER_EXEMPT_REASONS:
+    if _is_disclaimer_exempt(response.agent_stopped_reason):
         return response
     if _LOGISTICS_SHAPE_RE.search(user_message or ""):
         return response
