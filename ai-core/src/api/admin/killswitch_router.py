@@ -12,7 +12,9 @@ WHY A FLAG AND NOT `systemctl stop`
     on the server, which is the point of "one-click".
 
 THE FLAG IS A FILE, ON PURPOSE
-    `data/SERVICE_PAUSED` on disk, not a variable:
+    `ai-core/data/SERVICE_PAUSED` on disk, not a variable (note the
+    `ai-core/` -- it is NOT `/opt/chatbot/data/`, which is where an operator
+    standing in the repo root will look first):
       * it SURVIVES a restart -- if the bot is paused because it is
         misbehaving, a crash-restart must not quietly put it back in service
       * it can be set or cleared without this router, by touching or deleting
@@ -41,7 +43,7 @@ SECOND FACTOR ON THE SWITCH ITSELF
 
     Unconfigured means NOBODY can switch the service from the web page. That
     is safe rather than reckless only because the flag is a file: an
-    operator with a shell can still `touch data/SERVICE_PAUSED` during an
+    operator with a shell can still `touch ai-core/data/SERVICE_PAUSED` during an
     incident (see above). Keep that escape hatch working.
 """
 
@@ -126,11 +128,11 @@ def check_operator(email: str, password: str) -> Optional[str]:
     if not allowed:
         return ("SERVICE_PAUSE_OPERATORS is not set, so nobody is authorised "
                 "here. An operator with a shell can still touch the "
-                "data/SERVICE_PAUSED flag file.")
+                "ai-core/data/SERVICE_PAUSED flag file.")
     if not secret:
         return ("SERVICE_PAUSE_PASSWORD is not set, so nobody is authorised "
                 "here. An operator with a shell can still touch the "
-                "data/SERVICE_PAUSED flag file.")
+                "ai-core/data/SERVICE_PAUSED flag file.")
 
     who = (email or "").strip().lower()
     if not who:
