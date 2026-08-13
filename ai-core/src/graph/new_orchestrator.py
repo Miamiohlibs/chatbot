@@ -5407,6 +5407,33 @@ def _format_staff_contact(
                      "snippet": "Miami University Libraries — staff directory"}]
 
 
+def _subject_for_liaison_fallback(message: str) -> "Optional[str]":
+    """The subject to look a liaison up for, once the intent has already
+    decided the student is asking who to contact.
+
+    _subject_named_with_librarian requires the word "librarian" or "liaison",
+    because it also drives ROUTING and a loose match there would drag
+    unrelated questions into the wrong intent. By the time we are here that
+    decision is made and the requirement only gets in the way: "who do I
+    contact about special collections" contains neither word, so the
+    deterministic fallback never ran for it and whether a liaison was named
+    came down to whether the model called the lookup by itself -- 2/3 across
+    three runs, and 1/3 for "competitive intelligence research".
+
+    The WHOLE message goes to find_subject_by_alias, which is what that
+    function is built for: an alias inside the query, on word boundaries,
+    longest first. Passing one word at a time looks equivalent and is not --
+    "the" is a course-code alias for Theater, valid only as a whole query.
+    """
+    m = message or ""
+    narrow = _subject_named_with_librarian(m)
+    if narrow:
+        return narrow
+    from src.tools.subject_aliases import find_subject_by_alias
+
+    return find_subject_by_alias(m)
+
+
 def _liaison_lookup_when_agent_skipped(
     request: "TurnRequest", deps: "OrchestratorDeps", scope: "Scope",
     agent_outcome: "AgentOutcome",
@@ -5437,7 +5464,7 @@ def _liaison_lookup_when_agent_skipped(
             if res.name == "lookup_librarian":
                 return None          # the agent did it; nothing to add
 
-    subject = _subject_named_with_librarian(request.user_message)
+    subject = _subject_for_liaison_fallback(request.user_message)
     if not subject:
         return None
 

@@ -25,6 +25,25 @@ WHAT COUNTS AS A FAILURE
     separately: it is a quality problem rather than a wrong referral, and
     the two deserve different responses.
 
+THE PASS COUNT IS NOISY. THE WRONG-REFERRAL COUNT IS NOT.
+    Every question here goes through the agent, which decides for itself
+    whether to call the lookup, and that decision varies. Measured
+    2026-08-12: the SAME code, run twice in a row, scored 23/36 and 22/36,
+    and across a morning of changes the figure moved between 22 and 30
+    without a clean causal story. Several of those points were run-to-run
+    variance being read as cause and effect.
+
+    So do not tune against this number. A single run says almost nothing
+    about a few points either way; use it to catch a COLLAPSE, and use the
+    per-question marks to see which questions are unstable.
+
+    What has been stable across every run is the thing that matters: zero
+    wrong referrals, six runs out of six. That is the number to defend, and
+    it is a property of the guards, not of the model's mood.
+
+    For judging whether a change to the referral logic worked, prefer the
+    unit tests -- they call the functions directly and are deterministic.
+
 WHAT IT DELIBERATELY DOES NOT DO
     It does not check whether the liaison list itself is right. That is the
     library's data, not the bot's behaviour.

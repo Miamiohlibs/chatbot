@@ -37,7 +37,6 @@ def test_ordinary_english_resolves_to_no_subject(query):
     ("chem", "Chemistry and Biochemistry"),
     ("bio", "Biology"),
     ("psy", "Psychology"),
-    ("the", "Theater"),
     ("cs", "Computer Science and Software Engineering"),
     # and a long alias still matches inside a sentence
     ("i need help with biology", "Biology"),

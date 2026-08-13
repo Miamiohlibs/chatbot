@@ -272,7 +272,15 @@ SUBJECT_ALIASES = {
     "theater": "Theater",
     "theatre": "Theater",
     "drama": "Theater",
-    "the": "Theater",
+    # "the" was an alias for Theater -- the THE course code. It is also
+    # the commonest word in English, and find_subject_by_alias accepts a
+    # whole-query match "however short", so ANY question that was reduced
+    # to single words resolved to Theater: "who is the quidditch
+    # librarian" and "who is the librarian for underwater basket weaving"
+    # both came back with a real person's name (measured 2026-08-12).
+    # Removed on the operator's call: one course code is a smaller loss
+    # than a wrong referral, and Theater is still reachable by "theater",
+    # "theatre" and "drama".
     
     "architecture": "Architecture & Interior Design",
     "interior design": "Architecture & Interior Design",

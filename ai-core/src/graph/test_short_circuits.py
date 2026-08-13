@@ -2705,12 +2705,25 @@ def test_a_named_subject_is_recognised_in_a_refusable_ask():
 
 
 def test_the_definite_article_is_not_the_theater_department():
-    """The regression this guard exists for. "the" -> "Theater" in the alias
-    table, so any loose word loop hands a subject to every English sentence."""
+    """The alias is gone as of 2026-08-12, which is the cleanest possible
+    version of this guard: the word cannot resolve to a subject at all.
+
+    It used to map to Theater -- the THE course code -- and because a
+    whole-query match is accepted "however short", every path that reduced a
+    sentence to single words handed Theater to any English question. That
+    surfaced as real referrals: "who is the quidditch librarian" and "who is
+    the librarian for underwater basket weaving" both came back with a
+    person's name. The operator chose to drop one course code rather than
+    keep a wrong referral; Theater is still reachable by "theater",
+    "theatre" and "drama".
+
+    The sentence-level assertions below are kept. They are what actually
+    matters, and they must hold however "the" is handled."""
     from src.tools.subject_aliases import find_subject_by_alias
-    assert find_subject_by_alias("the") == "Theater", (
-        "if this ever stops being true the guard can relax -- until then it "
-        "is the reason the guard exists")
+    assert find_subject_by_alias("the") is None, (
+        "the definite article resolved to a subject again")
+    for still_reachable in ("theater", "theatre", "drama"):
+        assert find_subject_by_alias(still_reachable) == "Theater"
     assert _resolve_subject("what's the weather today?") is None
     assert _resolve_subject("who won the Bengals game") is None
     assert _resolve_subject("where is the parking garage") is None
