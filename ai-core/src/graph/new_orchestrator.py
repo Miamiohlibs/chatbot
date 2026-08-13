@@ -3255,6 +3255,25 @@ _ROOM_EXISTS_RE = re.compile(
 )
 
 
+# What the in-chat booking flow ACTUALLY requires, in one place so the three
+# pointers below cannot drift from it.
+#
+# John Burke (Library Director, Gardner-Harvey), 2026-08-13: "its responses to
+# my attempts were very unclear about exactly how I had to make that request.
+# I included all of the information it requested, but it still did not work."
+#
+# He did include all of it. The invitation asked for "the date, start and end
+# time, and your Miami email" -- four things. The tool requires SIX:
+# libcal_comprehensive_tools builds `missing_params` from firstName, lastName,
+# email, date, startTime, endTime. So the bot asked for four, he gave four,
+# and it then asked for first and last name, which it had never mentioned.
+# That is the roundabout, and it was guaranteed by the text.
+_BOOKING_FIELDS = (
+    "your first and last name, your @miamioh.edu email, the date, and the "
+    "start and end time"
+)
+
+
 def _room_reservation_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
     """Deterministic answer for HOW-TO / capability study-room booking
     questions ('how do I reserve a study room at Rentschler?', 'can I
@@ -3300,10 +3319,9 @@ def _room_reservation_answer(message: str) -> "Optional[tuple[str, list[dict]]]"
             "Study rooms at Rentschler Library (Hamilton campus) are "
             "reserved through LibCal: pick a room, date, and time on the "
             "Hamilton room reservation page [1]. The Rentschler "
-            "study-rooms page has details about the rooms themselves [2]. "
-            "Or I can book one for you here in chat -- just tell me to "
-            "book it, with the date, start and end time, and your Miami "
-            "email.",
+            "study-rooms page has details about the rooms themselves [2].\n\n"
+            "For a Hamilton room, booking on that page is the way to do it "
+            "-- I can only complete a booking in chat for King Library.",
             cite([
                 (_ROOMS_HAMILTON_RESERVE_URL,
                  "LibCal — Rentschler Library room reservations"),
@@ -3313,11 +3331,40 @@ def _room_reservation_answer(message: str) -> "Optional[tuple[str, list[dict]]]"
         )
     if _ROOM_MIDDLETOWN_RE.search(m):
         return (
+            # WHY THIS NO LONGER OFFERS TO BOOK IN CHAT.
+            #
+            # It was offering something it cannot do, and John Burke spent
+            # "a long roundabout" finding that out twice. Two independent
+            # reasons, either one fatal:
+            #
+            #  1. UNREACHABLE. The regional branches above run BEFORE the
+            #     transactional check that lets King bookings through
+            #     (_ROOM_TXN_STRONG_RE, below). So any message naming a
+            #     regional campus AND a room noun lands here -- including a
+            #     complete "Book me study room 120 at Gardner-Harvey today
+            #     from 1pm to 2pm, my email is ...". There is no single
+            #     message that can satisfy the invitation. Measured on the
+            #     deployed bot 2026-08-13.
+            #
+            #  2. THE ESCAPE ROUTE BOOKS THE WRONG CAMPUS. The documented
+            #     way out is a follow-up with no room noun ("book it, 1pm to
+            #     2pm, <email>"), which does reach the flow -- but the campus
+            #     is read from the CURRENT message only, so Gardner-Harvey is
+            #     gone by then. Measured the same day: turn 3 replied "If not
+            #     specified, I'll default to King Library". Booking a
+            #     Middletown patron into an Oxford room is worse than not
+            #     booking.
+            #
+            # Pointing at LibCal is also the navigator behaviour the operator
+            # asked for. Making regional in-chat booking real needs the
+            # transactional fall-through AND campus that survives a turn;
+            # that is post-launch work, not a launch-day text edit.
             "Study rooms at Gardner-Harvey Library (Middletown campus) "
             "are reserved through LibCal: pick a room, date, and time on "
-            "the Middletown room reservation page [1]. Or I can book one "
-            "for you here in chat -- just tell me to book it, with the "
-            "date, start and end time, and your Miami email.",
+            "the Middletown room reservation page [1].\n\n"
+            "For a Gardner-Harvey room, booking on that page is the way to "
+            "do it -- I can only complete a booking in chat for King "
+            "Library.",
             cite([
                 (_ROOMS_MIDDLETOWN_RESERVE_URL,
                  "LibCal — Gardner-Harvey Library room reservations"),
@@ -3334,9 +3381,9 @@ def _room_reservation_answer(message: str) -> "Optional[tuple[str, list[dict]]]"
     return (
         "Yes — you can reserve a study room at King Library through the "
         "LibCal room reservation system: pick a room, date, and time on "
-        "the reservation page [1]. Or I can book one for you right here "
-        "in chat — just tell me the date, start and end time, and your "
-        "Miami email.",
+        "the reservation page [1].\n\n"
+        "Or I can book one for you right here in chat. Give me "
+        f"{_BOOKING_FIELDS} — all in one message is easiest.",
         cite([
             (_ROOMS_KING_RESERVE_URL,
              "LibCal — Miami University Libraries room reservations"),

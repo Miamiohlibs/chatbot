@@ -3316,3 +3316,97 @@ def test_the_room_question_still_gets_the_honest_no():
         hit = nursing_room_answer(q)
         assert hit is not None, f"lost the room answer: {q}"
         assert "does **not** have" in hit[0]
+
+
+# --- John Burke's booking report (2026-08-13) -------------------------------
+
+
+def test_the_booking_invitation_lists_every_field_the_tool_requires():
+    """The roundabout was guaranteed by the text.
+
+    John Burke, Library Director at Gardner-Harvey: "I included all of the
+    information it requested, but it still did not work." He did. The
+    invitation asked for date, start/end time and email -- four things. The
+    tool requires six: firstName, lastName, email, date, startTime, endTime.
+    It then asked for the two it had never mentioned.
+
+    The required set is read out of libcal_comprehensive_tools rather than
+    copied here, so adding a seventh required field fails this test instead
+    of quietly recreating the same bug.
+    """
+    import re as _re
+    from pathlib import Path
+
+    from src.graph.new_orchestrator import _room_reservation_answer
+
+    tool_src = (Path(__file__).resolve().parents[1] / "tools"
+                / "libcal_comprehensive_tools.py").read_text(encoding="utf-8")
+    required = set(_re.findall(r'missing_params\.append\("(\w+)"\)', tool_src))
+    assert required, "could not read the tool's required fields"
+
+    invitation = _room_reservation_answer("can I book a study room at King?")[0]
+    low = invitation.lower()
+    spoken = {
+        "firstName": "first",
+        "lastName": "last",
+        "email": "email",
+        "date": "date",
+        "startTime": "start",
+        "endTime": "end",
+    }
+    missing = [f for f in required if spoken.get(f, f).lower() not in low]
+    assert not missing, (
+        f"the invitation does not mention {missing}, so the user cannot "
+        f"satisfy it in one go -- which is exactly what was reported")
+
+
+def test_regional_pointers_do_not_promise_in_chat_booking():
+    """Two reasons it was a promise we could not keep, either one fatal.
+
+    1. The regional branches run BEFORE the transactional check that lets
+       King bookings through, so a complete regional booking request can
+       never reach the flow -- no single message satisfies the invitation.
+    2. The documented escape (a follow-up with no room noun) does reach the
+       flow, but campus is read from the current message only, so it defaults
+       to King. Booking a Middletown patron into an Oxford room is worse than
+       not booking.
+    """
+    from src.graph.new_orchestrator import _room_reservation_answer
+
+    for q, page in (("how do I reserve a study room at Gardner-Harvey?",
+                     "middletown"),
+                    ("how do I reserve a study room at Rentschler?",
+                     "hamilton")):
+        answer, cites = _room_reservation_answer(q)
+        low = answer.lower()
+        assert "i can book one for you here in chat" not in low, q
+        assert "book it" not in low, q
+        # It must still say where booking DOES happen.
+        assert cites and any(page in c["url"].lower() for c in cites), q
+        assert "only complete a booking in chat for king" in low, q
+
+
+def test_a_complete_regional_booking_request_still_gets_the_pointer():
+    """His exact message. It is intercepted here -- that is the current,
+    deliberate design (regional booking via the agent was flaky) -- so the
+    answer it lands on must at least be honest about what happens next."""
+    from src.graph.new_orchestrator import _room_reservation_answer
+
+    res = _room_reservation_answer(
+        "Book me study room 120 at Gardner-Harvey today from 1pm to 2pm. "
+        "My email is burkejj@miamioh.edu")
+    assert res is not None, (
+        "if this ever falls through, campus must survive the turn first -- "
+        "see the comment in the Middletown branch")
+    low = res[0].lower()
+    assert "gardner-harvey" in low
+    assert "only complete a booking in chat for king" in low
+
+
+def test_king_bookings_still_reach_the_flow():
+    """The King path is unchanged: a real transaction falls through to the
+    agent's book_room flow rather than getting the how-to pointer."""
+    from src.graph.new_orchestrator import _room_reservation_answer
+
+    assert _room_reservation_answer(
+        "book me a study room at King tomorrow from 2pm to 4pm") is None
