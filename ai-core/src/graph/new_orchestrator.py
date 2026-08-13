@@ -938,6 +938,11 @@ def _run_turn(
             ("reading_rooms", _ff.reading_room_answer),
             ("restrooms", _ff.restroom_answer),
             ("nursing_room", _ff.nursing_room_answer),
+            # "Who can help with my computer?" -- Kevin Messner's 1/5. It was
+            # answered with a subject librarian's name and email because the
+            # LibGuides API fuzzy-matched "computer" to Computer Science.
+            # Answered here so no librarian lookup happens at all.
+            ("computer_help", _ff.computer_help_answer),
             # The department's own Q&A (see graph/special_collections.py).
             # ALL of these go before sc_campus and sc_handling, which are
             # broad enough to swallow them: measured 2026-08-13 against the
@@ -3922,14 +3927,60 @@ def _asks_for_my_librarian(message: str) -> bool:
     )
 
 
+# "PERSONAL librarian" is a DIFFERENT PROGRAM, and we were denying it exists.
+#
+# Kevin Messner (Head of Advise & Instruct), 2026-08-13, rated the old answer
+# 2/5: "The personal librarian program is not equivalent to the subject
+# librarian assignments -- though they are the same in 80-90% of cases. The
+# reference to 'your account' is also likely confusing and unhelpful. The
+# concern here is that a first-year student asking this *real* question is
+# likely one of the exceptions; hence their question."
+#
+# The old text opened "Miami's subject librarians are assigned by subject area
+# rather than to individual students, so there isn't one specific librarian
+# tied to your account". For someone asking about the Personal Librarian
+# programme that is a confident denial of a real service -- worse than a
+# refusal, because it sounds researched.
+#
+# We hold NOTHING about the programme: "personal librarian" appears in ZERO
+# chunks of the live index (checked 2026-08-13), while students plainly do ask
+# -- a real 2025 transcript in the exemplars reads "Do we still have personal
+# librarians, like when I was a freshman?". So the honest move is to say we
+# cannot look that roster up, and send them to someone who can. The 80-90%
+# overlap is reflected as "often the same person, though not always", which is
+# faithful without quoting a figure no page carries.
+_PERSONAL_LIBRARIAN_RE = re.compile(
+    r"\bpersonal\s+" + _LIBRARIAN_WORD + r"\b", re.IGNORECASE,
+)
+
+
 def _my_librarian_ask_subject(message: str) -> "Optional[tuple[str, list[dict]]]":
     m = message or ""
     if not _asks_for_my_librarian(m) or _SUBJECT_NAMED_RE.search(m):
         return None
+    if _PERSONAL_LIBRARIAN_RE.search(m):
+        return (
+            "The **Personal Librarian** programme is a different thing from "
+            "the subject librarian assignments, and I can't look up who "
+            "yours is -- that isn't information I hold.\n\n"
+            "Ask Us can tell you [1]; a librarian there can check which "
+            "Personal Librarian you were assigned.\n\n"
+            "In the meantime I can get you to a librarian who can help now. "
+            "Tell me your subject, major, or course (for example \"Biology\" "
+            "or \"PSY 201\") and I'll name the subject librarian for it [2]. "
+            "That is often the same person as your Personal Librarian, though "
+            "not always -- so treat it as a good starting point rather than "
+            "the answer to your question.",
+            [{"n": 1, "url": _ASKUS_URL,
+              "snippet": "Miami University Libraries — Ask Us"},
+             {"n": 2, "url": _LIAISONS_URL,
+              "snippet": "Miami University Libraries — subject librarians"}],
+        )
     return (
+        # "tied to your account" removed -- Kevin: confusing and unhelpful.
+        # Nothing about a subject liaison has anything to do with an account.
         "Miami's subject librarians are assigned by subject area rather "
-        "than to individual students, so there isn't one specific "
-        "librarian tied to your account. Tell me your subject, major, or "
+        "than to individual students. Tell me your subject, major, or "
         "course (for example \"Biology\" or \"PSY 201\") and I'll look up "
         "the right librarian for you. You can also browse the full list "
         "on the subject librarians page [1].",

@@ -234,3 +234,61 @@ def test_print_yields_on_per_library_and_policy_questions(q):
         fails by construction.
     """
     assert F.printing_scanning_wifi_answer(q) is None, q
+
+
+# --- Kevin Messner's 1/5: "Who can help with my computer?" -----------------
+
+
+def test_computer_help_does_not_reach_a_subject_librarian():
+    """His worst-rated answer, 2026-08-13.
+
+    The bot replied "Your subject librarian is Roger Justus at Oxford
+    (justusra@miamioh.edu ...)". Traced the same day: our own alias table
+    returns None for a bare "computer" -- the agent called lookup_librarian
+    with it anyway and the LIVE LibGuides API fuzzy-matched it to "Computer
+    Science and Software Engineering". The roster was right; the question was
+    never understood.
+
+    This answers before the agent, so no lookup happens.
+    """
+    from src.graph.facility_facts import computer_help_answer
+
+    res = computer_help_answer("Who can help with my computer?")
+    assert res is not None
+    body, cites = res
+    low = body.lower()
+    # No person, no personal email.
+    assert "@miamioh.edu" not in body
+    assert "justus" not in low
+    assert "subject librarian" in low, "it should say WHY no librarian is named"
+    # Both real routes, and nothing invented.
+    assert "information desk" in low
+    assert "miami university it" in low
+    assert cites and cites[0]["url"].endswith("/computer-labs/")
+
+
+def test_computer_help_covers_the_device_and_login_shapes():
+    from src.graph.facility_facts import computer_help_answer
+
+    for q in ("who can help with my laptop",
+              "my password isn't working",
+              "I can't log in",
+              "my computer is broken",
+              "who can help me with my miami account"):
+        assert computer_help_answer(q) is not None, q
+
+
+def test_computer_help_never_steals_a_real_subject_question():
+    """The whole risk of this fix is over-firing. Computer Science IS a
+    subject with a real liaison, and these must reach him."""
+    from src.graph.facility_facts import computer_help_answer
+
+    for q in ("who is the computer science librarian",
+              "who is the liaison for software engineering",
+              "I need databases for CSE 174",
+              "who is the electrical and computer engineering librarian",
+              # things with their own better answers
+              "how do I print from my laptop",
+              "how do I connect my laptop to the wifi",
+              "can I check out a laptop"):
+        assert computer_help_answer(q) is None, q

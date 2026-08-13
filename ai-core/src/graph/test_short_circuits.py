@@ -1142,7 +1142,14 @@ def test_my_librarian_asks_which_subject() -> None:
         # Asks for the subject rather than naming anyone.
         assert "subject" in answer.lower(), q
         assert "?" in answer or "Tell me" in answer, q
-        assert res[1][0]["url"].endswith("/liaisons/"), q
+        # The liaisons directory must be offered -- but not necessarily FIRST.
+        # Relaxed from res[1][0] on 2026-08-13: "personal librarian" now has
+        # its own branch (Kevin Messner, 2/5 -- the Personal Librarian
+        # programme is not the liaison assignment), and for that question the
+        # primary destination is Ask Us, who can look the assignment up.
+        # Liaisons is the secondary, "here is something useful meanwhile"
+        # link, so leading with it would be the wrong emphasis.
+        assert any(c["url"].endswith("/liaisons/") for c in res[1]), q
 
 
 def test_my_librarian_does_not_fire_when_subject_named() -> None:
@@ -3410,3 +3417,60 @@ def test_king_bookings_still_reach_the_flow():
 
     assert _room_reservation_answer(
         "book me a study room at King tomorrow from 2pm to 4pm") is None
+
+
+# --- "personal librarian" is a different programme (Kevin, 2/5) -------------
+
+
+def test_personal_librarian_is_not_denied():
+    """Kevin Messner, 2026-08-13, rated the old answer 2/5.
+
+    It opened "Miami's subject librarians are assigned by subject area rather
+    than to individual students, so there isn't one specific librarian tied to
+    your account" -- a confident denial of a real programme. His note: the
+    Personal Librarian programme is NOT the subject-liaison assignment, they
+    match in only 80-90% of cases, and "a first-year student asking this
+    *real* question is likely one of the exceptions; hence their question."
+
+    We hold nothing about it -- "personal librarian" is in ZERO chunks of the
+    live index (checked 2026-08-13) -- so the answer must not pretend either
+    way.
+    """
+    from src.graph.new_orchestrator import _my_librarian_ask_subject
+
+    body, cites = _my_librarian_ask_subject(
+        "How do I know who my personal librarian is?")
+    low = body.lower()
+    # Must not deny the programme.
+    assert "there isn't one specific librarian" not in low
+    assert "rather than to individual students" not in low
+    # Must name it as distinct, and route to someone who can look it up.
+    assert "personal librarian" in low
+    assert "different" in low
+    assert any("research-support/ask" in c["url"] for c in cites), (
+        "must route to Ask Us, who can actually check the assignment")
+    # The overlap, without quoting a figure no page carries.
+    assert "often the same person" in low and "not always" in low
+
+
+def test_the_subject_librarian_ask_drops_the_account_wording():
+    """Same report: "The reference to 'your account' is also likely confusing
+    and unhelpful." A subject liaison has nothing to do with an account."""
+    from src.graph.new_orchestrator import _my_librarian_ask_subject
+
+    body, _ = _my_librarian_ask_subject("who is my subject librarian")
+    assert "your account" not in body.lower()
+    # Still asks which subject -- Kevin credited that part.
+    assert "subject, major, or course" in body
+
+
+def test_a_plain_my_librarian_ask_is_unchanged():
+    """Only the PERSONAL wording branches. Everything else keeps the
+    ask-which-subject reply Kevin said worked."""
+    from src.graph.new_orchestrator import _my_librarian_ask_subject
+
+    for q in ("who is my librarian", "do I have a librarian",
+              "who's my subject librarian"):
+        body, _ = _my_librarian_ask_subject(q)
+        assert "Personal Librarian" not in body, q
+        assert "subject, major, or course" in body, q

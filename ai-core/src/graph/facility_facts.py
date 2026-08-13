@@ -151,8 +151,108 @@ _NOT_PRINTING_RE = re.compile(
 )
 
 
+COMPUTER_LABS_URL = "https://www.lib.miamioh.edu/use/spaces/computer-labs/"
+"""In the live index 2026-08-13: "Open-use Computers ... on every floor of King
+Library as well as at the Art & Architecture Library. To use these computers,
+login with your Miami ID and password." """
+
+# --- "who can help with my computer?" -------------------------------------
+#
+# Kevin Messner (Head of Advise & Instruct) rated this 1/5 on 2026-08-13 --
+# his worst score. The bot answered:
+#
+#     "Your subject librarian is Roger Justus at Oxford (justusra@..., ...)"
+#
+# His comment: "Their subject librarian is probably not Roger, and that's not
+# the question being asked at all. this is just one of probably dozens of
+# examples of the limitation of matching a word to a subject librarian."
+#
+# HOW IT HAPPENED, traced 2026-08-13: our own curated alias table does NOT
+# contain a bare "computer" -- find_subject_by_alias("who can help with my
+# computer?") returns None. The agent chose to call lookup_librarian with
+# "computer" anyway, and that goes to the LIVE LibGuides API, which
+# fuzzy-matched it to "Computer Science and Software Engineering". Roger
+# Justus covers that subject, so the roster was right and the QUESTION was
+# never understood.
+#
+# The fix here is the positive one: this question has a real answer, and it is
+# not a librarian. It is asked before the agent so no lookup happens at all.
+#
+# WHAT THIS DOES NOT FIX, stated plainly because Kevin's point is wider than
+# "computer": he also named education, business, paper, english, environment,
+# management -- everyday words that ARE real subjects. Those cannot be
+# stop-listed without breaking legitimate lookups, and the discriminator is
+# context, not vocabulary. The possessive-plus-device shape ("my computer",
+# "my laptop", "my password") IS reliable, and that is exactly the slice this
+# matcher takes. "I need help with my business" remains genuinely ambiguous
+# and is left to the agent.
+_IT_HELP_RE = re.compile(
+    # A device or account of THEIRS, or a login problem. The possessive is
+    # load-bearing: "my computer" is a device, "computer science" is a subject.
+    # An optional qualifier between the possessive and the noun: "my MIAMI
+    # account", "my UNIVERSITY email" -- students say it that way, and
+    # requiring the noun to follow "my" directly missed them.
+    r"\b(my|the)\s+(?:miami\s+|university\s+|school\s+|muohio\s+)?"
+    r"(computer|laptop|pc|mac|macbook|chromebook|tablet|ipad|"
+    r"phone|device|account|password|login|log[- ]?in|username|net\s*id|"
+    r"miami\s*id|email|screen|keyboard|charger)\b"
+    r"|\b(can'?t|cannot|unable\s+to|trouble|problem|issue|help)\b[^.?!]{0,30}"
+    r"\b(log\s*in|login|sign\s*in|connect|password|reset)\b"
+    r"|\b(computer|laptop)\b[^.?!]{0,20}\b(broken|not\s+working|won'?t\s+"
+    r"(start|turn|boot)|frozen|crashed)\b",
+    re.IGNORECASE,
+)
+
+# Never steal a genuine subject/research question, a course, or the things
+# that already have their own better answers.
+_NOT_IT_HELP_RE = re.compile(
+    r"\b(computer\s+science|software\s+engineering|cse|comp\s*sci|"
+    r"electrical\s+and\s+computer|computer\s+engineering|"
+    # a subject/liaison ask, however phrased
+    r"librarian|liaison|subject\s+specialist|"
+    # things with their own short-circuits
+    r"database|databases|journal|journals|article|articles|citation|"
+    r"print|printing|printer|scan|scanning|wifi|wi-?fi|"
+    r"checkout|check\s+out|borrow|loan|reserve|reserves|"
+    r"3d|makerspace|maker\s*space|"
+    # a course code
+    r"[a-z]{3}\s*\d{3})\b",
+    re.IGNORECASE,
+)
+
+
 def _cite(n: int, url: str, snippet: str) -> dict:
     return {"n": n, "url": url, "snippet": snippet}
+
+
+def computer_help_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
+    """A broken device or a login problem is IT's, not a subject librarian's.
+
+    Deliberately does NOT invent an IT phone number or portal URL -- nothing
+    in the corpus carries one, and the whole point of this fix is to stop
+    handing out confidently wrong contact details. It names the two routes we
+    can actually stand behind: the library desk for a library machine, and
+    Miami's IT support for a personal device or a Miami account.
+    """
+    m = message or ""
+    if not _IT_HELP_RE.search(m) or _NOT_IT_HELP_RE.search(m):
+        return None
+    return (
+        "That one isn't a library question, and there's no subject librarian "
+        "assigned to it -- so let me point you at the right desk instead.\n\n"
+        f"- **A computer in the library** that won't log in or isn't working: "
+        f"ask at the information desk, or call {KING_PHONE}. The open-use "
+        f"machines are on every floor of King and at Art & Architecture, and "
+        f"they take your Miami ID and password [1].\n"
+        "- **Your own laptop, phone, or your Miami account or password**: "
+        "that's Miami University IT support, not the Libraries. They handle "
+        "logins, password resets, and personal devices.\n\n"
+        "If it turns out to be a library thing after all -- getting into a "
+        "database, or a resource that won't load off campus -- tell me and I "
+        "can help with that.",
+        [_cite(1, COMPUTER_LABS_URL,
+               "Miami University Libraries — Open-use computers")],
+    )
 
 
 def quiet_study_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
