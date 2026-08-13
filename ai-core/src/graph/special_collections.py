@@ -123,7 +123,13 @@ _OTHER_COLLECTIONS_RE = re.compile(
 
 _WHO_MAY_USE_RE = re.compile(
     r"\b(who\s+(can|may|is\s+allowed|are\s+allowed)|am\s+i\s+allowed|"
-    r"can\s+(i|anyone|the\s+public|community|a\s+visitor)|"
+    r"can\s+(anyone|the\s+public|community|a\s+visitor|visitors?|"
+    r"non[- ]?miami|someone)|"
+    # Bare "can i" was a bug, measured against the deployed bot 2026-08-13:
+    # "where CAN I learn more" and "what CAN I bring" both matched it, and
+    # this matcher runs early, so both got the who-may-use answer instead of
+    # their own. Tie it to verbs about USING THE DEPARTMENT.
+    r"can\s+i\s+(use|visit|come|go|enter|access|get\s+in(to)?)|"
     r"open\s+to\s+(the\s+)?(public|everyone|anyone)|eligib\w*|"
     # "an ID", not just "a id" -- the article has to allow both or the most
     # natural phrasing of the question misses.
@@ -132,11 +138,19 @@ _WHO_MAY_USE_RE = re.compile(
     re.IGNORECASE,
 )
 
-_BRING_RE = re.compile(
-    r"\b(bring|take\s+in|allowed\s+in|permitted|can\s+i\s+use|"
-    r"pen|pens|pencil|pencils|marker|markers|laptop|laptops|tablet|"
-    r"backpack|backpacks|bag|bags|food|drink|drinks|water|coffee|"
-    r"camera|cameras|photo|photos|photograph\w*|notebook)\b",
+# Split in two, because a bare "can i use" belongs to the who-may-use
+# question, not to this one. An items question names an ITEM or uses a
+# bring-verb; "can I use Special Collections" does neither.
+_ITEM_RE = re.compile(
+    r"\b(pen|pens|pencil|pencils|marker|markers|laptop|laptops|tablet|"
+    r"tablets|backpack|backpacks|bag|bags|food|drink|drinks|water|coffee|"
+    r"camera|cameras|photo|photos|photograph\w*|notebook|notebooks|"
+    r"belongings)\b",
+    re.IGNORECASE,
+)
+_BRING_VERB_RE = re.compile(
+    r"\b(bring|carry\s+in|take\s+in(to)?|allowed\s+in(side)?|"
+    r"permitted\s+in(side)?)\b",
     re.IGNORECASE,
 )
 
@@ -227,7 +241,7 @@ def reading_room_items_answer(message: str) -> "Optional[tuple[str, list[dict]]]
     m = message or ""
     if not (SC_RE.search(m) or _READING_ROOM_RE.search(m)):
         return None
-    if not _BRING_RE.search(m):
+    if not (_ITEM_RE.search(m) or _BRING_VERB_RE.search(m)):
         return None
     return (
         f"In the Special Collections Reading Room you may bring in "

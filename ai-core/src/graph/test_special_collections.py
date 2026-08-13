@@ -32,6 +32,34 @@ from src.graph.special_collections import (  # noqa: E402
 ALL = (other_collections_answer, who_may_use_answer, reading_room_items_answer,
        dropins_answer, sc_locker_answer, learn_more_answer)
 
+_ORCHESTRATOR = Path(__file__).resolve().parent / "new_orchestrator.py"
+
+
+def _registered_order() -> "list[str]":
+    """The sc_* short-circuit names, in the order new_orchestrator runs them.
+
+    Parsed out of the source rather than copied, because a copied list is a
+    list that goes stale. The whole point of the routing test below is to
+    catch an ORDERING mistake, and it cannot do that against a stale copy of
+    the ordering.
+    """
+    import ast
+
+    tree = ast.parse(_ORCHESTRATOR.read_text(encoding="utf-8"))
+    names: "list[str]" = []
+    for node in ast.walk(tree):
+        # The registration table is a tuple of ("name", fn) tuples.
+        if not isinstance(node, ast.Tuple) or len(node.elts) != 2:
+            continue
+        first, second = node.elts
+        if not (isinstance(first, ast.Constant) and isinstance(first.value, str)):
+            continue
+        # Only the ones dispatching into this module.
+        if isinstance(second, ast.Attribute) and isinstance(second.value, ast.Name):
+            if second.value.id == "_spec":
+                names.append(first.value)
+    return names
+
 
 # --- the lockers, which are the whole reason for this module ---------------
 
@@ -180,6 +208,83 @@ def test_no_answer_fires_on_an_unrelated_question():
               "where is the makerspace"):
         for fn in ALL:
             assert fn(q) is None, f"{fn.__name__} fired on {q!r}"
+
+
+# --- routing: the test that would have caught the real bug ----------------
+#
+# Every function-level test above passed while the DEPLOYED bot answered two
+# of her nine questions with the wrong one of these answers. The bug was not
+# in any single matcher: it was in the overlap between two of them plus the
+# order they run in. So this walks the real order, from the real source.
+
+_BY_NAME = {
+    "sc_lockers": sc_locker_answer,
+    "sc_dropins": dropins_answer,
+    "sc_learn_more": learn_more_answer,
+    "sc_reading_room_items": reading_room_items_answer,
+    "sc_who_may_use": who_may_use_answer,
+    "sc_other_collections": other_collections_answer,
+}
+
+
+def _route(question: str) -> "str | None":
+    """Which sc_* short-circuit wins, running them in the registered order."""
+    for name in _registered_order():
+        fn = _BY_NAME.get(name)
+        if fn is None:
+            continue
+        if fn(question) is not None:
+            return name
+    return None
+
+
+def test_every_registered_sc_name_is_known_to_this_test():
+    """If someone adds a short-circuit and not a routing case, say so here
+    rather than letting it go unrouted and untested."""
+    registered = set(_registered_order())
+    assert registered, "parsed no sc_* registrations -- has the table moved?"
+    assert registered <= set(_BY_NAME), (
+        f"unrouted: {sorted(registered - set(_BY_NAME))}")
+
+
+# (her question, the answer it must reach)
+HER_QUESTIONS = [
+    ("where can I learn more about special collections", "sc_learn_more"),
+    ("what can I bring into the special collections reading room",
+     "sc_reading_room_items"),
+    ("who is allowed to use special collections", "sc_who_may_use"),
+    ("do I need an appointment for special collections or can I drop in",
+     "sc_dropins"),
+    ("are there lockers in special collections", "sc_lockers"),
+    ("what other collections are in special collections",
+     "sc_other_collections"),
+    # Phrasings that broke on the deployed bot, kept as named regressions.
+    ("can I use a pen in special collections", "sc_reading_room_items"),
+    ("can I bring my backpack into special collections",
+     "sc_reading_room_items"),
+    ("can I visit special collections", "sc_who_may_use"),
+    ("what is the special collections website", "sc_learn_more"),
+]
+
+
+def test_her_questions_route_to_the_right_answer():
+    wrong = []
+    for question, expected in HER_QUESTIONS:
+        got = _route(question)
+        if got != expected:
+            wrong.append(f"{question!r}: expected {expected}, got {got}")
+    assert not wrong, "misrouted:\n  " + "\n  ".join(wrong)
+
+
+def test_the_two_bare_can_i_phrasings_no_longer_hit_who_may_use():
+    """The exact regression, named. A bare "can i" used to match the
+    who-may-use matcher, which runs early."""
+    assert who_may_use_answer(
+        "where can I learn more about special collections") is None
+    assert who_may_use_answer(
+        "what can I bring into the special collections reading room") is None
+    # ...while the genuine access phrasing still works.
+    assert who_may_use_answer("can I use special collections") is not None
 
 
 # --- hours rider ----------------------------------------------------------

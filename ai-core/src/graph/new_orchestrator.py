@@ -945,11 +945,22 @@ def _run_turn(
             # got the Oxford-only campus speech and "who is allowed to use
             # special collections" got the reading-room handling speech.
             # Both true, neither the question asked.
+            # ORDER IS LOAD-BEARING, most specific first, and it is asserted
+            # in test_special_collections.py::test_her_questions_route_to_the
+            # _right_answer -- which walks this list as parsed out of THIS
+            # file, so the two cannot drift apart.
+            #
+            # Measured on the deployed bot 2026-08-13: with who_may_use ahead
+            # of these, "where CAN I learn more" and "what CAN I bring" both
+            # got the who-may-use answer, because its matcher accepted a bare
+            # "can i". Function-level unit tests all passed -- the bug lived
+            # in the overlap between matchers plus this ordering, which only
+            # a routing test can see.
             ("sc_dropins", _spec.dropins_answer),
-            ("sc_who_may_use", _spec.who_may_use_answer),
-            ("sc_reading_room_items", _spec.reading_room_items_answer),
-            ("sc_other_collections", _spec.other_collections_answer),
             ("sc_learn_more", _spec.learn_more_answer),
+            ("sc_reading_room_items", _spec.reading_room_items_answer),
+            ("sc_who_may_use", _spec.who_may_use_answer),
+            ("sc_other_collections", _spec.other_collections_answer),
             ("sc_campus", _special_collections_campus_answer),
             ("sc_handling", _special_collections_handling_answer),
             ("fee_policy", _fee_policy_answer),
