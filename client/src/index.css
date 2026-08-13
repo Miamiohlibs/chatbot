@@ -117,6 +117,35 @@ a:hover {
   color: #535bf2;
 }
 
+/* The out-of-service notice sits on a red-50 tint, and the link inside it
+   has to be readable there.
+
+   WHY THIS IS A STYLESHEET RULE AND NOT A TAILWIND CLASS
+   The `a` rule above is UNLAYERED. Tailwind v4 emits its utilities inside
+   `@layer utilities`, and unlayered CSS beats layered CSS whatever the
+   specificity -- so `text-miami-red-dark` on an <a> is silently ignored
+   everywhere in this app. Measured 2026-08-13: the class computed to
+   rgb(158,15,40) on a <div> and rgb(172,12,44) on an <a>. The class was
+   doing nothing. Overriding here, at the same layer, is what actually
+   works.
+
+   The colour above is tuned for WHITE (7.40:1). On the notice's #fef2f2 it
+   falls to 6.75:1, under the 7:1 this widget is held to, which is why this
+   needs its own value rather than inheriting.
+
+   #7d0b1f on #fef2f2 measures 9.9:1. Re-measure with axe if either
+   changes; do not eyeball it. */
+.offline-notice a {
+  color: #7d0b1f;
+}
+/* The global a:hover is #535bf2, a leftover from the Vite starter template
+   -- a blue-violet that is both off-brand here and 3.4:1. Hover must not
+   drop below the resting state. */
+.offline-notice a:hover,
+.offline-notice a:focus-visible {
+  color: #5e0817;
+}
+
 h1 {
   font-size: 3.2em;
   line-height: 1.1;

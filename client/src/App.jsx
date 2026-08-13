@@ -1,5 +1,5 @@
 import { useContext, useEffect, useState, useCallback } from 'react';
-import { ArrowLeft, Clock, X } from 'lucide-react';
+import { ArrowLeft, Clock, Wrench, X } from 'lucide-react';
 import { toast } from 'sonner';
 import HumanLibrarianWidget from './components/HumanLibrarianWidget';
 import OfflineTicketWidget from './components/TicketWidget';
@@ -8,6 +8,7 @@ import ErrorBoundaryComponent from './components/ErrorBoundaryComponent';
 import { SocketContext } from './context/SocketContextProvider';
 import FeedbackFormComponent from './components/FeedbackFormComponent';
 import useServerHealth from './hooks/useServerHealth';
+import useServiceStatus from './hooks/useServiceStatus';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -16,11 +17,61 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 
+/**
+ * "The chatbot is out of service" -- said in the UI, before anyone types.
+ *
+ * The kill switch used to be invisible until a patron sent a message and
+ * got a maintenance reply. This is the same fact, stated up front, in the
+ * two places a patron actually looks: the welcome layer and the launcher
+ * panel.
+ *
+ * `role="status"` rather than `role="alert"`: a screen reader should hear
+ * this when it appears mid-session (a pause landing while the page is
+ * open), politely, without interrupting whatever is being read. It is not
+ * an emergency, it is a change of state.
+ *
+ * Colours: miami-red-dark on red-50 measures 7.8:1, which clears the 7:1
+ * this widget is held to (WCAG 2.1 AAA, 1.4.6). Do not lighten either one
+ * without re-measuring.
+ */
+const OutOfServiceNotice = ({ askUsUrl, compact = false }) => (
+  <div
+    role="status"
+    className={`offline-notice rounded-lg border-2 border-miami-red-dark bg-red-50 text-left ${
+      compact ? 'p-3' : 'p-4'
+    }`}
+  >
+    <p className="flex items-center gap-2 font-bold text-miami-red-dark">
+      <Wrench className="h-4 w-4 shrink-0" aria-hidden="true" />
+      Chatbot offline for maintenance
+    </p>
+    {/* Not "the options below": this same notice renders on the welcome
+        layer, where there is nothing below it -- the buttons live inside
+        the panel, one click away. Wording that is true in both places. */}
+    <p className={`text-gray-900 ${compact ? 'text-sm mt-1' : 'mt-2'}`}>
+      The Smart Chatbot is temporarily out of service. A librarian can still
+      help you — you can create a ticket, or reach someone now through{' '}
+      <a
+        href={askUsUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="font-semibold text-miami-red-dark underline underline-offset-2"
+      >
+        Ask Us
+      </a>
+      .
+    </p>
+  </div>
+);
+
 const App = () => {
   const [isOpen, setIsOpen] = useState(true); // Open by default
   const [step, setStep] = useState('initial');
   const { socketContextValues } = useContext(SocketContext);
   const { serverStatus, needsAttention } = useServerHealth();
+  // An operator-thrown kill switch, which is NOT the same thing as a fault.
+  // See hooks/useServiceStatus.
+  const { isPaused, askUsUrl } = useServiceStatus();
   
   // Ask Us Chat Service availability state
   const [askUsStatus, setAskUsStatus] = useState({
@@ -151,9 +202,14 @@ const App = () => {
     setIsOpen(false);
   };
 
-  const isChatbotUnavailable =
+  // Two different reasons the chatbot button must not be pressable, kept
+  // apart on purpose: a fault ("technical difficulties") and an operator
+  // decision ("down for maintenance"). Both disable the button; only one of
+  // them is the bot's fault, and patrons are told which.
+  const isChatbotFaulty =
     serverStatus === 'unhealthy' ||
     (!socketContextValues.isConnected && socketContextValues.attemptedConnection);
+  const isChatbotUnavailable = isChatbotFaulty || isPaused;
 
   return (
     <ErrorBoundaryComponent onLibrarianHelp={handleLibrarianHelp}>
@@ -161,7 +217,12 @@ const App = () => {
           `inert` when the dialog is open: aria-hidden alone hid it from
           screen readers but left it in the tab order, so a keyboard user
           could still reach the content behind an open dialog. */}
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+      {/* flex-col so the out-of-service notice can be a SIBLING of the
+          clickable welcome block rather than a child of it. It used to be
+          inside, which put a link inside a role="button" -- axe flags that
+          as `nested-interactive`, and it is a genuine trap: the Ask Us link
+          was focusable inside a control that is itself one tab stop. */}
+      <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
         <div
           className={`text-center mb-8 transition-all duration-300 ${
             isOpen ? 'opacity-30' : 'opacity-100 cursor-pointer hover:opacity-80 hover:-translate-y-0.5'
@@ -192,11 +253,25 @@ const App = () => {
             Get help with quick information, or talk to a librarian for research questions.
           </p>
           {!isOpen && (
-            <p className="text-sm text-blue-500 mt-3 font-semibold">
-              Get Started
+            /* blue-500 measured 3.59:1 on gray-50 -- it failed AA, never
+               mind the AAA this widget is held to. It went unnoticed
+               because it only renders with the panel CLOSED, and no audit
+               had ever run against that state. blue-800 is 8.35:1. */
+            <p className="text-sm text-blue-800 mt-3 font-semibold">
+              {isPaused ? 'See your options' : 'Get Started'}
             </p>
           )}
         </div>
+        {/* Only with the panel CLOSED. With it open the panel carries its
+            own copy, and a second one out here would be a duplicate that
+            is also un-dimmed (the opacity-30 belongs to the block above)
+            and outside that block's `inert`, i.e. reachable by keyboard
+            from behind an open dialog. */}
+        {isPaused && !isOpen && (
+          <div className="mb-8 max-w-md w-full">
+            <OutOfServiceNotice askUsUrl={askUsUrl} />
+          </div>
+        )}
       </div>
 
       <Dialog open={isOpen} onOpenChange={(open) => !open && handleClose()}>
@@ -241,6 +316,14 @@ const App = () => {
           <div className="py-5">
             {step === 'initial' && (
               <div className="flex flex-col gap-3">
+                {/* The three buttons used to look completely healthy while
+                    the bot was out of service. Say it here, above them,
+                    where the choice is actually made. The librarian and
+                    ticket buttons stay live: taking the BOT out of service
+                    must never take away the human routes -- those are the
+                    whole point of pausing rather than stopping the
+                    process. */}
+                {isPaused && <OutOfServiceNotice askUsUrl={askUsUrl} compact />}
                 <Button
                   variant="miami"
                   onClick={() => {
@@ -263,10 +346,12 @@ const App = () => {
                   className={isChatbotUnavailable ? 'opacity-60' : ''}
                 >
                   Library Chatbot{' '}
-                  {(needsAttention ||
-                    (!socketContextValues.isConnected &&
-                      socketContextValues.attemptedConnection)) &&
-                    '(Unavailable)'}
+                  {isPaused
+                    ? '(Offline for maintenance)'
+                    : (needsAttention ||
+                        (!socketContextValues.isConnected &&
+                          socketContextValues.attemptedConnection)) &&
+                      '(Unavailable)'}
                 </Button>
                 
                 {/* Show the librarian button only during business hours */}
@@ -298,9 +383,21 @@ const App = () => {
                 </Button>
               </div>
             )}
+            {/* A pause can land while someone is sitting on an open chat.
+                They will never send another message, so the poll is the
+                only thing that can tell them -- the notice goes above the
+                transcript, which stays put, and the composer below it is
+                disabled. Kept OUTSIDE the health ternary because a paused
+                bot is healthy and connected; it is switched off, and
+                "technical difficulties" would be a lie. */}
+            {step === 'services' && isPaused && (
+              <div className="mb-4">
+                <OutOfServiceNotice askUsUrl={askUsUrl} compact />
+              </div>
+            )}
             {step === 'services' &&
               (serverStatus === 'healthy' && socketContextValues.isConnected ? (
-                <ChatBotComponent askUsStatus={askUsStatus} />
+                <ChatBotComponent askUsStatus={askUsStatus} isPaused={isPaused} />
               ) : (
                 <div className="flex flex-col gap-4 text-center py-6">
                   <p className="text-red-500 font-bold">

@@ -11,7 +11,12 @@ import { Input } from '@/components/ui/input';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import './ChatBotComponent.css';
 
-const ChatBotComponent = ({ askUsStatus = { isOpen: false, hoursToday: null, nextOpen: null } }) => {
+// `isPaused` -- an operator has taken the bot out of service. The transcript
+// stays on screen (a student mid-conversation should not lose what they have
+// read), but there is nothing useful to send: the server answers every turn
+// with a maintenance notice. So the composer is disabled and says why,
+// instead of accepting a question and returning a canned reply.
+const ChatBotComponent = ({ askUsStatus = { isOpen: false, hoursToday: null, nextOpen: null }, isPaused = false }) => {
   const { socketContextValues } = useContext(SocketContext);
   const { messageContextValues } = useContext(MessageContext);
   const chatRef = useRef();
@@ -327,14 +332,18 @@ const ChatBotComponent = ({ askUsStatus = { isOpen: false, hoursToday: null, nex
             id="chat-message-input"
             value={messageContextValues.inputMessage}
             onChange={(e) => messageContextValues.setInputMessage(e.target.value)}
-            placeholder="Type your message..."
-            disabled={!socketContextValues.isConnected}
+            placeholder={
+              isPaused
+                ? 'Chatbot offline for maintenance'
+                : 'Type your message...'
+            }
+            disabled={!socketContextValues.isConnected || isPaused}
             className="flex-1"
           />
           <Button
             variant="miami"
             type="submit"
-            disabled={!socketContextValues.isConnected}
+            disabled={!socketContextValues.isConnected || isPaused}
           >
             Send
           </Button>
