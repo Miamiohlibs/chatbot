@@ -864,7 +864,18 @@ def test_sword_location_only_falls_to_agent():
 
 
 # --- Special Collections hours (eval review 2026-06-29 #67) -----------------
-def test_sc_hours_appends_appointment_rider():
+def test_sc_hours_keeps_live_figures_and_adds_the_semester_pattern():
+    """Updated 2026-08-13 from the Special Collections department's own Q&A.
+
+    This used to assert the rider said "appointment". It did, in the form
+    "research access ... IS BY APPOINTMENT", and the department says that is
+    wrong -- drop-ins are welcome. The assertion was pinning the bug.
+
+    What the rider must do now: leave the LIVE LibCal figure alone (her
+    static hours would go stale the way the website's flat "M-F 9-4" already
+    has) and add the three things LibCal cannot express -- the semester
+    split, the holiday closure, and the promptly-at-4 rule.
+    """
     deps = _StubDeps(_StubToolResult(data={
         "success": True, "library": "special",
         "hours": "Special Collections: Mon-Fri 8:00am - 5:00pm this week.",
@@ -872,8 +883,14 @@ def test_sc_hours_appends_appointment_rider():
     }))
     res = _special_collections_hours_answer(deps)
     assert res is not None
+    # The live figure still leads, unchanged.
     assert "8:00am - 5:00pm" in res[0]
-    assert "appointment" in res[0].lower()
+    # ...and the department's pattern rides along.
+    assert "Fall and Spring" in res[0]
+    assert "promptly at 4:00pm" in res[0]
+    assert "Drop-ins are welcome" in res[0]
+    # The wording the department contradicts must be gone.
+    assert "is by appointment" not in res[0]
     assert res[1][1]["url"] == "https://spec.lib.miamioh.edu/home/"
     assert deps.last_call.arguments == {"library": "special"}
 
@@ -2852,21 +2869,41 @@ def test_special_collections_campus_answer_leaves_neighbours_alone():
         assert _special_collections_campus_answer(q) is None, q
 
 
-def test_handling_rules_give_what_we_have_and_refuse_what_we_don_t():
-    """The conduct rules gold asks for -- pencils only, no food, gloves -- are
-    NOT on the site. I read all five seeded Special Collections pages.
-    Gold's own last line is "should refuse specifics not on the page", so
-    refusing them is right; refusing the WHOLE question was the waste, because
-    we do know where the reading room is and that access is by appointment."""
+def test_handling_rules_give_what_the_department_told_us():
+    """Updated 2026-08-13. The premise of this test changed, not just its text.
+
+    It used to assert the answer must NOT say "pencil" or "no food", because
+    the conduct rules were on none of the five seeded Special Collections
+    pages and inventing them would have been fabrication. That was right at
+    the time.
+
+    The department has since supplied them in writing (see
+    graph/special_collections.py), so those specifics are now SUPPORTED --
+    just by a named source rather than a page. Withholding them would now be
+    the failure. What must still hold:
+
+      * the facts she gave are stated
+      * the facts she did NOT give -- gloves -- are still not invented
+      * unpublished facts are labelled as coming from staff, not cited to a
+        page that does not say them
+      * "access is by appointment", which she contradicts, is gone
+    """
     out, cites = _special_collections_handling_answer(
         "What are the rules for handling materials in Special Collections?")
     low = out.lower()
-    assert "third floor" in low and "appointment" in low
+    assert "third floor" in low
     assert "reading room" in low
-    # and it must NOT invent the specifics
-    for invented in ("pencil", "no food", "glove", "must not eat"):
-        assert invented not in low, f"invented {invented!r}"
-    assert "aren't spelled out" in low or "not spelled out" in low
+    # Now supported by her document.
+    assert "pencil" in low
+    assert "food" in low and "drink" in low
+    assert "drop-ins are welcome" in low
+    assert "locker" in low
+    # Still not in her document -- still must not be invented.
+    assert "glove" not in low, "invented gloves"
+    # The wording she contradicts.
+    assert "access is by appointment" not in low
+    # Provenance, since most of the above is on no page we hold.
+    assert "rather than a web page" in low
     assert cites[0]["url"]
 
 

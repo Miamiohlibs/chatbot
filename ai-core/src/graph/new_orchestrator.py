@@ -44,6 +44,7 @@ from dataclasses import dataclass, field, replace as _dc_replace
 from typing import Any, Callable, Optional
 
 from src.graph import facility_facts as _ff
+from src.graph import special_collections as _spec  # `_sc` is taken by two locals in run_turn
 from src.graph import tech_checkout as _tc
 from src.agent.agent import AgentLLM, AgentOutcome, AgentRequest, run_agent
 from src.agent.tool_registry import ToolRegistry
@@ -897,6 +898,14 @@ def _run_turn(
             # which-subject question rather than a directory pointer.
             ("my_librarian_ask_subject", _my_librarian_ask_subject),
             ("staff_directory", _staff_directory_answer),
+            # BEFORE lockers. Two different services share the word: King's
+            # Faculty and Graduate Reading Room lockers (yearly assignment,
+            # faculty and grads only) and Special Collections' free patron
+            # lockers (anyone, no application). The operator asked about
+            # lockers and got the faculty/grad answer, which tells an
+            # undergraduate they are ineligible for a locker they may in fact
+            # use. Whoever names Special Collections gets her answer.
+            ("sc_lockers", _spec.sc_locker_answer),
             ("lockers", _locker_answer),
             ("alumni_borrowing", _alumni_borrowing_answer),
             ("always_open_hours", _always_open_answer),
@@ -929,6 +938,18 @@ def _run_turn(
             ("reading_rooms", _ff.reading_room_answer),
             ("restrooms", _ff.restroom_answer),
             ("nursing_room", _ff.nursing_room_answer),
+            # The department's own Q&A (see graph/special_collections.py).
+            # ALL of these go before sc_campus and sc_handling, which are
+            # broad enough to swallow them: measured 2026-08-13 against the
+            # live bot, "what other collections are in special collections"
+            # got the Oxford-only campus speech and "who is allowed to use
+            # special collections" got the reading-room handling speech.
+            # Both true, neither the question asked.
+            ("sc_dropins", _spec.dropins_answer),
+            ("sc_who_may_use", _spec.who_may_use_answer),
+            ("sc_reading_room_items", _spec.reading_room_items_answer),
+            ("sc_other_collections", _spec.other_collections_answer),
+            ("sc_learn_more", _spec.learn_more_answer),
             ("sc_campus", _special_collections_campus_answer),
             ("sc_handling", _special_collections_handling_answer),
             ("fee_policy", _fee_policy_answer),
@@ -4227,16 +4248,29 @@ def _special_collections_handling_answer(
     if re.search(r"\b(digital|online|government|gov\s*docs?|newspaper|hours?|"
                  r"open|closed)\b", m, re.IGNORECASE):
         return None
+    # REWRITTEN 2026-08-13 from the department's own Q&A. Two things were
+    # wrong, not merely thin:
+    #   * "Access is by appointment" reads as a closed door. The department
+    #     says drop-ins ARE welcome; an appointment is strongly encouraged so
+    #     staff can retrieve materials ahead of time. We were turning away
+    #     patrons who could have walked in.
+    #   * "whether you can photograph an item ... aren't spelled out on the
+    #     website, and I'd rather not guess" was the honest answer while we
+    #     did not know. We know now: cameras for research photography are
+    #     permitted. Refusing to answer a question we can answer is its own
+    #     kind of wrong.
     return (
-        "Materials are consulted in the reading room on the third floor of "
-        "King Library -- nothing circulates, so you use it there. Access is "
-        "by appointment: request one through the Special Collections site "
-        "first, and you register when you arrive [1]. The specific "
-        "reading-room conditions -- what you may bring in, whether you can "
-        "photograph an item, how a fragile item is handled -- aren't spelled "
-        "out on the website, and I'd rather not guess at them. The staff on "
-        "that page will tell you when you book, and they are the right people "
-        "to ask about a particular item.",
+        "Materials are consulted in the Reading Room on the third floor of "
+        "King Library -- nothing circulates, so you use them there. "
+        "**Drop-ins are welcome**, though staff strongly encourage booking "
+        "ahead so they can retrieve your materials before you arrive [1]. "
+        "Bring a valid school-issued or government photo ID; everyone "
+        "registers on arrival.\n\n"
+        f"You may bring in **{_spec.PERMITTED}**. Not permitted: "
+        f"**{_spec.NOT_PERMITTED}** -- free, secure lockers are provided for "
+        "anything that cannot come in.\n\n"
+        "How a particular fragile item may be handled is a question for the "
+        f"staff about that item.\n\n{_spec.dept_note()}",
         [{"n": 1, "url": _SPEC_APPOINTMENTS_URL,
           "snippet": "Walter Havighurst Special Collections & University "
                      "Archives — visiting and appointments"}],
@@ -4260,8 +4294,13 @@ def _special_collections_campus_answer(
         "Special Collections & University Archives, on the third floor of "
         "King Library. Neither Rentschler at Hamilton nor Gardner-Harvey at "
         "Middletown has its own archive or rare-book collection, so a visit "
-        "means coming to Oxford. Research access is by appointment, which you "
-        "request through the Special Collections site [1].",
+        "means coming to Oxford.\n\n"
+        # Same correction as sc_handling: the department says drop-ins are
+        # welcome. It matters more here -- this answer is already telling
+        # someone to drive to another town.
+        "Drop-ins are welcome, but for a trip like that it is worth booking "
+        "through the Special Collections site first so staff can have your "
+        "materials ready [1].",
         [{"n": 1, "url": _SPEC_APPOINTMENTS_URL,
           "snippet": "Walter Havighurst Special Collections & University "
                      "Archives — visiting and appointments"}],
@@ -6450,8 +6489,10 @@ def _week_hours_answer(
               or _HOURS_PAGE_URL["oxford"],
               "snippet": "Miami University Libraries — Hours (live from LibCal)"}]
     if library == "special":
-        body += ("\n\nNote: research access is by appointment -- please "
-                 "request one through the Special Collections site [2].")
+        # Same correction as the SC hours short-circuit -- drop-ins are
+        # welcome, and the semester pattern is what her document adds that
+        # LibCal cannot say.
+        body += f"\n\n{_spec.hours_rider()} [2]"
         cites.append({"n": 2, "url": _SPEC_APPOINTMENTS_URL,
                       "snippet": "Walter Havighurst Special Collections & "
                                  "University Archives"})
@@ -6481,12 +6522,15 @@ def _special_collections_hours_answer(
     # which is better than saying nothing.
     _today_line = _today_hours_sentence(
         hours_text, "Walter Havighurst Special Collections")
+    # The rider used to say access "is by appointment", which the department
+    # contradicts (see graph/special_collections.py). LibCal still owns the
+    # live figure -- her static hours would go stale exactly the way the
+    # website's flat "M-F 9-4" already has -- so what rides along is the
+    # semester pattern, the holiday closure and the promptly-at-4 rule, which
+    # LibCal cannot express.
     answer = (
         f"{_today_line or hours_text} [1]\n\n"
-        "Note: research access to the Walter Havighurst Special "
-        "Collections & University Archives is by appointment -- please "
-        "request an appointment through the Special Collections site "
-        "before visiting [2]."
+        f"{_spec.hours_rider()} [2]"
     )
     citations = [
         {"n": 1, "url": source_url,
