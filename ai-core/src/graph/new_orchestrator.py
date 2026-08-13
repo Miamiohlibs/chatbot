@@ -5096,6 +5096,34 @@ def _checkout_limit_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
     used here even though the standing rule prefers the live site: the rule
     settles conflicts, and there is no conflict to settle. If a live page
     ever grows these figures, it wins and these must be re-checked.
+
+    THE FAQ IS WRONG ABOUT THE FRIENDS OF THE LIBRARY, AND WE NO LONGER
+    REPEAT IT.
+        FAQ 343505 says verbatim "Friends of the library (Hamilton /
+        Middletown): 5 items". John Burke, Library Director at Gardner-Harvey
+        (Middletown), reported on 2026-08-13 that the real figure is 20 items
+        total with at most 5 OhioLINK items at a time. He runs Middletown and
+        Krista McDonald runs Hamilton under the same Regional Campus Library
+        structure, so on this he is the authority and the FAQ is not.
+
+        This is what the standing rule was written for -- LibAnswers FAQs are
+        hand-maintained and go stale. Note WHICH way the error ran: the FAQ
+        quoted the OhioLINK sub-limit as though it were the total, so the bot
+        was telling a Friend of the Library they could borrow a quarter of
+        what they are entitled to.
+
+        Only that one line is wrong. The other three figures are the FAQ's
+        and John confirmed the student answer was right, so the FAQ is still
+        cited -- for the rows it gets right.
+
+    THE WRONG NUMBER IS STILL IN THE SEARCH INDEX.
+        That FAQ chunk is live in Chunk_vv20260804_1110, so the AGENT path
+        can still retrieve and repeat "5 items" for a phrasing this
+        short-circuit does not catch. This function is the path measured on
+        the deployed bot, so fixing it fixes the reported bug -- but the
+        durable fix is a correction record or an ETL suppression, and until
+        one exists the risk is real. See SUPPRESSED_FAQ_IDS in
+        scripts/etl/libanswers.py for the mechanism.
     """
     m = message or ""
     if not _CHECKOUT_LIMIT_RE.search(m):
@@ -5106,9 +5134,13 @@ def _checkout_limit_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
     return (
         "The maximum depends on your borrower type: faculty, emeritus faculty "
         "and graduate students can have 999 items out at once -- effectively "
-        "no limit; undergraduate students and staff, 200; affiliated patrons "
-        "at Oxford, 20; and Friends of the Library at Hamilton and "
-        "Middletown, 5. [1]",
+        "no limit; undergraduate students and staff, 200; and affiliated "
+        "patrons at Oxford, 20. [1]\n\n"
+        "**Friends of the Library at Hamilton and Middletown may borrow 20 "
+        "items**, of which at most **5 may be OhioLINK items** at any one "
+        "time.\n\n"
+        "That last figure comes from the Regional Campus Library director "
+        "rather than the FAQ, which understates it.",
         [
             {"n": 1, "url": _FAQ_CHECKOUT_LIMIT_URL,
              "snippet": "How many books or other items can be checked out at "

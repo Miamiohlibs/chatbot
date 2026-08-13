@@ -606,3 +606,49 @@ def test_one_dept_inbox_plus_one_individual_is_not_privacy_refusal():
         evidence=[_Ev("Jane Doe jdoe23@miamioh.edu archives@miamioh.edu")],
     )
     assert not result.is_refusal, f"unexpected refusal: {result.refusal}"
+
+
+# --- regional campuses must not be sent to the SUBJECT liaison directory ---
+
+
+def test_regional_campus_refusals_point_at_the_full_staff_directory():
+    """John Burke, Library Director at Gardner-Harvey (Middletown), 2026-08-13.
+
+    He asked whether laptop loan periods differ between King and GHL. The bot
+    replied "ask the Middletown library staff directly -- their directory is
+    at .../liaisons/" and he reported that no Gardner-Harvey librarians are on
+    that list.
+
+    He was right, and it is checkable: pulled from the live index the same
+    day, organization/staff/ contains Burke, Hicks, McDonald, Shores, McQueen
+    and Young, while organization/liaisons/ contains none of them. liaisons/
+    is the SUBJECT liaison directory and regional staff are not subject
+    liaisons, so it cannot ever contain the person the patron needs.
+
+    Referring someone to a directory that structurally cannot list who they
+    need is the "referral that doesn't make sense" the Head of Advise &
+    Instruct raised on 2026-08-12 -- and the recovery lands on a service desk
+    with our name on it.
+    """
+    from src.synthesis.post_processor import _refusal_context_for
+    from src.synthesis.refusal_templates import RefusalTrigger
+
+    for campus in ("hamilton", "middletown"):
+        ctx = _refusal_context_for(RefusalTrigger.CROSS_CAMPUS_MISMATCH, campus)
+        assert ctx is not None, campus
+        assert ctx.staff_directory_url.endswith("/organization/staff/"), (
+            f"{campus} is being sent to {ctx.staff_directory_url}")
+        assert "liaisons" not in ctx.staff_directory_url, (
+            f"{campus} back on the subject-liaison page, which does not "
+            f"list regional staff")
+
+
+def test_oxford_still_gets_the_subject_liaison_directory():
+    """Not a blanket change: a subject question at Oxford does want the
+    subject liaison, and that page is right for it."""
+    from src.synthesis.post_processor import _refusal_context_for
+    from src.synthesis.refusal_templates import RefusalTrigger
+
+    ctx = _refusal_context_for(RefusalTrigger.CROSS_CAMPUS_MISMATCH, "oxford")
+    assert ctx is not None
+    assert ctx.staff_directory_url.endswith("/organization/liaisons/")

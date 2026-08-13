@@ -1993,6 +1993,31 @@ def test_how_many_books_can_i_check_out_is_answered_with_a_count() -> None:
             assert figure in answer, f"borrower-type figure {figure} missing"
 
 
+def test_friends_of_the_library_borrow_20_not_5() -> None:
+    """John Burke, Library Director at Gardner-Harvey, 2026-08-13.
+
+    FAQ 343505 says verbatim "Friends of the library (Hamilton /
+    Middletown): 5 items". It quotes the OhioLINK sub-limit as the total, so
+    the bot was telling a Friend of the Library they could borrow a quarter
+    of what they may. The real figure is 20 items, at most 5 of them
+    OhioLINK.
+
+    Asserting "5 in answer" is not enough on its own -- 5 is still a correct
+    number here, just about OhioLINK. This pins the SENTENCE, so restoring
+    the FAQ's version fails.
+    """
+    from src.graph.new_orchestrator import _checkout_limit_answer
+
+    answer = _checkout_limit_answer("how many books can I check out?")[0]
+    low = answer.lower()
+    assert "friends of the library" in low
+    assert "20 items" in low, "the Friends total must be stated as 20"
+    assert "5 may be ohiolink" in low, "the 5 must be scoped to OhioLINK"
+    # The exact wrong phrasings, so neither can come back quietly.
+    assert "middletown, 5" not in low
+    assert "middletown: 5" not in low
+
+
 def test_the_count_answers_do_not_steal_duration_questions() -> None:
     """The loan-period and how-to-renew answers must keep their questions."""
     from src.graph.new_orchestrator import (

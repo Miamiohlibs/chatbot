@@ -509,10 +509,33 @@ def _refusal_context_for(
         "hamilton": "Hamilton",
         "middletown": "Middletown",
     }.get(scope_campus, scope_campus.title())
+    # THE REGIONAL CAMPUSES DO NOT GO TO THE LIAISONS PAGE.
+    #
+    # John Burke, Library Director at Gardner-Harvey (Middletown), 2026-08-13:
+    # he asked whether laptop loan periods differ between King and GHL, was
+    # told to "ask the Middletown library staff directly -- their directory is
+    # at .../liaisons/", and reported that there are no Gardner-Harvey
+    # librarians on that list. He is right: liaisons/ is the SUBJECT liaison
+    # directory, and the regional campus staff are not subject liaisons.
+    #
+    # Sending someone to a directory that cannot contain the person they need
+    # is the "referral that doesn't make sense" the Head of Advise & Instruct
+    # raised on 2026-08-12 -- and it arrives with our name on it, so the
+    # recovery lands on a service desk.
+    #
+    # organization/staff/ is the full staff directory and does list them
+    # (verified 2026-08-13: all seven regional staff are in our own Librarian
+    # table with campus set -- Krista McDonald, Mark Shores, Brea McQueen and
+    # Samantha Young at Hamilton; John Burke, Jennifer Hicks and Leah Tabler
+    # at Middletown).
+    _LIAISONS = "https://www.lib.miamioh.edu/about/organization/liaisons/"
+    _ALL_STAFF = "https://www.lib.miamioh.edu/about/organization/staff/"
     staff_url = {
-        "oxford": "https://www.lib.miamioh.edu/about/organization/liaisons/",
-        "hamilton": "https://www.lib.miamioh.edu/about/organization/liaisons/",
-        "middletown": "https://www.lib.miamioh.edu/about/organization/liaisons/",
+        # Oxford keeps liaisons/: a subject question at Oxford genuinely does
+        # want the subject liaison.
+        "oxford": _LIAISONS,
+        "hamilton": _ALL_STAFF,
+        "middletown": _ALL_STAFF,
     }.get(scope_campus, "https://www.lib.miamioh.edu/")
     return RefusalContext(
         campus_display=display,
