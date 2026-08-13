@@ -3474,3 +3474,50 @@ def test_a_plain_my_librarian_ask_is_unchanged():
         body, _ = _my_librarian_ask_subject(q)
         assert "Personal Librarian" not in body, q
         assert "subject, major, or course" in body, q
+
+
+# --- Armstrong (Kevin, 3/5: "completely missed 'Armstrong'") -----------------
+
+
+def test_armstrong_is_answered_as_armstrong():
+    """The true answer is YES, and it was being answered about King.
+
+    Two pages in the live index say Armstrong Student Center study rooms go
+    through the Libraries' own reservation system (checked 2026-08-13):
+    /use/spaces/room-reservations/ and libanswers 163332. So this was never an
+    out-of-scope building -- falling through to the King default produced a
+    true sentence about the wrong building.
+    """
+    from src.graph.new_orchestrator import _room_reservation_answer
+
+    answer, cites = _room_reservation_answer(
+        "Can I reserve a study room at Armstrong?")
+    low = answer.lower()
+    assert "armstrong" in low, "must name the building the patron named"
+    assert low.lstrip().startswith("yes"), "the answer is yes"
+    assert cites, "Kevin credited the link -- keep giving one"
+    # It must NOT present itself as a King answer.
+    assert "reserve a study room at king library through" not in low
+
+
+def test_armstrong_does_not_promise_in_chat_booking():
+    """Same rule as Gardner-Harvey: the booking tool has no Armstrong
+    building, so offering to complete it in chat would be a promise we cannot
+    keep."""
+    from src.graph.new_orchestrator import _room_reservation_answer
+
+    answer, _ = _room_reservation_answer("can I book a room at Armstrong")
+    low = answer.lower()
+    assert "in-chat booking only covers king" in low
+    assert "i can book one for you right here" not in low
+
+
+def test_king_room_answers_are_unchanged_by_the_armstrong_branch():
+    from src.graph.new_orchestrator import _room_reservation_answer
+
+    answer, _ = _room_reservation_answer("can I reserve a study room at King?")
+    assert "King Library" in answer
+    assert "Armstrong" not in answer
+    # A real King transaction still falls through to the booking flow.
+    assert _room_reservation_answer(
+        "book me a study room at King tomorrow from 2pm to 4pm") is None

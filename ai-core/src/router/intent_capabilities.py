@@ -114,9 +114,14 @@ _POINT_TO_URL: dict[str, IntentCapability] = {
             "ebooks, journal articles, and OhioLINK partner libraries "
             "in one place.\n\n"
             "Primo: https://ohiolink-mu.primo.exlibrisgroup.com/discovery/search?vid=01OHIOLINK_MU:MU\n\n"
-            "If Primo says \"no results\" and you think the library "
-            "should have it, you can request it through Interlibrary "
-            "Loan: https://www.lib.miamioh.edu/use/borrow/ill/"
+            # "and you think the library should have it" removed 2026-08-13.
+            # Kevin Messner asked for it by name: "not good wording here and
+            # unnecessary, just remove that phrase." It also put a judgement
+            # call on the patron -- ILL exists precisely for things we do NOT
+            # have, so making the request conditional on their opinion about
+            # our collection is backwards.
+            "If Primo says \"no results\", you can request it through "
+            "Interlibrary Loan: https://www.lib.miamioh.edu/use/borrow/ill/"
         ),
     ),
     "library_employment": IntentCapability(
@@ -211,8 +216,15 @@ _REFUSE: dict[str, IntentCapability] = {
         tier=CapabilityTier.REFUSE,
         canonical_url="https://www.lib.miamioh.edu/research/research-support/ask/",
         short_message=(
+            # "research help" removed from this list 2026-08-13, at Kevin
+            # Messner's request. He rated the alum-genealogy refusal 4/5 --
+            # "for 'knowing' not to try, i.e. staying in scope" -- but asked
+            # for this phrase to go, because the bot is DEFERRING ON a
+            # research question at the moment it claims research help as one
+            # of its specialities. Claiming a capability in the same breath as
+            # declining to use it reads as evasive rather than honest.
             "I'm focused on Miami University Libraries questions -- "
-            "hours, services, spaces, research help, and policies. "
+            "hours, services, spaces, and policies. "
             "The question you asked is outside that scope, so I don't "
             "have a reliable answer for it.\n\n"
             "If this IS a library question I'm misreading, try "

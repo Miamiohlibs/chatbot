@@ -3245,6 +3245,32 @@ _ROOM_OTHER_SPACE_RE = re.compile(
     r"|art\s*(and|&)\s*architecture|art\s+library|maker\s*space|makerspace)\b",
     re.IGNORECASE,
 )
+# ARMSTRONG IS A REAL, BOOKABLE ANSWER -- we just never noticed the word.
+#
+# Kevin Messner, 2026-08-13, rated "Can I reserve a study room at Armstrong?"
+# 3/5: "answers question *next to* actual question. completely missed
+# 'Armstrong'. Give appropriate link though!"
+#
+# He was right that it was missed, and the happy part is that the true answer
+# is YES. Two pages in the live index say Armstrong study rooms go through the
+# Libraries' OWN reservation system (checked 2026-08-13):
+#
+#   /use/spaces/room-reservations/ -- "our room reservation system allows you
+#     to reserve rooms in King, Art & Architecture Libraries, CIM studio rooms
+#     and Armstrong Student Center study rooms"
+#   libanswers 163332 -- "... King, Art & Architecture Libraries, Makerspace,
+#     AV Production Lab, and Armstrong Student Center study rooms"
+#
+# So this is not an out-of-scope building. Falling through to the King default
+# gave a true sentence about the wrong building, which is the failure mode
+# Kevin keeps naming: an answer standing next to the question.
+#
+# In-chat booking is NOT offered for it. The booking tool resolves a
+# `building` and Armstrong is not one of its values, so promising it would
+# repeat the Gardner-Harvey mistake of inviting a booking we cannot complete.
+_ROOM_ARMSTRONG_RE = re.compile(
+    r"\b(armstrong|student\s+cent(er|re))\b", re.IGNORECASE,
+)
 _ROOM_HAMILTON_RE = re.compile(r"\b(rentschler|hamilton)\b", re.IGNORECASE)
 _ROOM_MIDDLETOWN_RE = re.compile(
     r"\b(gardner[- ]?harvey|middletown)\b", re.IGNORECASE
@@ -3319,6 +3345,24 @@ def _room_reservation_answer(message: str) -> "Optional[tuple[str, list[dict]]]"
     # marked BOT-OK; gold: 'never substitute King rooms'). A follow-up
     # 'book it for me, tomorrow 2pm, <email>' has no room-noun, so it
     # falls past this regex to the agent's book_room flow.
+    # Before the campus branches: Armstrong is on the Oxford campus, so
+    # nothing below would catch it and it would land on the King default.
+    if _ROOM_ARMSTRONG_RE.search(m):
+        return (
+            "Yes — **Armstrong Student Center study rooms are bookable "
+            "through the Libraries' own reservation system**, the same one "
+            "used for King and Art & Architecture. Pick the room, date and "
+            "time there [1][2].\n\n"
+            "That one I can't complete for you in chat — in-chat booking only "
+            "covers King Library — but the reservation page takes about a "
+            "minute.",
+            cite([
+                (_ROOMS_KING_RESERVE_URL,
+                 "LibCal — Miami University Libraries room reservations"),
+                (_ROOMS_URL,
+                 "Miami University Libraries — room reservations"),
+            ]),
+        )
     if _ROOM_HAMILTON_RE.search(m):
         return (
             "Study rooms at Rentschler Library (Hamilton campus) are "
