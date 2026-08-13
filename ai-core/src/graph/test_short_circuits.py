@@ -3583,3 +3583,69 @@ def test_a_general_instruction_request_is_not_claimed_by_the_makerspace():
         "I want to incorporate making into my curriculum") is None
     assert _makerspace_instruction_answer(
         "can you do a library instruction session for my class") is None
+
+
+# --- "Do you have the book for <COURSE>?" (Kevin: 4/5 vs 2/5, same shape) ----
+
+
+def test_every_course_code_gets_the_same_answer():
+    """Kevin Messner asked CHM141 and BIO116 back to back and got completely
+    different answers. Measured on the deployed bot 2026-08-13, 8 course
+    codes: only the two CHM ones reached reserves, everything else got the
+    generic Primo template.
+
+    Not flakiness -- `course_reserves` has 51 exemplars and exactly one
+    contains a course code ("...for my CHM 144 class..."), so CHM landed near
+    it on the shared token and no other department had a neighbour. The
+    classifier was keying on the department prefix rather than the question
+    shape.
+    """
+    from src.graph.new_orchestrator import _course_book_answer
+
+    codes = ["CHM141", "BIO116", "PSY201", "ENG111", "MTH151", "CHM 141",
+             "BIO 116", "ENGL 220"]
+    answers = {}
+    for code in codes:
+        res = _course_book_answer(f"Do you have the book for {code}?")
+        assert res is not None, code
+        answers[code] = res[0]
+    # Same shape -> same answer, modulo the course name echoed back.
+    shapes = {a.replace(c.upper().replace(" ", " "), "X") for c, a in answers.items()}
+    normalised = {
+        a.replace("CHM 141", "X").replace("BIO 116", "X")
+         .replace("PSY 201", "X").replace("ENG 111", "X")
+         .replace("MTH 151", "X").replace("ENGL 220", "X")
+        for a in answers.values()
+    }
+    assert len(normalised) == 1, (
+        f"{len(normalised)} different answers for the same question shape")
+
+
+def test_the_course_book_answer_names_the_course_and_covers_both_routes():
+    """Better than either answer he saw: reserves FIRST because that is where
+    course textbooks live, Primo named as the fallback so it is right whether
+    or not the book is on reserve."""
+    from src.graph.new_orchestrator import _course_book_answer
+
+    body, cites = _course_book_answer("Do you have the book for BIO116?")
+    low = body.lower()
+    assert "BIO 116" in body, "echo the course back so it reads as an answer"
+    assert "reserve" in low
+    assert low.index("reserve") < low.index("primo"), (
+        "reserves must lead -- that is where course textbooks are")
+    assert "interlibrary loan" in low
+    # Kevin's own point elsewhere: don't make it conditional on the patron's
+    # opinion of our collection.
+    assert "you think the library should have it" not in low
+    assert len(cites) == 2
+
+
+def test_course_book_leaves_the_neighbouring_questions_alone():
+    from src.graph.new_orchestrator import _course_book_answer
+
+    for q in ("do you have the book Braiding Sweetgrass",
+              "how do I access reserves",
+              "where can I find books about totalitarianism",
+              # instructor submission keeps its own answer
+              "can you put my book on course reserves for BIO 116"):
+        assert _course_book_answer(q) is None, q

@@ -917,6 +917,11 @@ def _run_turn(
             # opening hours (Kevin Messner, 2/5).
             ("makerspace_instruction", _makerspace_instruction_answer),
             ("makerspace_equipment", _makerspace_equipment_answer),
+            # BEFORE course_reserves: "do you have the book for BIO116" says
+            # nothing about reserves, so course_reserves cannot catch it, and
+            # whether it reached a reserves answer depended on whether the
+            # classifier happened to have a same-department exemplar.
+            ("course_book", _course_book_answer),
             ("course_reserves", _course_reserves_answer),
             ("digital_exhibits", _digital_exhibits_answer),
             ("gov_docs", _gov_docs_answer),
@@ -5039,6 +5044,79 @@ _RESERVES_SUBMIT_RE = re.compile(
     r"\b(on|to)\s+(course\s+)?reserves?\b",
     re.IGNORECASE,
 )
+
+
+# "DO YOU HAVE THE BOOK FOR <COURSE>?" -- one shape, two answers.
+#
+# Kevin Messner, 2026-08-13, asked CHM141 and BIO116 back to back and got
+# completely different answers (4/5 and 2/5): "it's a bit strange that two
+# different course textbooks got two different answers? The first is much more
+# relevant."
+#
+# Measured on the deployed bot the same day, eight course codes:
+#
+#     CHM141   -> reserves      CHM 141  -> reserves
+#     BIO116   -> Primo         BIO 116  -> Primo
+#     PSY201   -> Primo         ENG111   -> Primo
+#     MTH151   -> Primo         "textbook for BIO116" -> Primo
+#
+# Not flakiness -- 2 of 8, and both of them CHM. The cause is one exemplar.
+# `course_reserves` has 51 exemplars and exactly one contains a course code:
+# "Hello I'm looking for a book for my CHM 144 class...". So CHM141 lands near
+# it on the shared "CHM" token and every other department has no such
+# neighbour. The classifier was keying on the DEPARTMENT PREFIX, not the
+# question shape, and none of the 51 exemplars has this shape at all.
+#
+# The existing short-circuit could not save it either: it requires the word
+# "reserve", and Kevin's question never says it.
+#
+# So the shape is matched directly here. The answer is deliberately better
+# than BOTH of the ones he saw: course textbooks live on reserve, so reserves
+# comes first, and Primo is named as the fallback for when it is not on
+# reserve -- which makes it correct either way instead of correct half the
+# time.
+_COURSE_BOOK_RE = re.compile(
+    r"\b(book|books|textbook|textbooks|text)\b", re.IGNORECASE,
+)
+_COURSE_CODE_RE = re.compile(
+    # "BIO116", "BIO 116", "bio-116". Three letters + three digits is the
+    # Miami pattern; the optional 4th letter covers codes like "ENGL".
+    r"\b([A-Z]{3,4})\s*-?\s*(\d{3})\b", re.IGNORECASE,
+)
+
+
+def _course_book_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
+    """"Do you have the book for BIO116?" -- same answer for every course."""
+    m = message or ""
+    if not _COURSE_BOOK_RE.search(m):
+        return None
+    hit = _COURSE_CODE_RE.search(m)
+    if not hit:
+        return None
+    # Instructors placing materials keep their own answer below.
+    if _RESERVES_SUBMIT_RE.search(m):
+        return None
+    course = f"{hit.group(1).upper()} {hit.group(2)}"
+    return (
+        f"Course textbooks are usually on **course reserve** rather than in "
+        f"the general collection, so start there: search course reserves for "
+        f"**{course}** [1]. You can search by the course code, the textbook "
+        f"title, or your instructor's last name.\n\n"
+        "Reserve copies are for use in the library -- typically a 2-hour "
+        "checkout, though the instructor picks the loan period (2-hour, "
+        "1-day or 3-day), and reserve material is cleared at the end of each "
+        "semester [1].\n\n"
+        f"If {course} has nothing on reserve, search Primo, the main catalogue "
+        f"[2] -- and if the book is not there either, Interlibrary Loan can "
+        f"usually get it.\n\n"
+        "Worth knowing: not every course has a reserve copy. The programme "
+        "covers a subset of high-enrolment courses, so a gap does not mean "
+        "you have missed something.",
+        [{"n": 1, "url": _RESERVES_GUIDE_URL,
+          "snippet": "Miami University Libraries — Reserves and Textbooks"},
+         {"n": 2, "url": _PRIMO_SEARCH_URL,
+          "snippet": "Primo — Miami University Libraries catalogue"}],
+    )
 
 
 def _course_reserves_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
