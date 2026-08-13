@@ -292,3 +292,39 @@ def test_computer_help_never_steals_a_real_subject_question():
               "how do I connect my laptop to the wifi",
               "can I check out a laptop"):
         assert computer_help_answer(q) is None, q
+
+
+def test_disclosing_an_account_name_is_not_an_it_help_request():
+    """A regression I introduced and caught by re-running Kevin's own list.
+
+    "My account is messnekr" is a patron DISCLOSING their username -- his
+    literal test input. The first version of the matcher needed only the noun,
+    so "my account" fired the IT-desk answer and displaced the correct one
+    ("I don't have access to your library account, check it at ... or call
+    ...").
+
+    A device noun alone is a statement; a device noun PLUS trouble is a
+    request. Both are required now.
+    """
+    from src.graph.facility_facts import computer_help_answer
+
+    for q in ("My account is messnekr",
+              "my account is jsmith",
+              "what is on my account",
+              "my email is burkejj@miamioh.edu",
+              "my library account balance"):
+        assert computer_help_answer(q) is None, q
+
+
+def test_the_trouble_shapes_still_reach_it():
+    """The fix must not have bought precision with coverage."""
+    from src.graph.facility_facts import computer_help_answer
+
+    for q in ("Who can help with my computer?",
+              "my password isn't working",
+              "I can't log in",
+              "I forgot my password",
+              "my laptop won't connect",
+              "my computer is broken",
+              "who can help me with my miami account"):
+        assert computer_help_answer(q) is not None, q

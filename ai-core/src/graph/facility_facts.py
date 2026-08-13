@@ -186,20 +186,39 @@ login with your Miami ID and password." """
 # "my laptop", "my password") IS reliable, and that is exactly the slice this
 # matcher takes. "I need help with my business" remains genuinely ambiguous
 # and is left to the agent.
-_IT_HELP_RE = re.compile(
-    # A device or account of THEIRS, or a login problem. The possessive is
-    # load-bearing: "my computer" is a device, "computer science" is a subject.
-    # An optional qualifier between the possessive and the noun: "my MIAMI
-    # account", "my UNIVERSITY email" -- students say it that way, and
-    # requiring the noun to follow "my" directly missed them.
+# TWO conditions, both required. The first version needed only the noun, and
+# that was too loose: "My account is messnekr" -- a patron DISCLOSING their
+# username, which is Kevin Messner's own test input -- matched "my account"
+# and got the IT-desk answer, displacing the correct one ("I don't have access
+# to your library account, check it at ... or call ..."). Found by re-running
+# his list against the deployed fix, 2026-08-13.
+#
+# A device noun alone is a statement. A device noun PLUS trouble is a request.
+_IT_NOUN_RE = re.compile(
+    # The possessive is load-bearing: "my computer" is a device, "computer
+    # science" is a subject. The optional qualifier catches "my MIAMI account"
+    # and "my UNIVERSITY email", which is how students say it.
     r"\b(my|the)\s+(?:miami\s+|university\s+|school\s+|muohio\s+)?"
     r"(computer|laptop|pc|mac|macbook|chromebook|tablet|ipad|"
     r"phone|device|account|password|login|log[- ]?in|username|net\s*id|"
-    r"miami\s*id|email|screen|keyboard|charger)\b"
-    r"|\b(can'?t|cannot|unable\s+to|trouble|problem|issue|help)\b[^.?!]{0,30}"
-    r"\b(log\s*in|login|sign\s*in|connect|password|reset)\b"
-    r"|\b(computer|laptop)\b[^.?!]{0,20}\b(broken|not\s+working|won'?t\s+"
-    r"(start|turn|boot)|frozen|crashed)\b",
+    r"miami\s*id|email|screen|keyboard|charger)\b",
+    re.IGNORECASE,
+)
+_IT_TROUBLE_RE = re.compile(
+    r"\b(help|helps|fix|fixed|broken|break|not\s+working|isn'?t\s+working|"
+    r"doesn'?t\s+work|won'?t\s+(work|start|turn|boot|open|connect|load)|"
+    r"can'?t|cannot|unable|trouble|problem|problems|issue|issues|"
+    r"reset|forgot|forgotten|locked\s+out|stuck|frozen|freezes|crashed|"
+    r"crashes|error|dead|charge|charging|slow|virus|malware|"
+    r"who\s+(can|do\s+i|should\s+i)|where\s+do\s+i\s+go)\b",
+    re.IGNORECASE,
+)
+# A login/connection problem stated without a possessive at all: "I can't log
+# in", "trouble connecting". Self-sufficient, so it bypasses the noun test.
+_IT_LOGIN_TROUBLE_RE = re.compile(
+    r"\b(can'?t|cannot|unable\s+to|trouble|problem|issue|help|forgot|"
+    r"locked\s+out)\b[^.?!]{0,30}"
+    r"\b(log\s*in|login|log\s*on|sign\s*in|connect|password|reset)\b",
     re.IGNORECASE,
 )
 
@@ -235,7 +254,13 @@ def computer_help_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
     Miami's IT support for a personal device or a Miami account.
     """
     m = message or ""
-    if not _IT_HELP_RE.search(m) or _NOT_IT_HELP_RE.search(m):
+    if _NOT_IT_HELP_RE.search(m):
+        return None
+    asks_for_help = (
+        (_IT_NOUN_RE.search(m) and _IT_TROUBLE_RE.search(m))
+        or _IT_LOGIN_TROUBLE_RE.search(m)
+    )
+    if not asks_for_help:
         return None
     return (
         "That one isn't a library question, and there's no subject librarian "
