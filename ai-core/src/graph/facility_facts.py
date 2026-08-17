@@ -317,6 +317,60 @@ def reading_room_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
     )
 
 
+# A REPORT IS NOT A QUESTION.
+#
+# Live traffic, 2026-08-17: "There is a toilet running on the second floor"
+# was answered with where the restrooms are. The patron was not lost -- they
+# were doing us a favour, and got a map.
+#
+# Nobody is going to file a work order through a chatbot, and pretending we
+# can would be worse than useless. What we can do is thank them and give them
+# the desk, in one short answer, which is what a member of staff would do.
+_FACILITY_PROBLEM_RE = re.compile(
+    r"\b(running|leak\w*|drip\w*|overflow\w*|clogged|blocked|broken|broke|"
+    r"not\s+working|isn'?t\s+working|doesn'?t\s+work|won'?t\s+(flush|work|"
+    r"turn\s+on|close|open)|out\s+of\s+order|flickering|burnt\s+out|"
+    r"burned\s+out|(is|are|was|were)\s+out\b|spill\w*|flooded|smells?|stinks?|"
+    r"no\s+(hot\s+)?water|"
+    r"jammed|stuck)\b",
+    re.IGNORECASE,
+)
+_FACILITY_THING_RE = re.compile(
+    r"\b(toilet|urinal|sink|tap|faucet|restroom|bathroom|water\s+fountain|"
+    r"drinking\s+fountain|bottle\s+filler|light|lights?|lamp|door|elevator|"
+    r"lift|escalator|air\s*conditioning|a/?c|heat|heater|window|blind|"
+    r"outlet|socket|printer|copier|scanner|computer|monitor|keyboard|"
+    r"chair|table|desk|carpet|ceiling|floor)\b",
+    re.IGNORECASE,
+)
+# A report STATES a condition. A question asks about one, and those keep their
+# own answers ("is there a water fountain on the third floor?").
+_ASKING_NOT_REPORTING_RE = re.compile(
+    r"^\s*(is|are|does|do|can|could|where|when|how|what|which|who|why|may)\b"
+    r"|\?\s*$",
+    re.IGNORECASE,
+)
+
+
+def facility_problem_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
+    """Someone is reporting something broken. Thank them, hand them the desk."""
+    m = message or ""
+    if _ASKING_NOT_REPORTING_RE.search(m.strip()):
+        return None
+    if not (_FACILITY_PROBLEM_RE.search(m) and _FACILITY_THING_RE.search(m)):
+        return None
+    return (
+        "Thanks for flagging that -- and sorry, I can't file a repair request "
+        "myself.\n\n"
+        f"The quickest route is the service desk: **{KING_PHONE}**, or stop "
+        "at the desk on the first floor of King. They can get it to Facilities "
+        "the same day.\n\n"
+        f"If it's easier to write it down, Ask Us reaches a librarian who can "
+        f"pass it on [1] -- mention the building and floor.",
+        [_cite(1, ASK_US_URL, "Miami University Libraries — Ask Us")],
+    )
+
+
 def restroom_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
     """Operator 2026-08-04: every floor has restrooms."""
     if not _RESTROOM_RE.search(message or ""):

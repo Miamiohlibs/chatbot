@@ -415,3 +415,48 @@ def test_every_answer_in_this_module_is_actually_registered():
     unwired = [n for n in exported if f"_ff.{n}" not in orch]
     assert not unwired, (
         f"defined but never registered, so they are dead code: {unwired}")
+
+
+# --- a report is not a question ---------------------------------------------
+
+
+def test_a_broken_fixture_report_gets_the_desk_not_a_map():
+    """Live traffic, 2026-08-17: "There is a toilet running on the second
+    floor" was answered with where the restrooms ARE. The patron was not lost,
+    they were doing us a favour, and got a map.
+
+    Nobody files a work order through a chatbot, so the honest answer says so
+    and hands over the desk -- what a member of staff would do.
+    """
+    from src.graph.facility_facts import facility_problem_answer
+
+    body, cites = facility_problem_answer(
+        "There is a toilet running on the second floor")
+    low = body.lower()
+    assert "(513) 529-4141" in body
+    assert "can't file a repair request" in low or "cannot file" in low
+    assert cites
+
+
+def test_the_report_phrasings_people_use():
+    from src.graph.facility_facts import facility_problem_answer
+
+    for q in ("There is a toilet running on the second floor",
+              "the sink on 3 is leaking",
+              "a light is out near the elevator",
+              "the printer on floor 2 is jammed",
+              "an outlet is broken in the quiet area"):
+        assert facility_problem_answer(q) is not None, q
+
+
+def test_questions_about_fixtures_keep_their_own_answers():
+    """A report STATES a condition; a question asks about one. Confusing the
+    two is how this bug happened in the first place, just in reverse."""
+    from src.graph.facility_facts import facility_problem_answer
+
+    for q in ("where are the restrooms",
+              "is there a water fountain on the third floor",
+              "are the elevators working?",
+              "how do I print",
+              "can I use a computer in the library"):
+        assert facility_problem_answer(q) is None, q

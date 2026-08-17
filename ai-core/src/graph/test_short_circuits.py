@@ -3697,3 +3697,54 @@ def test_real_conduct_questions_still_get_the_policy():
               "can I eat in the library",
               "can I bring my dog"):
         assert _facilities_policy_answer(q) is not None, q
+
+
+# --- "help me find something" was being refused as out of scope --------------
+
+
+def test_finding_help_covers_the_two_refused_live_questions():
+    """Both refused with "that is outside what I cover", 2026-08-17:
+
+        'some assistance with books on "vision statements".'
+        'Can you direct me to GrantFoward?'
+
+    Both are squarely library questions. The first is the class Kevin Messner
+    rated 3/5 in July -- he said the Primo pointer "would actually be more
+    suitable" -- and it had been fixed only for "where can I find books ABOUT
+    X". `_looks_like_item_request` guards on "do you have <title>", an
+    OWNERSHIP question, which neither of these is.
+    """
+    from src.graph.new_orchestrator import _finding_help_answer
+
+    for q in ('some assistance with books on "vision statements".',
+              "Can you direct me to GrantFoward?",
+              "I need help finding articles on climate migration",
+              "looking for books about totalitarianism"):
+        assert _finding_help_answer(q) is not None, q
+
+
+def test_finding_help_offers_all_three_routes():
+    """A database name is indistinguishable from any other proper noun --
+    "GrantForward" only reads as a database if you already know. So rather
+    than guess, name the three routes by what the patron is after."""
+    from src.graph.new_orchestrator import _finding_help_answer
+
+    body, cites = _finding_help_answer("can you direct me to GrantForward")
+    low = body.lower()
+    assert "primo" in low
+    assert "databases a-z" in low
+    assert "subject librarian" in low
+    assert len(cites) == 3
+
+
+def test_finding_help_is_last_and_yields_to_every_specific_answer():
+    """Its matcher is the broadest in the group, so it must not take a
+    question that has a better answer."""
+    from src.graph.new_orchestrator import _finding_help_answer
+
+    for q in ("what are the hours", "can I reserve a study room",
+              "how much does printing cost", "who is the chemistry librarian",
+              "do you have the book for BIO116", "where are the restrooms",
+              "are there lockers in special collections",
+              "how do I renew a book"):
+        assert _finding_help_answer(q) is None, q

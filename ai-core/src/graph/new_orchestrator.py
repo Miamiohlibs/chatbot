@@ -944,6 +944,10 @@ def _run_turn(
             # on "where are the bathrooms" is the worst kind of unhelpful.
             # printing_scanning_wifi is LAST of this group -- its matcher is
             # the broadest, so anything more specific gets first refusal.
+            # BEFORE restrooms and the rest: "there is a toilet running on the
+            # second floor" is a REPORT, and restroom_answer was replying with
+            # where the restrooms are (live traffic 2026-08-17).
+            ("facility_problem", _ff.facility_problem_answer),
             ("quiet_study", _ff.quiet_study_answer),
             ("reading_rooms", _ff.reading_room_answer),
             ("restrooms", _ff.restroom_answer),
@@ -991,6 +995,11 @@ def _run_turn(
             # to run first to do that.
             ("printing_cost", _ff.printing_cost_answer),
             ("print_scan_wifi", _ff.printing_scanning_wifi_answer),
+            # LAST in this group on purpose: its matcher is the broadest of
+            # all of them, so every specific answer above gets first refusal.
+            # It exists because "assistance with books on X" and "direct me to
+            # <database>" were being refused as out of scope.
+            ("finding_help", _finding_help_answer),
         ):
             _res = _fn(request.user_message)
             if _res is not None:
@@ -4129,6 +4138,84 @@ _PEER_REVIEW_RE = re.compile(
 _PEER_REVIEW_FIND_RE = re.compile(
     r"\b(only|filter|find|limit|restrict|search|how)\b", re.IGNORECASE
 )
+
+
+# "HELP ME FIND SOMETHING" REFUSED AS OUT OF SCOPE.
+#
+# Two live rows, 2026-08-17, both refused with "that is outside what I cover":
+#
+#   'some assistance with books on "vision statements".'
+#   'Can you direct me to GrantFoward?'
+#
+# Both are squarely library questions. The first is the same class Kevin
+# Messner rated 3/5 in July -- he said the Primo pointer "would actually be
+# more suitable" -- and it was fixed only for "where can I find books ABOUT
+# X". `_looks_like_item_request` guards on "do you have <title>", which is an
+# OWNERSHIP question; neither of these is one.
+#
+# WHY ONE ANSWER FOR BOTH
+# I cannot tell a database name from any other proper noun -- "GrantForward"
+# is only recognisable as a database if you already know. So rather than
+# guess, this offers the three routes by what the patron is looking for:
+# Primo for books and articles, the A-Z list for a named database, and the
+# subject librarian when they are not sure. That is honest about the
+# uncertainty and still actionable, which a refusal was not.
+_FIND_HELP_TOPIC_RE = re.compile(
+    r"\b(books?|ebooks?|materials?|resources?|sources?|articles?|journals?|"
+    r"literature|readings?|studies|research)\b[^.?!]{0,20}\b(on|about|for|"
+    r"regarding|covering|related\s+to)\b",
+    re.IGNORECASE,
+)
+_FIND_HELP_ASK_RE = re.compile(
+    r"\b(assistance|help|helping|direct\s+me|point\s+me|guide\s+me|"
+    r"where\s+(can|do|would)\s+i\s+(find|get|look|search)|"
+    r"how\s+(can|do)\s+i\s+(find|get|access|reach)|looking\s+for|"
+    r"need\s+to\s+find|trying\s+to\s+find|can\s+you\s+(find|get|direct|point))\b",
+    re.IGNORECASE,
+)
+# These have their own, better answers -- do not take their questions.
+_FIND_HELP_EXCLUDE_RE = re.compile(
+    r"\b(hour|hours|open|closed|room|rooms|study\s+space|print|printing|"
+    r"wifi|wi-?fi|scan|restroom|bathroom|toilet|locker|parking|"
+    r"librarian|liaison|reserve|reserves|textbook|course|ill|interlibrary|"
+    r"renew|due\s+date|fine|fines|special\s+collections|archives|makerspace|"
+    r"maker\s*space|3d)\b"
+    # A course code means the course-reserves answer, which runs earlier in
+    # the chain anyway -- belt and braces in case the order is ever changed.
+    r"|\b[A-Z]{3,4}\s*-?\s*\d{3}\b",
+    re.IGNORECASE,
+)
+
+
+def _finding_help_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
+    """Someone wants help finding material and we were refusing them."""
+    m = message or ""
+    if _FIND_HELP_EXCLUDE_RE.search(m):
+        return None
+    if not (_FIND_HELP_TOPIC_RE.search(m) or _FIND_HELP_ASK_RE.search(m)):
+        return None
+    return (
+        "I can point you at the right starting place -- which one depends on "
+        "what you are after:\n\n"
+        "- **Books, ebooks, articles, DVDs** on a topic: search **Primo**, the "
+        "library catalogue [1]. It covers our own collection plus OhioLINK "
+        "partner libraries.\n"
+        "- **A specific database by name**: the **Databases A-Z** list [2] has "
+        "every one the Libraries subscribe to, searchable by title.\n"
+        "- **Not sure where to start, or the topic is broad**: your **subject "
+        "librarian** [3] does this for a living and will meet with you -- for "
+        "a topic search that is usually faster than guessing.\n\n"
+        "If you tell me the subject or the course, I can name the right "
+        "librarian for it.",
+        [
+            {"n": 1, "url": _PRIMO_SEARCH_URL,
+             "snippet": "Primo — Miami University Libraries catalogue"},
+            {"n": 2, "url": _DATABASES_AZ_URL,
+             "snippet": "Miami University Libraries — Databases A-Z"},
+            {"n": 3, "url": _LIAISONS_URL,
+             "snippet": "Miami University Libraries — subject librarians"},
+        ],
+    )
 
 
 def _peer_review_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
