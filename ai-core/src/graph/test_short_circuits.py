@@ -3797,3 +3797,54 @@ def test_the_reported_question_no_longer_reaches_finding_help():
     assert _finding_help_answer(
         "hello! how can I find information on textbooks in the Hamilton "
         "campus library?") is None
+
+
+# --- LOLA: a pandemic-era page that was never updated ------------------------
+
+
+def test_lola_is_registered():
+    """Wiring, not behaviour. Defined-but-never-registered has bitten this
+    project five times, most recently the printing-cost answer earlier today.
+    """
+    from pathlib import Path
+
+    src = (Path(__file__).resolve().parent / "new_orchestrator.py").read_text(
+        encoding="utf-8")
+    assert '("lola", _lola_answer)' in src
+
+
+def test_lola_refuses_to_claim_the_service_still_exists():
+    """Found reviewing flagged conversations 2026-08-18. "What is LOLA and how
+    do I use it" was refused as out of scope while the page sits in our index
+    -- but the accidental refusal was SAFER than an answer, because the page
+    describes a 2020 stopgap in the future tense:
+
+        "...during the time of the COVID-19 pandemic, the Libraries WILL BE
+         OFFERING A NEW SERVICE ... this SHORT-TERM lending service"
+
+    So the answer must assert NEITHER that it runs nor that it ended, which is
+    the operator's short-term-content rule applied to a named instance.
+    """
+    from src.graph.new_orchestrator import _lola_answer
+
+    body, cites = _lola_answer("what is LOLA and how do I use it")
+    low = body.lower()
+    assert "short-term" in low
+    assert "can't tell you whether it is still running" in low
+    # Neither claim is allowed.
+    assert "is no longer" not in low and "has ended" not in low
+    assert "you can use lola" not in low
+    # Durable routes plus the contact the page itself names.
+    assert "(513) 529-4141" in body
+    assert "myersc2@miamioh.edu" in body
+    assert "interlibrary loan" in low
+    assert cites and "lola" in cites[0]["url"].lower()
+
+
+def test_lola_does_not_fire_on_a_room_called_lola():
+    """A bare four-letter token earning a paragraph about a defunct lending
+    service reads as broken, even though no such room exists."""
+    from src.graph.new_orchestrator import _lola_answer
+
+    assert _lola_answer("where is the lola room") is None
+    assert _lola_answer("how do I print") is None

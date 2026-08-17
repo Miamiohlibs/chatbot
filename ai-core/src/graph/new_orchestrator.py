@@ -1013,6 +1013,9 @@ def _run_turn(
             # definition: a crawl is a snapshot and this content changes.
             # Hours are the operator's explicit carve-out and are excluded
             # inside the function -- they come live from LibCal.
+            # LOLA is a named instance of the same rule: a page describing a
+            # short-term pandemic service that was never updated.
+            ("lola", _lola_answer),
             ("temporary_notice", _ff.temporary_notice_answer),
             ("building_facility", _ff.building_facility_answer),
             # LAST in this group on purpose: its matcher is the broadest of
@@ -8598,3 +8601,76 @@ __all__ = [
     "TurnResponse",
     "run_turn",
 ]
+
+
+# --- LOLA: a pandemic-era service still on the website -----------------------
+#
+# Found while reviewing flagged conversations, 2026-08-18. "What is LOLA and
+# how do I use it" was refused as out of scope -- while the page sits in our
+# index. Refusing a question we have a page for is the bug class this review
+# keeps turning up.
+#
+# But the page is worse than missing, and the accidental refusal was SAFER than
+# an answer would have been. Its own words:
+#
+#   "in support of Miami University's efforts to address concerns about
+#    physical distancing on campus during the time of the COVID-19 pandemic,
+#    the Miami University Libraries WILL BE OFFERING A NEW SERVICE ... this
+#    SHORT-TERM lending service"
+#
+# So LOLA was a 2020 stopgap, described in the future tense, and very probably
+# ended years ago. Answering "here is how to use LOLA" would send a 2026
+# student to a service that may not exist.
+#
+# THIS IS EXACTLY THE OPERATOR'S 2026-08-18 RULE: short-term and temporary
+# content goes to the desk. So this asserts NEITHER that LOLA is running NOR
+# that it has ended -- we cannot tell from a page that was never updated -- and
+# names the durable alternatives plus the contact the page itself gives.
+#
+# Carla Myers is verified in our own Librarian table (Coordinator of Scholarly
+# Communication, myersc2@miamioh.edu); the page calls her the copyright
+# librarian, so the role wording differs and the person does not.
+#
+# Checked the whole index for others like it: only this page and one benign
+# "short-term loans" mention on the Art & Architecture page. LOLA is the single
+# landmine, which is why it gets a named answer rather than a general rule.
+_KING_PHONE_FOR_LOLA = "(513) 529-4141"
+_LOLA_URL = "https://www.lib.miamioh.edu/use/borrow/lola/"
+_LOLA_CONTACT = "myersc2@miamioh.edu"
+_LOLA_RE = re.compile(
+    r"\blola\b|limited\s+online\s+library\s+access", re.IGNORECASE,
+)
+
+
+def _lola_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
+    """LOLA -- describe what it WAS, refuse to claim it still is."""
+    m = message or ""
+    if not _LOLA_RE.search(m):
+        return None
+    # "lola" is a short token and also a name. No Lola room or lounge exists at
+    # Miami, so this is a corner case rather than a live problem -- but a bare
+    # four-letter match earning a paragraph about a defunct lending service is
+    # the kind of thing that reads as broken, so decline it.
+    if re.search(r"\blola\b\s*(room|lounge|hall|cafe|café|desk)\b",
+                 m, re.IGNORECASE):
+        return None
+    return (
+        "**LOLA** (Limited Online Library Access) was set up as a "
+        "**short-term** service during the COVID-19 period, giving remote "
+        "access through Canvas to works the Libraries hold in print [1].\n\n"
+        "**I can't tell you whether it is still running.** That page has not "
+        "been updated since it was introduced, and I would rather say so than "
+        "walk you into a service that may have ended.\n\n"
+        "If what you need is remote access to something we hold in print, "
+        "these are the durable routes:\n"
+        f"- The **service desk** knows what is currently offered: "
+        f"{_KING_PHONE_FOR_LOLA}\n"
+        f"- **Carla Myers**, Coordinator of Scholarly Communication "
+        f"({_LOLA_CONTACT}), is the contact named on the LOLA page itself and "
+        f"handles copyright and access questions\n"
+        "- **Interlibrary Loan** can often get a digital copy of an article or "
+        "chapter regardless.",
+        [{"n": 1, "url": _LOLA_URL,
+          "snippet": "Miami University Libraries — Limited Online Library "
+                     "Access (LOLA)"}],
+    )
