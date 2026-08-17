@@ -948,10 +948,11 @@ def _run_turn(
             # second floor" is a REPORT, and restroom_answer was replying with
             # where the restrooms are (live traffic 2026-08-17).
             ("facility_problem", _ff.facility_problem_answer),
-            ("quiet_study", _ff.quiet_study_answer),
-            ("reading_rooms", _ff.reading_room_answer),
-            ("restrooms", _ff.restroom_answer),
-            ("nursing_room", _ff.nursing_room_answer),
+            # Operator ruling 2026-08-17: building facts we cannot source on
+            # the website go to the service desk instead of being answered
+            # from memory. One answer replaces the four that used to guess at
+            # floors -- see the note in facility_facts.
+            ("building_facility", _ff.building_facility_answer),
             # "Who can help with my computer?" -- Kevin Messner's 1/5. It was
             # answered with a subject librarian's name and email because the
             # LibGuides API fuzzy-matched "computer" to Computer Science.

@@ -280,43 +280,6 @@ def computer_help_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
     )
 
 
-def quiet_study_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
-    """Operator 2026-08-04: quiet areas are on the 2nd AND 3rd floors.
-
-    The website does not say this anywhere -- "silent" appears zero times in
-    the whole corpus -- so the bot refused every version of the question.
-    """
-    if not _QUIET_RE.search(message or ""):
-        return None
-    return (
-        "King Library has quiet study areas on both the **second and third "
-        "floors**. The second floor also holds the Faculty and Graduate "
-        "Reading Rooms, which are reserved for faculty and graduate "
-        "students [1].\n\n"
-        "That floor detail comes from the library staff rather than a web "
-        f"page, so if you want to confirm before you come, call {KING_PHONE}.",
-        [_cite(1, READING_ROOMS_URL,
-               "Miami University Libraries — Faculty and Graduate Reading Room")],
-    )
-
-
-def reading_room_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
-    """Operator 2026-08-04: both reading rooms are on the 2nd floor."""
-    if not _READING_ROOM_RE.search(message or ""):
-        return None
-    return (
-        "King Library has a Graduate Reading Room and a Faculty & Staff "
-        "Reading Room, both on the **second floor** [1]. They are reserved "
-        "for those groups -- graduate students and faculty/staff "
-        "respectively.\n\n"
-        "If you are an undergraduate looking for somewhere quiet, the second "
-        "and third floors both have quiet study areas that are open to "
-        "everyone.",
-        [_cite(1, READING_ROOMS_URL,
-               "Miami University Libraries — Faculty and Graduate Reading Room")],
-    )
-
-
 # A REPORT IS NOT A QUESTION.
 #
 # Live traffic, 2026-08-17: "There is a toilet running on the second floor"
@@ -371,48 +334,10 @@ def facility_problem_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
     )
 
 
-def restroom_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
-    """Operator 2026-08-04: every floor has restrooms."""
-    if not _RESTROOM_RE.search(message or ""):
-        return None
-    return (
-        "There are restrooms on **every floor** of King Library. Look for the "
-        "signage near the elevators and stairwells on whichever floor you are "
-        "on.\n\n"
-        "This is from library staff rather than a web page, so if you need "
-        f"something specific -- an accessible or all-gender restroom, for "
-        f"example -- call {KING_PHONE} and someone can tell you exactly where "
-        f"to go.",
-        [],
-    )
-
-
-def nursing_room_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
-    """Operator 2026-08-04: there is NO nursing/lactation room in the library.
-
-    An honest no, with a route to someone who can help, beats both a refusal
-    and a hedge. A parent needs to know before they travel, not after.
-    """
-    m = message or ""
-    if not _NURSING_RE.search(m):
-        return None
-    if _NURSING_IS_THE_SUBJECT_RE.search(m):
-        return None          # the DEGREE, not the room -- see the pattern
-    return (
-        "King Library does **not** have a dedicated nursing or lactation "
-        "room.\n\n"
-        f"The library staff can help you find somewhere suitable -- call "
-        f"{KING_PHONE} or ask through Ask Us [1]. Miami University maintains "
-        "lactation spaces elsewhere on campus, and the staff can point you to "
-        "the nearest one.",
-        [_cite(1, ASK_US_URL, "Miami University Libraries — Ask Us")],
-    )
-
-
 PRINT_COST_FAQ_URL = "https://libanswers.lib.miamioh.edu/faq/163327"
 """FAQ 163327: "Printing costs in the Libraries are $0.10/page for B&W and
-$0.25/page for Color." Corroborated by FAQ 174591, which adds that students
-pay through MUlaa with their student ID. Both live in the index, checked
+$0.25/page for Color." Corroborated by FAQ 174591, which adds that students pay
+through MUlaa with their student ID. Both live in the index, checked
 2026-08-16."""
 
 # "IS THERE FREE PRINTING?" -- a real student, 2026-08-15, the first week of
@@ -424,13 +349,15 @@ pay through MUlaa with their student ID. Both live in the index, checked
 # this one. It just did not list the words people actually use. Measured:
 #
 #     "how much does printing cost"   -> correctly excluded
-#     "printing charges"              -> correctly excluded
 #     "Is there free printing?"       -> NOT excluded, got the guide
-#     "is printing free"              -> NOT excluded, got the guide
 #     "do I have to pay to print"     -> NOT excluded, got the guide
 #
 # Excluding them is not enough on its own: we know the answer exactly, so the
 # honest thing is to give it. "Free?" deserves yes or no, not a link.
+#
+# NOTE this is NOT affected by the 2026-08-17 "building facts go to the desk"
+# ruling: these figures come from a published FAQ, not from memory. The rule
+# is about unsourced claims, not about declining to be useful.
 _PRINT_COST_RE = re.compile(
     r"\b(free|cost|costs|price|pricing|how\s+much|charge|charges|"
     r"pay|paid|paying|fee|fees|expensive|cheap|per\s+page)\b",
@@ -497,4 +424,104 @@ def printing_scanning_wifi_answer(message: str) -> "Optional[tuple[str, list[dic
             _cite(3, PRINTING_VIDEO_URL, "Miami University Libraries — printing how-to video"),
             _cite(4, PRINTING_PAGE_URL, "Miami University Libraries — Printing and WiFi"),
         ],
+    )
+
+
+# BUILDING FACTS WE CANNOT SOURCE GO TO THE SERVICE DESK.
+#
+# OPERATOR RULING 2026-08-17, reversing the 2026-08-04 decision this module was
+# built on. The original rule was "refusing a question the staff can answer in
+# one sentence is the worst kind of unhelpful", so four answers were written
+# from the operator's own knowledge. None of them was on a page:
+#
+#   restrooms      "there are restrooms on every floor"      no citation at all
+#   quiet study    "quiet areas on the 2nd and 3rd floors"   floors on no page
+#   reading rooms  "both on the 2nd floor"                   floors on no page
+#   nursing room   "there is no lactation room"              nowhere on the site
+#
+# The new rule, for the physical plant -- toilets, lifts, fixtures, floors:
+# if it is not on the website, do not answer from memory. Send them to the desk.
+#
+# WHY THE REVERSAL IS RIGHT EVEN THOUGH THOSE ANSWERS WERE USEFUL
+# This module warned about exactly this failure in its own header from day one:
+# "a floor gets renovated and nobody updates a Python file". A confidently
+# wrong floor sends someone up three flights for nothing, and NOBODY CAN TELL
+# IT IS WRONG BY READING IT -- there is no citation to check against. The desk
+# always knows the building; this file only knows what it was told once.
+#
+# WHAT IT STILL DOES, because this is a navigator and not a refusal machine:
+# where a real page exists for the thing asked about, hand over the page AND
+# the desk. The Reading Rooms page genuinely describes the rooms and who may
+# use them; it simply does not give a floor. Withholding a page we hold would
+# be its own kind of wrong.
+_BUILDING_FIXTURE_RE = re.compile(
+    r"\b(restroom|restrooms|bathroom|bathrooms|toilet|toilets|washroom|"
+    r"men'?s\s+room|women'?s\s+room|urinal|"
+    r"elevator|elevators|lift|lifts|escalator|stairs|stairwell|"
+    r"water\s+fountain|drinking\s+fountain|bottle\s+filler|"
+    r"vending|microwave|"
+    r"nursing|lactation|breastfeed\w*|breast\s*feed\w*|"
+    r"pump(ing)?\s+room|mother'?s\s+room)\b",
+    re.IGNORECASE,
+)
+# The academic senses of "nursing" keep their own answers. This carries over
+# the 2026-08-12 fix: "who is the nursing librarian" was being answered with
+# "King Library has no lactation room".
+_FIXTURE_IS_ACADEMIC_RE = re.compile(
+    r"\b(librarian|liaison|subject\s+specialist|research|"
+    r"database|databases|journals?|articles?|citation|literature|"
+    r"program|programme|major|degree|course|class|students?|faculty|school)\b",
+    re.IGNORECASE,
+)
+_QUIET_SPACE_RE = re.compile(
+    r"\b(silent|quiet)\b[^.?!]{0,30}\b(area|areas|floor|floors|space|spaces|"
+    r"section|room|rooms|study|zone)\b"
+    r"|\b(study|studying|read|reading|floor|floors|somewhere|anywhere|place)\b"
+    r"[^.?!]{0,24}\b(silent|silently|quiet|quietly)\b"
+    r"|\bwhere\b[^.?!]{0,20}\b(silent|quiet)\b",
+    re.IGNORECASE,
+)
+_READING_ROOM_RE = re.compile(
+    r"\b(grad(uate)?|faculty|staff)\b[^.?!]{0,24}\breading\s+room",
+    re.IGNORECASE,
+)
+
+
+def building_facility_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
+    """Where is X in the building? The desk answers, not this file.
+
+    Replaces quiet_study_answer, reading_room_answer, restroom_answer and
+    nursing_room_answer. See the note above for why all four were removed.
+    """
+    m = message or ""
+    reading_room = bool(_READING_ROOM_RE.search(m))
+    fixture = bool(_BUILDING_FIXTURE_RE.search(m))
+    if fixture and _FIXTURE_IS_ACADEMIC_RE.search(m):
+        fixture = False          # the nursing LIBRARIAN, not a lactation room
+    if not (reading_room or fixture or _QUIET_SPACE_RE.search(m)):
+        return None
+
+    if reading_room:
+        return (
+            "King Library has a Graduate Reading Room and a Faculty & Staff "
+            "Reading Room, reserved for those groups respectively. The "
+            "Reading Rooms page covers who may use them and how access "
+            "works [1].\n\n"
+            "It does not say which floor they are on, and I would rather not "
+            f"guess -- the service desk will tell you: **{KING_PHONE}**, or "
+            "ask at the desk on the first floor.",
+            [_cite(1, READING_ROOMS_URL,
+                   "Miami University Libraries — Faculty and Graduate "
+                   "Reading Room")],
+        )
+
+    return (
+        "I can't find that on the Libraries' website, and I would rather send "
+        "you to someone who knows than guess at it.\n\n"
+        f"The service desk has the current answer: **{KING_PHONE}**, or ask at "
+        "the desk on the first floor of King. For anything about the building "
+        "itself they are the right people -- layouts change and a web page "
+        "does not always keep up.\n\n"
+        "If you would rather write it down, Ask Us reaches a librarian [1].",
+        [_cite(1, ASK_US_URL, "Miami University Libraries — Ask Us")],
     )

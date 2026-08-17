@@ -19,71 +19,19 @@ def _ans(fn, q):
 # --- quiet study: 2nd AND 3rd floor -------------------------------------
 
 
-@pytest.mark.parametrize("q", [
-    "where is the silent study area",
-    "Where is the silent study area?",
-    "is there a quiet floor",
-    "quiet study space?",
-    "where can i study quietly",
-    "do you have silent areas",
-    "which floor is quiet",
-])
-def test_quiet_fires_on_how_students_ask(q):
-    a = _ans(F.quiet_study_answer, q)
-    assert a is not None, q
-    assert "second and third" in a.lower()
-
-
-def test_quiet_answer_names_both_floors_not_just_one():
-    """The gold said THIRD floor only; the operator says second AND third."""
-    a = _ans(F.quiet_study_answer, "where is the silent study area")
-    assert "second" in a.lower() and "third" in a.lower()
-
-
-def test_quiet_answer_says_where_the_fact_came_from():
-    """It is not on any page, so the answer must not imply a page said it."""
-    a = _ans(F.quiet_study_answer, "quiet study area")
-    assert "library staff" in a.lower()
-    assert F.KING_PHONE in a
-
-
-@pytest.mark.parametrize("q", [
-    "can you be quiet about my fines",          # 'quiet' but not a space question
-    "how do I renew a book",
-    "who is my librarian",
-])
-def test_quiet_does_not_overfire(q):
-    assert F.quiet_study_answer(q) is None, q
-
-
-# --- reading rooms: both on the 2nd floor -------------------------------
-
-
-@pytest.mark.parametrize("q", [
-    "where is the graduate reading room",
-    "is there a faculty reading room",
-    "grad reading room location",
-    "staff reading room",
-])
-def test_reading_room_fires(q):
-    a = _ans(F.reading_room_answer, q)
-    assert a is not None, q
-    assert "second floor" in a.lower()
-
-
-def test_reading_room_tells_undergrads_where_to_go_instead():
-    """The rooms are restricted, so a bare "you can't" is a dead end."""
-    a = _ans(F.reading_room_answer, "can I use the graduate reading room")
-    assert "undergraduate" in a.lower()
-    assert "quiet study" in a.lower()
-
-
-def test_reading_room_cites_the_page_that_really_is_titled_that():
-    r = F.reading_room_answer("graduate reading room")
-    assert r[1][0]["url"] == F.READING_ROOMS_URL
-
-
-# --- restrooms: every floor ---------------------------------------------
+# --- building facts go to the desk (operator ruling 2026-08-17) ----------
+#
+# THE PREMISE OF THESE TESTS CHANGED, so they are rewritten rather than
+# deleted. They used to assert the OLD policy: quiet areas "second and third
+# floor", reading rooms "second floor", restrooms "every floor", and "there is
+# no lactation room" -- all four answered from the operator's own knowledge,
+# because on 2026-08-04 the ruling was that refusing a question staff can
+# answer in one sentence is the worst kind of unhelpful.
+#
+# On 2026-08-17 the same operator reversed it for the physical plant: if it is
+# not on the website, do not answer from memory, send them to the desk. Those
+# old assertions were pinning floor numbers that no page backs and that nobody
+# reading the answer could check.
 
 
 @pytest.mark.parametrize("q", [
@@ -91,42 +39,65 @@ def test_reading_room_cites_the_page_that_really_is_titled_that():
     "is there a restroom",
     "where's the toilet",
     "mens room",
-])
-def test_restroom_fires(q):
-    a = _ans(F.restroom_answer, q)
-    assert a is not None, q
-    assert "every floor" in a.lower()
-
-
-def test_restroom_answer_carries_no_citation():
-    """No page states this, so no page gets cited for it."""
-    assert F.restroom_answer("where are the bathrooms")[1] == []
-
-
-def test_restroom_offers_a_route_for_accessible_or_all_gender():
-    a = _ans(F.restroom_answer, "where are the bathrooms")
-    assert "accessible" in a.lower()
-
-
-# --- nursing room: there isn't one --------------------------------------
-
-
-@pytest.mark.parametrize("q", [
+    "where is the silent study area",
+    "is there a quiet floor",
+    "which floor is quiet",
     "do you have a lactation room",
     "is there a nursing room",
     "where can I breastfeed",
-    "is there a mothers room",
+    "where is the elevator",
+    "is there a water fountain on the third floor",
 ])
-def test_nursing_fires(q):
-    assert F.nursing_room_answer(q) is not None, q
+def test_unsourced_building_questions_go_to_the_desk(q):
+    a = _ans(F.building_facility_answer, q)
+    assert a is not None, q
+    assert F.KING_PHONE in a, q
+    # And it must NOT assert a floor it cannot source.
+    for invented in ("second and third", "every floor", "does not have"):
+        assert invented not in a.lower(), f"{q!r} still guesses: {invented!r}"
 
 
-def test_nursing_answer_is_an_honest_no_with_a_route():
-    """A parent needs to know BEFORE they travel."""
-    a = _ans(F.nursing_room_answer, "is there a nursing room")
-    assert "does **not** have" in a or "does not have" in a
-    assert F.KING_PHONE in a
-    assert "elsewhere on campus" in a.lower()
+def test_it_says_why_rather_than_just_refusing():
+    """"I don't know" is a dead end; "it isn't on the site, the desk knows" is
+    a route. The distinction is the whole reason this is not a refusal."""
+    a = _ans(F.building_facility_answer, "where are the bathrooms")
+    low = a.lower()
+    assert "can't find that on the" in low or "cannot find that on the" in low
+    assert "desk" in low
+
+
+def test_reading_rooms_still_hand_over_the_page_they_do_have():
+    """A navigator does not withhold a page it holds. The Reading Rooms page
+    genuinely describes the rooms and who may use them -- it just does not say
+    which floor, and that part goes to the desk."""
+    r = F.building_facility_answer("where is the graduate reading room")
+    assert r is not None
+    body, cites = r
+    assert cites and cites[0]["url"] == F.READING_ROOMS_URL
+    assert "graduate reading room" in body.lower()
+    assert "second floor" not in body.lower(), "the floor is not on that page"
+    assert F.KING_PHONE in body
+
+
+def test_the_nursing_librarian_carve_out_survived_the_rewrite():
+    """Regression from 2026-08-12: "who is the nursing librarian" was answered
+    with "King Library has no lactation room". The academic sense of the word
+    must keep reaching the liaison path."""
+    for q in ("who is the nursing librarian",
+              "nursing databases",
+              "I need help with my nursing degree"):
+        assert F.building_facility_answer(q) is None, q
+
+
+@pytest.mark.parametrize("q", [
+    "can you be quiet about my fines",
+    "how do I renew a book",
+    "who is my librarian",
+    "how do I print",
+    "what are the hours",
+])
+def test_building_answer_does_not_overfire(q):
+    assert F.building_facility_answer(q) is None, q
 
 
 # --- printing / scanning / wifi -----------------------------------------
@@ -200,10 +171,10 @@ def test_print_does_not_hijack_the_specific_cases(q):
 
 def test_every_answer_is_nonempty_and_every_citation_is_numbered():
     cases = [
-        (F.quiet_study_answer, "quiet study area"),
-        (F.reading_room_answer, "graduate reading room"),
-        (F.restroom_answer, "where are the bathrooms"),
-        (F.nursing_room_answer, "lactation room"),
+        (F.building_facility_answer, "quiet study area"),
+        (F.building_facility_answer, "graduate reading room"),
+        (F.building_facility_answer, "where are the bathrooms"),
+        (F.building_facility_answer, "lactation room"),
         (F.printing_scanning_wifi_answer, "how do I print"),
     ]
     for fn, q in cases:

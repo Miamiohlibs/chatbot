@@ -3294,35 +3294,51 @@ def test_ill_turnaround_yields_to_the_return_question():
 # --- "nursing" is a degree as well as a room (2026-08-12) -----------------
 
 
-def test_the_nursing_librarian_is_not_answered_with_lactation_rooms():
-    """Measured against the running service: "who is the nursing librarian"
-    returned "King Library does not have a dedicated nursing or lactation
-    room". The facility matcher runs before the liaison logic, so the word
-    alone was enough. A student asking for their subject librarian and being
-    told about lactation rooms is exactly the reply a service desk then has
-    to recover."""
-    from src.graph.facility_facts import nursing_room_answer
+def test_the_nursing_librarian_is_not_answered_with_a_lactation_room():
+    """Measured against the running service 2026-08-12: "who is the nursing
+    librarian" returned "King Library does not have a dedicated nursing or
+    lactation room". The facility matcher ran before the liaison logic, so the
+    word alone was enough. A student asking for their subject librarian and
+    being told about lactation rooms is exactly the reply a service desk then
+    has to recover.
+
+    The carve-out has to survive the 2026-08-17 rewrite, which replaced four
+    unsourced building answers with one desk referral -- so this now guards
+    `building_facility_answer` instead of the deleted `nursing_room_answer`.
+    """
+    from src.graph.facility_facts import building_facility_answer
     for q in ("who is the nursing librarian",
               "who is the liaison for nursing",
               "nursing databases",
               "nursing journals",
               "I need help with nursing research",
               "best databases for nursing students"):
-        assert nursing_room_answer(q) is None, f"answered as a room: {q}"
+        assert building_facility_answer(q) is None, f"answered as a room: {q}"
 
 
-def test_the_room_question_still_gets_the_honest_no():
-    """The operator's answer exists because a parent needs to know before
-    they travel; disambiguation must not cost them it."""
-    from src.graph.facility_facts import nursing_room_answer
+def test_the_lactation_room_question_now_goes_to_the_desk():
+    """PREMISE CHANGED, so this is rewritten rather than deleted.
+
+    It used to assert "does **not** have" -- the operator's own answer, given
+    on 2026-08-04 because a parent needs to know before they travel. On
+    2026-08-17 the same operator ruled that building facts we cannot source on
+    the website must not be answered from memory, and whether a lactation room
+    exists is on no page we hold.
+
+    The trade is real and worth naming: a parent now has to ring the desk
+    instead of getting a straight no. What they must NOT get is a confident
+    answer with nothing behind it.
+    """
+    from src.graph.facility_facts import KING_PHONE, building_facility_answer
     for q in ("is there a nursing room",
               "where can I breastfeed",
               "lactation room in king",
               "do you have a mother's room",
               "is there a pumping room"):
-        hit = nursing_room_answer(q)
-        assert hit is not None, f"lost the room answer: {q}"
-        assert "does **not** have" in hit[0]
+        hit = building_facility_answer(q)
+        assert hit is not None, f"lost the question entirely: {q}"
+        assert KING_PHONE in hit[0], q
+        assert "does not have" not in hit[0].lower(), q
 
 
 # --- John Burke's booking report (2026-08-13) -------------------------------
