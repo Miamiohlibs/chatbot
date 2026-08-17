@@ -36,6 +36,13 @@ class DiffReport:
     rejected_urls: list[tuple[str, str]] = field(default_factory=list)  # (url, reason)
     fetched_url_count: int = 0
     fetch_failures: list[tuple[str, str]] = field(default_factory=list)  # (url, error)
+    unreachable_protected: list[tuple[str, str]] = field(default_factory=list)
+    """URLs we could not REACH, held back from tombstoning. (url, error)
+
+    A page we failed to fetch is not a page that was deleted. See the note in
+    run_etl's fetch loop: treating the two the same silently deleted content
+    on any SSL error, timeout or 5xx.
+    """
     extracted_doc_count: int = 0
     extraction_rejects: list[tuple[str, str]] = field(default_factory=list)
     chunks_created: int = 0
@@ -126,6 +133,27 @@ def render_markdown(report: DiffReport) -> str:
             lines.append(f"- {url}")
         if len(report.upsert.tombstoned_urls) > 50:
             lines.append(f"- ... and {len(report.upsert.tombstoned_urls) - 50} more")
+        lines.append("")
+
+    if report.unreachable_protected:
+        lines.append("")
+        lines.append("## 🛡 Unreachable — kept in the index, NOT tombstoned")
+        lines.append("")
+        lines.append(
+            f"{len(report.unreachable_protected)} URL(s) could not be fetched "
+            "for a transport reason (TLS, timeout, connection, 5xx). A page we "
+            "cannot reach is not a page that was deleted, so their chunks are "
+            "held in the index rather than removed. **Only 404 and 410 count "
+            "as gone.**"
+        )
+        lines.append("")
+        lines.append("If a host appears here every week, that is an infrastructure "
+                     "ticket, not a content change.")
+        lines.append("")
+        for url, err in report.unreachable_protected[:30]:
+            lines.append(f"- `{url}` — {err[:120]}")
+        if len(report.unreachable_protected) > 30:
+            lines.append(f"- ... and {len(report.unreachable_protected) - 30} more")
         lines.append("")
 
     if report.fetch_failures:

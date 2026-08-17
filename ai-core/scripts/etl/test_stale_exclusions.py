@@ -208,3 +208,95 @@ def test_a_redirect_cannot_smuggle_an_excluded_page_in():
         ok, why = _is_excluded(target)
         assert ok, f"{target} must be excluded wherever it is reached from"
         assert why
+
+
+# --- a page we cannot REACH is not a page that was DELETED -------------------
+
+
+import pytest as _pytest  # noqa: E402  (module already imports pytest above)
+
+from scripts.etl.run_etl import _looks_deleted  # noqa: E402
+
+
+@_pytest.mark.parametrize("err", [
+    "HTTPError: 404 Client Error: Not Found for url: https://x/y",
+    "HTTPError: 410 Client Error: Gone for url: https://x/y",
+])
+def test_404_and_410_are_the_only_gone_signals(err):
+    assert _looks_deleted(err)
+
+
+@_pytest.mark.parametrize("err", [
+    # The real one, 2026-08-18: every Hamilton page failed like this, and four
+    # of them were listed in the pending diff as "lost outright".
+    "SSLError: HTTPSConnectionPool(host='www.ham.miamioh.edu', port=443): "
+    "Max retries exceeded ... CERTIFICATE_VERIFY_FAILED ... unable to get "
+    "local issuer certificate",
+    "ConnectionError: HTTPSConnectionPool(host='x', port=443): "
+    "Max retries exceeded",
+    "ReadTimeout: HTTPSConnectionPool(host='x', port=443): Read timed out.",
+    "HTTPError: 500 Server Error: Internal Server Error for url: https://x/y",
+    "HTTPError: 503 Server Error: Service Unavailable for url: https://x/y",
+    "ProxyError: Cannot connect to proxy",
+    "unknown",
+])
+def test_transport_failures_are_never_treated_as_deleted(err):
+    """Defaulting the other way is what silently deleted content. When in
+    doubt, KEEP."""
+    assert not _looks_deleted(err)
+
+
+def test_no_error_is_not_deleted():
+    assert not _looks_deleted(None)
+    assert not _looks_deleted("")
+
+
+def test_an_unreachable_url_stays_in_seen_urls_so_it_is_not_tombstoned(
+        tmp_path, monkeypatch):
+    """The end-to-end property, exercised through run(): the tombstone step is
+    handed `seen_urls`, so an unreachable page must appear there or its chunks
+    are removed from the index.
+    """
+    from scripts.etl import config as etl_config
+    from scripts.etl import run_etl
+
+    # Never write into the real data/diffs -- that directory holds the pending
+    # approvals a human signs, and it is root-owned in production.
+    monkeypatch.setattr(etl_config, "DIFF_REPORT_DIR", str(tmp_path),
+                        raising=False)
+
+    captured: dict = {}
+
+    def _fetch(url):
+        if "ham.miamioh.edu" in url:
+            return None, None, None, (
+                "SSLError: CERTIFICATE_VERIFY_FAILED unable to get local "
+                "issuer certificate")
+        return "<html><body>" + ("word " * 200) + "</body></html>", None, url, None
+
+    def _preview(chunks, seen_urls):
+        captured["seen"] = set(seen_urls)
+        from scripts.etl import upsert
+        return upsert.UpsertResult()
+
+    class _D:
+        def __init__(self, url):
+            self.url, self.source = url, "test"
+
+    from scripts.etl.upsert import UpsertResult
+    pipeline = run_etl.Pipeline(
+        fetch=_fetch,
+        embed=lambda chunks: [[0.0] for _ in chunks],
+        upsert_chunks=lambda c, e, v: UpsertResult(),
+        tombstone=lambda seen, v: UpsertResult(),
+        update_allowlist=lambda seen: 0,
+        preview=_preview,
+        discover_fn=lambda: [_D("https://www.lib.miamioh.edu/ok/"),
+                             _D("https://www.ham.miamioh.edu/library/")],
+        extra_docs_fn=None,
+    )
+    run_etl.run(dry_run=True, pipeline=pipeline)
+    seen = captured.get("seen", set())
+    assert "https://www.ham.miamioh.edu/library/" in seen, (
+        "the unreachable Hamilton page would be tombstoned")
+    assert "https://www.lib.miamioh.edu/ok/" in seen

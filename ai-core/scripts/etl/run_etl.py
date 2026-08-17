@@ -189,6 +189,27 @@ def _default_preview(
 # --- Real fetcher (lazy, requests-based) -------------------------------------
 
 
+def _looks_deleted(err: Optional[str]) -> bool:
+    """Is this error the website saying the page is GONE, or us failing to reach it?
+
+    Only 404 and 410 mean gone. `build_requests_fetcher` formats errors as
+    "{ExceptionName}: {message}", and requests' raise_for_status produces
+    "HTTPError: 404 Client Error: Not Found for url: ...", so the status is in
+    the string.
+
+    Everything else -- SSLError, ConnectionError, Timeout, 5xx, a proxy
+    failure -- is a transport problem on our side of the conversation, and the
+    page is presumed still there. Defaulting the other way is what deleted
+    content; when in doubt, KEEP.
+    """
+    if not err:
+        return False
+    e = err.lower()
+    if "httperror" not in e:
+        return False           # SSL / connection / timeout -> unreachable
+    return " 404 " in f" {e} " or " 410 " in f" {e} " or "not found" in e
+
+
 def build_requests_fetcher(cache_dir: Optional[Path] = None) -> FetchFn:
     """Build a real `requests`-backed fetcher.
 
@@ -313,6 +334,28 @@ def run(
         html, last_mod, canonical, err = pipeline.fetch(d.url)
         if err or html is None:
             report.fetch_failures.append((d.url, err or "unknown"))
+            # A PAGE WE COULD NOT REACH IS NOT A PAGE THAT WAS DELETED.
+            #
+            # `seen_urls` drives the tombstone step, so `continue` here meant
+            # every fetch failure was reported to Weaviate as "this URL no
+            # longer exists on the website" and its chunks were removed. Any
+            # SSL error, timeout, DNS blip or 5xx silently deleted content.
+            #
+            # Found 2026-08-18 in the pending diff: all 38 failures were
+            # www.ham.miamioh.edu (its cert chains to emSign Root TLS CA - G1,
+            # which is in neither the system bundle nor certifi), and four of
+            # the five URLs the diff listed as "lost outright" were the only
+            # Hamilton pages we still had. Applying it would have taken
+            # Hamilton coverage from four pages to zero -- while the pages
+            # themselves were perfectly fine and still on the web.
+            #
+            # 404 and 410 are the real "it is gone" signals and still allow a
+            # tombstone. Everything else is presumed present, kept in the
+            # index, and surfaced separately in the diff so it is visible
+            # rather than silent.
+            if not _looks_deleted(err):
+                seen_urls.add(canonical or d.url)
+                report.unreachable_protected.append((d.url, err or "unknown"))
             continue
         report.fetched_url_count += 1
         # Use the post-redirect canonical URL when available -- otherwise
