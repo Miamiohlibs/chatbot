@@ -3764,3 +3764,36 @@ def test_finding_help_is_last_and_yields_to_every_specific_answer():
               "are there lockers in special collections",
               "how do I renew a book"):
         assert _finding_help_answer(q) is None, q
+
+
+def test_finding_help_exclusions_cover_plurals():
+    """Found via a thumbs-down from a real person, 2026-08-10:
+
+        "hello! how can I find information on TEXTBOOKS in the Hamilton
+         campus library?"
+
+    `finding_help` stole it from the course-reserves path, because the
+    exclusion list said `textbook` and \\b does not match across the "s".
+    `courses`, `lockers`, `archive` and `librarians` leaked identically.
+
+    Asserted as the RULE -- every excluded noun in both numbers -- because
+    checking the one word that was reported would leave the other four.
+    """
+    from src.graph.new_orchestrator import _finding_help_answer
+
+    for w in ("textbook", "textbooks", "course", "courses",
+              "locker", "lockers", "reserve", "reserves",
+              "hour", "hours", "room", "rooms", "fine", "fines",
+              "archive", "archives", "librarian", "librarians",
+              "restroom", "restrooms", "toilet", "toilets", "liaison",
+              "liaisons", "special collection", "special collections"):
+        q = f"how can I find information on {w} in the library"
+        assert _finding_help_answer(q) is None, f"{w!r} leaks through"
+
+
+def test_the_reported_question_no_longer_reaches_finding_help():
+    from src.graph.new_orchestrator import _finding_help_answer
+
+    assert _finding_help_answer(
+        "hello! how can I find information on textbooks in the Hamilton "
+        "campus library?") is None

@@ -4195,10 +4195,16 @@ _FIND_HELP_ASK_RE = re.compile(
 )
 # These have their own, better answers -- do not take their questions.
 _FIND_HELP_EXCLUDE_RE = re.compile(
-    r"\b(hour|hours|open|closed|room|rooms|study\s+space|print|printing|"
-    r"wifi|wi-?fi|scan|restroom|bathroom|toilet|locker|parking|"
-    r"librarian|liaison|reserve|reserves|textbook|course|ill|interlibrary|"
-    r"renew|due\s+date|fine|fines|special\s+collections|archives|makerspace|"
+    # PLURALS MATTER, and five were missing. Found via a thumbs-down from a
+    # real person on 2026-08-10 -- "how can I find information on TEXTBOOKS in
+    # the Hamilton campus library?" -- which this answer stole from the
+    # course-reserves path because the list said `textbook` and `\b` does not
+    # match across the "s". `courses`, `lockers`, `archive` and `librarians`
+    # leaked the same way. Every entry now carries s? where a plural exists.
+    r"\b(hours?|open|closed|rooms?|study\s+space|print|printing|"
+    r"wifi|wi-?fi|scan|restrooms?|bathrooms?|toilets?|lockers?|parking|"
+    r"librarians?|liaisons?|reserves?|textbooks?|courses?|ill|interlibrary|"
+    r"renew|due\s+date|fines?|special\s+collections?|archives?|makerspace|"
     r"maker\s*space|3d)\b"
     # A course code means the course-reserves answer, which runs earlier in
     # the chain anyway -- belt and braces in case the order is ever changed.
