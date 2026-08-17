@@ -948,11 +948,6 @@ def _run_turn(
             # second floor" is a REPORT, and restroom_answer was replying with
             # where the restrooms are (live traffic 2026-08-17).
             ("facility_problem", _ff.facility_problem_answer),
-            # Operator ruling 2026-08-17: building facts we cannot source on
-            # the website go to the service desk instead of being answered
-            # from memory. One answer replaces the four that used to guess at
-            # floors -- see the note in facility_facts.
-            ("building_facility", _ff.building_facility_answer),
             # "Who can help with my computer?" -- Kevin Messner's 1/5. It was
             # answered with a subject librarian's name and email because the
             # LibGuides API fuzzy-matched "computer" to Computer Science.
@@ -996,6 +991,19 @@ def _run_turn(
             # to run first to do that.
             ("printing_cost", _ff.printing_cost_answer),
             ("print_scan_wifi", _ff.printing_scanning_wifi_answer),
+            # OPERATOR RULING 2026-08-17, restated 2026-08-18: any library
+            # hardware or infrastructure that the WEBSITE does not cover goes
+            # to the service desk rather than being answered from memory.
+            #
+            # POSITION IS THE WHOLE MECHANISM. It sits after every answer
+            # above that IS backed by a page or a published FAQ -- computers,
+            # printing, Special Collections, room booking -- so those keep
+            # their questions, and this catches only what is left over. That
+            # is literally the rule: on the site, answer from the site; not on
+            # the site, send them to the desk. Moving this earlier would make
+            # it steal page-backed answers, which is why it started out too
+            # early and had to be moved.
+            ("building_facility", _ff.building_facility_answer),
             # LAST in this group on purpose: its matcher is the broadest of
             # all of them, so every specific answer above gets first refusal.
             # It exists because "assistance with books on X" and "direct me to

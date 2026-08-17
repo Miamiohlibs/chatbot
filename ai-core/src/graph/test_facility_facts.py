@@ -431,3 +431,99 @@ def test_questions_about_fixtures_keep_their_own_answers():
               "how do I print",
               "can I use a computer in the library"):
         assert facility_problem_answer(q) is None, q
+
+
+# --- the ORDER is the mechanism, so the order is what gets tested ------------
+
+
+def _registered_single_arg_chain():
+    """The short-circuit names in the order new_orchestrator runs them.
+
+    Parsed out of the source, not copied. A copied order goes stale, and a
+    stale copy cannot catch an ordering mistake -- which is the only thing
+    this exists to catch. Same approach as the Special Collections routing
+    test, for the same reason.
+    """
+    import ast
+    from pathlib import Path
+
+    src = (Path(__file__).resolve().parent / "new_orchestrator.py").read_text(
+        encoding="utf-8")
+    tree = ast.parse(src)
+    out = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Tuple) or len(node.elts) != 2:
+            continue
+        first, second = node.elts
+        if not (isinstance(first, ast.Constant)
+                and isinstance(first.value, str)):
+            continue
+        if isinstance(second, ast.Attribute) and isinstance(second.value, ast.Name):
+            if second.value.id in ("_ff", "_spec"):
+                out.append((first.value, second.value.id, second.attr))
+        elif isinstance(second, ast.Name):
+            out.append((first.value, None, second.id))
+    return out
+
+
+def test_the_infrastructure_fallback_runs_after_every_page_backed_answer():
+    """Operator rule, restated 2026-08-18: on the site, answer from the site;
+    NOT on the site, send them to the desk.
+
+    Position is how that is implemented. `building_facility` has a deliberately
+    broad matcher -- doors, heat, lighting, outlets, bins -- and that is only
+    safe because every page-backed answer runs BEFORE it. It originally sat
+    third in the group, ahead of computers and printing, and would have stolen
+    them once broadened.
+    """
+    order = [name for name, _, _ in _registered_single_arg_chain()]
+    assert "building_facility" in order, "the fallback is not registered"
+    i = order.index("building_facility")
+    for page_backed in ("computer_help", "printing_cost", "print_scan_wifi",
+                        "sc_lockers", "sc_reading_room_items"):
+        assert page_backed in order, page_backed
+        assert order.index(page_backed) < i, (
+            f"{page_backed} runs AFTER the infrastructure fallback, so the "
+            f"fallback will steal its questions")
+    # ...and it must not be last either: finding_help is broader still.
+    assert order.index("finding_help") > i
+
+
+def test_page_backed_questions_survive_the_broadened_matcher():
+    """Walk the real chain. Individually-correct matchers that overlap are
+    exactly how a working answer gets stolen."""
+    import src.graph.facility_facts as _ff_mod
+    import src.graph.new_orchestrator as _orch
+    import src.graph.special_collections as _spec_mod
+
+    mods = {"_ff": _ff_mod, "_spec": _spec_mod}
+
+    def route(q):
+        for name, mod, attr in _registered_single_arg_chain():
+            fn = getattr(mods[mod], attr) if mod else getattr(_orch, attr, None)
+            if fn is None or not callable(fn):
+                continue
+            try:
+                if fn(q) is not None:
+                    return name
+            except TypeError:
+                continue          # needs deps/scope, not part of this chain
+        return None
+
+    expected = {
+        "how do I print": "print_scan_wifi",
+        "Is there free printing?": "printing_cost",
+        "who can help with my computer": "computer_help",
+        "are there lockers in special collections": "sc_lockers",
+        "where are the bathrooms": "building_facility",
+        "where is the elevator": "building_facility",
+        "is there a lactation room": "building_facility",
+        "where is the silent study area": "building_facility",
+        "the toilet on the second floor is running": "facility_problem",
+    }
+    wrong = []
+    for q, want in expected.items():
+        got = route(q)
+        if got != want:
+            wrong.append(f"{q!r}: expected {want}, got {got}")
+    assert not wrong, "misrouted:\n  " + "\n  ".join(wrong)

@@ -7,16 +7,26 @@ because the search index is a faithful copy of lib.miamioh.edu, and putting
 unpublished claims in there would quietly break the promise that every
 indexed sentence traces back to a page a patron can read.
 
-Students ask these constantly and the bot was refusing all of them:
-"where is the silent study area", "where are the bathrooms", "is there a
-nursing room". Refusing a question the staff can answer in one sentence is
-the worst kind of unhelpful.
+THE 2026-08-04 RULE WAS REVERSED ON 2026-08-17 -- READ THIS FIRST.
+Four answers here were originally written from the operator's own knowledge,
+on the reasoning that "refusing a question the staff can answer in one
+sentence is the worst kind of unhelpful": quiet-study floors, reading-room
+floors, restrooms on every floor, and no lactation room.
+
+The operator reversed that for the PHYSICAL PLANT. Any library hardware or
+infrastructure the website does not cover now goes to the service desk, via
+`building_facility_answer`. Those four claims carried no citation, so nobody
+reading an answer could tell one had gone stale -- which is exactly the
+failure the paragraph below had predicted from day one. A wrong floor sends
+someone up three flights for nothing.
+
+What remains here is only what a PAGE or a published FAQ backs: printing
+prices and guides, Wi-Fi, the computer labs. The rule is about UNSOURCED
+claims, not about declining to be useful.
 
 RE-VERIFY WHEN THE BUILDING CHANGES
-These are the facts most likely to go stale silently -- a floor gets
-renovated and nobody updates a Python file. Each entry carries the date it
-was given and by whom. Anything here that later appears on the website
-should be DELETED from this module so there is one source of truth.
+Anything here that later appears on the website should be DELETED from this
+module so there is one source of truth.
 
 WHAT IS DELIBERATELY NOT CITED
 A fact that is not on a page does not get a citation marker pointing at that
@@ -66,50 +76,13 @@ KING_PHONE = "(513) 529-4141"
 # Tight on purpose. These fire before the agent, so a false positive replaces
 # a good retrieved answer with a canned one.
 
-_QUIET_RE = re.compile(
-    # "quiet floor", "silent study area", "quiet space"
-    r"\b(silent|quiet)\b[^.?!]{0,30}\b(area|areas|floor|floors|space|spaces|"
-    r"section|room|rooms|study|zone)\b"
-    # "study quietly", "read somewhere quiet", "which floor is quiet"
-    r"|\b(study|studying|read|reading|floor|floors|somewhere|anywhere|place)\b"
-    r"[^.?!]{0,24}\b(silent|silently|quiet|quietly)\b"
-    r"|\bwhere\b[^.?!]{0,20}\b(silent|quiet)\b",
-    re.IGNORECASE,
-)
-
-_READING_ROOM_RE = re.compile(
-    r"\b(grad(uate)?|faculty|staff)\b[^.?!]{0,24}\breading\s+room",
-    re.IGNORECASE,
-)
-
-_RESTROOM_RE = re.compile(
-    r"\b(restroom|restrooms|bathroom|bathrooms|toilet|toilets|washroom|"
-    r"men'?s\s+room|women'?s\s+room)\b",
-    re.IGNORECASE,
-)
-
-_NURSING_RE = re.compile(
-    r"\b(nursing|lactation|breastfeed\w*|breast\s*feed\w*|"
-    r"pump(ing)?\s+room|mother'?s\s+room)\b",
-    re.IGNORECASE,
-)
-
-# "Nursing" is also a DEGREE, and this matcher runs before the liaison
-# logic, so "who is the nursing librarian" was answered with "King Library
-# does not have a dedicated nursing or lactation room" -- measured against
-# the running service 2026-08-12. A student asking for their subject
-# librarian being told about lactation rooms is exactly the kind of reply
-# that has to be recovered by a person at a service desk.
-#
-# Everything here is the academic sense of the word. The room question is
-# never phrased with any of them.
-_NURSING_IS_THE_SUBJECT_RE = re.compile(
-    r"\b(librarian|liaison|subject\s+specialist|research|"
-    r"database|databases|journals?|articles?|citation|literature|"
-    r"program|programme|major|degree|course|class|students?|faculty|school)\b",
-    re.IGNORECASE,
-)
-
+# _QUIET_RE, _RESTROOM_RE, _NURSING_RE and _NURSING_IS_THE_SUBJECT_RE lived
+# here until 2026-08-18. They belonged to the four answers the operator's
+# 2026-08-17 ruling removed, and were left behind dead -- one of them shadowed
+# by an identically named matcher further down, which is worse than useless
+# because a reader cannot tell which one is live. Their surviving equivalents
+# are _QUIET_SPACE_RE, _BUILDING_FIXTURE_RE and _FIXTURE_IS_ACADEMIC_RE, next
+# to `building_facility_answer`.
 _PRINT_SCAN_WIFI_RE = re.compile(
     r"\b(print|prints|printing|printer|printers|photocopy|copier|"
     r"scan|scans|scanning|scanner|scanners|"
@@ -209,7 +182,12 @@ _IT_TROUBLE_RE = re.compile(
     r"doesn'?t\s+work|won'?t\s+(work|start|turn|boot|open|connect|load)|"
     r"can'?t|cannot|unable|trouble|problem|problems|issue|issues|"
     r"reset|forgot|forgotten|locked\s+out|stuck|frozen|freezes|crashed|"
-    r"crashes|error|dead|charge|charging|slow|virus|malware|"
+    r"crashes|error|dead|slow|virus|malware|"
+    # "won't charge" IS a fault. "Where can I charge my laptop" is a question
+    # about OUTLETS -- building infrastructure, so it goes to the desk. Bare
+    # "charge" here sent it to IT support, which answered "that isn't a
+    # library question" about a library building question.
+    r"won'?t\s+charge|not\s+charging|"
     r"who\s+(can|do\s+i|should\s+i)|where\s+do\s+i\s+go)\b",
     re.IGNORECASE,
 )
@@ -454,12 +432,39 @@ def printing_scanning_wifi_answer(message: str) -> "Optional[tuple[str, list[dic
 # the desk. The Reading Rooms page genuinely describes the rooms and who may
 # use them; it simply does not give a floor. Withholding a page we hold would
 # be its own kind of wrong.
+# THE WHOLE PHYSICAL PLANT, not only the four things that used to be answered.
+#
+# Operator restated the rule 2026-08-18: any library hardware or
+# infrastructure the website does not cover goes to the desk -- not just
+# toilets and lifts.
+#
+# Broad on purpose, and that is ONLY safe because of where this is registered:
+# after every page-backed answer in the group. Printing, scanning, Wi-Fi,
+# computers, Special Collections and room booking all keep their questions
+# because they run first, so what reaches here is by construction the
+# infrastructure we have no published source for. It originally sat third in
+# that group, ahead of computers and printing, and would have stolen them once
+# broadened -- see the ordering test in test_facility_facts.
 _BUILDING_FIXTURE_RE = re.compile(
+    # sanitary
     r"\b(restroom|restrooms|bathroom|bathrooms|toilet|toilets|washroom|"
-    r"men'?s\s+room|women'?s\s+room|urinal|"
-    r"elevator|elevators|lift|lifts|escalator|stairs|stairwell|"
-    r"water\s+fountain|drinking\s+fountain|bottle\s+filler|"
-    r"vending|microwave|"
+    r"men'?s\s+room|women'?s\s+room|urinal|baby\s+chang\w*|"
+    # vertical circulation and access
+    r"elevator|elevators|lift|lifts|escalator|stairs|stairway|stairwell|"
+    r"ramp|entrance|turnstile|loading\s+dock|"
+    # water and food fixtures
+    r"water\s+fountain|drinking\s+fountain|bottle\s+filler|water\s+cooler|"
+    r"vending|microwave|fridge|refrigerator|coffee\s+machine|"
+    # power, climate, light
+    r"outlet|outlets|socket|sockets|power\s+strip|charging\s+station|"
+    r"charge\w*\s+(my|a|the)?\s*(laptop|phone|computer|tablet|device)|"
+    r"air\s*condition\w*|radiator|thermostat|ventilation|"
+    r"too\s+(hot|cold)|light\s+switch|lamps?|"
+    # furniture and fittings
+    r"carrel|carrels|standing\s+desk|whiteboard|chalkboard|"
+    r"coat\s+rack|umbrella\s+stand|bike\s+rack|recycling|"
+    r"first\s+aid|aed|defibrillator|"
+    # lactation -- a room question, not a subject question
     r"nursing|lactation|breastfeed\w*|breast\s*feed\w*|"
     r"pump(ing)?\s+room|mother'?s\s+room)\b",
     re.IGNORECASE,
