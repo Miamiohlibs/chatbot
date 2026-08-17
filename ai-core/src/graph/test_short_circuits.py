@@ -3649,3 +3649,51 @@ def test_course_book_leaves_the_neighbouring_questions_alone():
               # instructor submission keeps its own answer
               "can you put my book on course reserves for BIO 116"):
         assert _course_book_answer(q) is None, q
+
+
+# --- a conduct word inside a TITLE is not a conduct question -----------------
+
+
+def test_a_book_title_containing_wine_does_not_get_the_alcohol_policy():
+    """Live traffic, 2026-08-17. A patron wrote:
+
+        "I need to correct a book title that I requested from ILL today:
+         The title should be: Crossing the Wine Dark Sea"
+
+    and was answered with the building-conduct policy -- food and drink,
+    alcohol, sleeping, pets, smoking, bikes. _CONDUCT_STRONG_RE matched
+    **wine**, from the book's title, and strong terms fire with no permission
+    phrasing at all.
+
+    They asked twice and got the same answer both times.
+    """
+    from src.graph.new_orchestrator import _facilities_policy_answer
+
+    assert _facilities_policy_answer(
+        "I need to correct a book title that I requested from ILL today: "
+        "The title should be: Crossing the Wine Dark Sea") is None
+
+
+def test_titles_and_transactions_never_reach_the_conduct_pointer():
+    from src.graph.new_orchestrator import _facilities_policy_answer
+
+    for q in ("can you cancel my ILL request for The Wine Dark Sea",
+              "I have a book called Smoke and Mirrors checked out",
+              "the author is named Wine",
+              "renew my copy of Beer in the Snooker Club",
+              "what is the due date for my OhioLink book"):
+        assert _facilities_policy_answer(q) is None, q
+
+
+def test_real_conduct_questions_still_get_the_policy():
+    """The fix must not buy precision with coverage -- these are the questions
+    the pointer exists for."""
+    from src.graph.new_orchestrator import _facilities_policy_answer
+
+    for q in ("can I bring alcohol into the library",
+              "is smoking allowed",
+              "can I nap in the library",
+              "is there a policy about pets",
+              "can I eat in the library",
+              "can I bring my dog"):
+        assert _facilities_policy_answer(q) is not None, q

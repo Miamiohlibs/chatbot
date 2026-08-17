@@ -2413,6 +2413,45 @@ _RESEARCH_CTX_RE = re.compile(
     re.IGNORECASE,
 )
 
+# A CONDUCT WORD INSIDE A TITLE IS NOT A CONDUCT QUESTION.
+#
+# Live traffic, 2026-08-17. A patron wrote:
+#
+#   "I need to correct a book title that I requested from ILL today:
+#    The title should be: Crossing the Wine Dark Sea"
+#
+# and was answered with the building-conduct policy -- food and drink,
+# alcohol, sleeping, pets, smoking, bikes. _CONDUCT_STRONG_RE matched **wine**,
+# from the book's title, and strong terms fire with no permission phrasing at
+# all because "in a library bot, asking about these is ~always a conduct
+# question". Inside a title it never is.
+#
+# They asked TWICE and got the same answer both times, so they left without
+# help. Worst answer in the live data so far.
+#
+# _RESEARCH_CTX_RE was meant to catch this class and has `books? about`, but
+# the message says "a book TITLE", so it missed. Two additions, both of which
+# only ever SUPPRESS this pointer and let the agent handle the turn:
+#
+#   * title/author/chapter/ISBN phrasing -- a bibliographic reference
+#   * request/order/ILL/hold/renew phrasing -- a transaction about an item,
+#     which is never a question about behaviour in the building
+_BIBLIOGRAPHIC_CTX_RE = re.compile(
+    r"\b(title|titled|subtitle|author|authored|editor|chapter|volume|edition|"
+    r"isbn|issn|doi|call\s*number|barcode|"
+    # "the book <X>", "a DVD called <X>" -- a named item, not a topic
+    r"(book|dvd|film|movie|cd|record|score|map|thesis|dissertation)\s+"
+    r"(called|named|titled|entitled))\b",
+    re.IGNORECASE,
+)
+_ITEM_TRANSACTION_CTX_RE = re.compile(
+    r"\b(ill|interlibrary|inter-library|ohiolink|searchohio|"
+    r"request(ed|ing|s)?|order(ed|ing|s)?|recall(ed|ing)?|hold|holds|"
+    r"renew(al|ed|ing)?|due\s+date|checked?\s+out|check\s+out|return(ed|ing)?|"
+    r"pick\s*up|purchase\s+request|suggest\s+a\s+purchase)\b",
+    re.IGNORECASE,
+)
+
 
 def _facilities_policy_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
     """Deterministic pointer to the Facilities & Events Policies doc for
@@ -2421,6 +2460,10 @@ def _facilities_policy_answer(message: str) -> "Optional[tuple[str, list[dict]]]
     m = message or ""
     if _RESEARCH_CTX_RE.search(m):
         return None  # "article about alcohol" etc. -> research, not conduct
+    if _BIBLIOGRAPHIC_CTX_RE.search(m):
+        return None  # "the book titled ... Wine ..." -> a title, not a rule
+    if _ITEM_TRANSACTION_CTX_RE.search(m):
+        return None  # "my ILL request for ..." -> a transaction, not a rule
     if not (_CONDUCT_STRONG_RE.search(m)
             or (_CONDUCT_WEAK_RE.search(m) and _PERMISSION_RE.search(m))):
         return None
