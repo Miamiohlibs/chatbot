@@ -945,6 +945,18 @@ async def _v2_message(sid, data):
                 was_refusal=bool(wire.get("is_refusal")),
                 refusal_trigger=wire.get("refusal_trigger"),
                 cited_chunk_ids=wire.get("cited_chunk_ids") or [],
+                # The links we actually put in front of the patron. They were
+                # being sent to the browser and then dropped: chunk ids only
+                # exist for retrieval-built answers, so for the deterministic
+                # short-circuits -- most turns -- nothing recorded where we
+                # pointed someone. Read off the same `citations` the client
+                # renders, so the stored list is by construction the list the
+                # patron saw.
+                cited_urls=[
+                    c.get("url")
+                    for c in (wire.get("citations") or [])
+                    if isinstance(c, dict) and c.get("url")
+                ],
             )
         except Exception as le:  # noqa: BLE001
             logging.warning(f"⚠️ [v2] assistant-message log failed (reply still delivered): {le}")

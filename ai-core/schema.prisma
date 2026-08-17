@@ -33,6 +33,17 @@ model Message {
   wasRefusal     Boolean           @default(false)
   refusalTrigger String? // matches a key in refusal_templates (no_results, low_confidence, ...)
   citedChunkIds  String[]          @default([]) // FK list to ChunkProvenance.chunkId
+  /// The URLs actually SHOWN to the patron, in citation order ([1], [2], ...).
+  ///
+  /// Distinct from citedChunkIds, and not derivable from it. Chunk ids only
+  /// exist for answers built from retrieval; the deterministic short-circuits
+  /// carry hand-verified URLs and no chunks at all. Measured 2026-08-16:
+  /// 401 of 1,872 assistant messages had chunk ids, so for 79% of answers
+  /// there was NO record of what we pointed the patron at.
+  ///
+  /// Stored so a librarian reviewing a bad answer can see the links the
+  /// patron saw, and so "which pages do we send people to" is answerable.
+  citedUrls      String[]          @default([])
   reviews        LibrarianReview[]
   /// Operator triage state for the admin review queue (added 2026-07-27).
   /// Distinct from LibrarianReview, which is the per-librarian verdict

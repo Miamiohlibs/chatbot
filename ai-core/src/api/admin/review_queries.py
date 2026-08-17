@@ -13,7 +13,7 @@ degrade to "no rows", not 500 the page.
 Schema fields used (verified against prisma/schema.prisma):
   Message(type, content, timestamp, conversationId, isPositiveRated,
           intent, scopeCampus, scopeLibrary, modelUsed, confidence,
-          wasRefusal, refusalTrigger, citedChunkIds)
+          wasRefusal, refusalTrigger, citedChunkIds, citedUrls)
   Conversation(id, createdAt, updatedAt, toolUsed)
   ModelTokenUsage(llmModelName, promptTokens, completionTokens,
           totalTokens, cachedInputTokens, callSite, conversationId,
@@ -118,6 +118,9 @@ def _msg_dict(m: Any) -> dict:
         "refusal_trigger": getattr(m, "refusalTrigger", None),
         "is_positive_rated": getattr(m, "isPositiveRated", None),
         "cited_chunk_ids": list(getattr(m, "citedChunkIds", []) or []),
+        # The links the patron saw, in citation order. See the schema note:
+        # for most turns this is the ONLY record of where we sent someone.
+        "cited_urls": list(getattr(m, "citedUrls", []) or []),
     }
 
 

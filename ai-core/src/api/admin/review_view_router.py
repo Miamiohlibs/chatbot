@@ -271,6 +271,33 @@ def build_review_view_router(deps: dict) -> Any:
             return ("<div><small class='dim'>Passages this answer came "
                     f"from</small><ul class='sources'>{items}</ul></div>")
 
+        def _links(m: dict) -> str:
+            """The URLs the patron was actually shown, in citation order.
+
+            Added 2026-08-16 at the operator's request. `_sources` above
+            shows CHUNK IDS, which exist only for retrieval-built answers --
+            measured that day, 401 of 1,872 assistant messages had them. For
+            the other 79%, all of them deterministic short-circuits carrying
+            hand-verified URLs, the console showed nothing at all about where
+            we had sent the patron.
+
+            Numbered [1], [2] to match the markers in the answer text above,
+            so a reviewer reading "see the reserves guide [1]" can see what
+            [1] resolved to without leaving the page. Rendered as real links
+            so a wrong or dead one can be checked in a click -- that is the
+            point of showing them.
+            """
+            urls = m.get("cited_urls") or []
+            if not urls:
+                return ""
+            items = "".join(
+                f"<li>[{i}] <a href='{_e(u)}' target='_blank' "
+                f"rel='noopener noreferrer'>{_e(u)}</a></li>"
+                for i, u in enumerate(urls, 1)
+            )
+            return ("<div><small class='dim'>Links shown to the patron"
+                    f"</small><ol class='sources'>{items}</ol></div>")
+
         def _turn_badges(m: dict) -> str:
             """What the bot DECIDED about this turn, before what went wrong.
 
@@ -311,7 +338,7 @@ def build_review_view_router(deps: dict) -> Any:
                else "")
             + ("<span class='tag down'>thumbs-down</span>"
                if m['is_positive_rated'] is False else "")
-            + f"</div><pre>{_e(m['content'])}</pre>{_sources(m)}</div>"
+            + f"</div><pre>{_e(m['content'])}</pre>{_links(m)}{_sources(m)}</div>"
             for m in d["messages"]
         )
         toks = "".join(

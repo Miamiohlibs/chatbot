@@ -242,6 +242,28 @@ async def save_conversation_feedback(
 # ============================================================================
 
 
+def _dedupe_keep_order(urls: "List[Any]") -> "List[str]":
+    """Unique URLs, first-seen order, non-empty strings only.
+
+    Citation order is [1], [2], [3] as the patron read them, so it carries
+    meaning and must not be sorted away. But the same page is routinely cited
+    twice in one answer -- the printing answer cites its own page as both [1]
+    and [4] -- and storing it twice would make "how often do we send people
+    here" wrong.
+    """
+    seen: set = set()
+    out: "List[str]" = []
+    for u in urls:
+        if not isinstance(u, str):
+            continue
+        u = u.strip()
+        if not u or u in seen:
+            continue
+        seen.add(u)
+        out.append(u)
+    return out
+
+
 async def add_message_v2(
     conversation_id: str,
     *,
@@ -256,6 +278,7 @@ async def add_message_v2(
     was_refusal: bool = False,
     refusal_trigger: Optional[str] = None,
     cited_chunk_ids: Optional[List[str]] = None,
+    cited_urls: Optional[List[str]] = None,
 ) -> str:
     """Add a message with smart-chatbot rebuild telemetry.
 
@@ -275,6 +298,12 @@ async def add_message_v2(
         "timestamp": datetime.now(),
         "wasRefusal": was_refusal,
         "citedChunkIds": cited_chunk_ids or [],
+        # The links the patron actually saw. See the schema comment: chunk
+        # ids cover only retrieval-built answers, so without this there is no
+        # record at all for the deterministic short-circuits -- which are the
+        # majority of turns. Deduplicated while preserving citation order,
+        # because the same page is often cited as both [1] and [4].
+        "citedUrls": _dedupe_keep_order(cited_urls or []),
     }
     # Only include columns we actually have a value for. Prisma's
     # `create` happily accepts missing optionals, but explicit None

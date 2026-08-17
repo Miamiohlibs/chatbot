@@ -57,3 +57,42 @@ def test_the_evening_date_bucket_moves_to_the_right_day():
     evening = dt.datetime(2026, 8, 16, 0, 30, tzinfo=dt.timezone.utc)  # 8:30pm EDT 08-15
     assert evening.date().isoformat() == "2026-08-16", "the bug being fixed"
     assert local_dt(evening).date().isoformat() == "2026-08-15"
+
+
+# --- the links the patron was shown -----------------------------------------
+
+
+def test_cited_urls_are_deduped_but_keep_citation_order():
+    """Order is [1], [2], [3] as the patron read them, so it carries meaning
+    and must not be sorted away. But the same page is routinely cited twice
+    in one answer -- the printing answer cites its own page as [1] and [4] --
+    and storing it twice would make "how often do we send people here" wrong.
+    """
+    from src.memory.conversation_store import _dedupe_keep_order
+
+    assert _dedupe_keep_order(["b", "a", "b", "c"]) == ["b", "a", "c"]
+    assert _dedupe_keep_order([]) == []
+    # Junk in the citations list must not become a stored "URL".
+    assert _dedupe_keep_order([None, "", "  ", 7, "x"]) == ["x"]
+    assert _dedupe_keep_order(["  http://a  "]) == ["http://a"]
+
+
+def test_the_query_layer_exposes_cited_urls():
+    """The admin console reads this; a missing column must degrade to an
+    empty list rather than raise, like everything else in review_queries."""
+    from src.api.admin.review_queries import _msg_dict
+
+    class _M:
+        id = "m1"
+        type = "assistant"
+        content = "see the guide [1]"
+        citedUrls = ["https://example.org/a"]
+
+    assert _msg_dict(_M())["cited_urls"] == ["https://example.org/a"]
+
+    class _Old:  # a row written before the column existed
+        id = "m0"
+        type = "assistant"
+        content = "old"
+
+    assert _msg_dict(_Old())["cited_urls"] == []
