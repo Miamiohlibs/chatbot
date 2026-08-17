@@ -984,6 +984,12 @@ def _run_turn(
             ("dean", _dean_answer),
             # Broad matcher -- keep last so a 3D-printing or fines question
             # reaches its own handler first.
+            # BEFORE print_scan_wifi: "is there free printing?" is a COST
+            # question and print_scan_wifi answers it with the how-to guide.
+            # _NOT_PRINTING_RE already declines "how much"/"cost"/"charge",
+            # so this only has to win on the phrasings it misses -- but it has
+            # to run first to do that.
+            ("printing_cost", _ff.printing_cost_answer),
             ("print_scan_wifi", _ff.printing_scanning_wifi_answer),
         ):
             _res = _fn(request.user_message)

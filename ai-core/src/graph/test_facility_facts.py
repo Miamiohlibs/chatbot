@@ -382,3 +382,36 @@ def test_a_scanning_only_cost_question_is_not_given_printing_prices():
 
     assert printing_cost_answer("is scanning free") is None
     assert printing_cost_answer("how much does it cost to scan") is None
+
+
+def test_every_answer_in_this_module_is_actually_registered():
+    """The bug that keeps happening, caught for the whole module at once.
+
+    `printing_cost_answer` was written, given four passing tests, and never
+    registered in new_orchestrator -- so it was dead code and the live bot
+    kept answering "is there free printing?" with the how-to guide. Found by
+    asking the deployed bot, not by any test, because every test called the
+    function directly.
+
+    That is the FIFTH time this shape has bitten this project (a rate limit
+    keyed on the wrong thing, an unused turn cap, an exemption list that went
+    stale, a backup cron missing a `cd`, and now this). So this asserts the
+    RULE rather than the instance: every public `*_answer` this module
+    exports must appear in new_orchestrator.py. A new one is covered the day
+    it is written, with nothing to remember.
+    """
+    from pathlib import Path
+
+    from src.graph import facility_facts as ff
+
+    orch = (Path(__file__).resolve().parent / "new_orchestrator.py").read_text(
+        encoding="utf-8")
+    exported = [
+        n for n in dir(ff)
+        if n.endswith("_answer") and callable(getattr(ff, n))
+        and not n.startswith("_")
+    ]
+    assert exported, "found no answer functions -- has the naming changed?"
+    unwired = [n for n in exported if f"_ff.{n}" not in orch]
+    assert not unwired, (
+        f"defined but never registered, so they are dead code: {unwired}")
