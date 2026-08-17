@@ -34,6 +34,70 @@ from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
+LIBRARY_TZ = "America/New_York"
+"""Kept as a literal rather than imported from config.budget: this module is
+read-only and deliberately dependency-light, and one string is cheaper than a
+coupling. If the libraries ever move, both change."""
+
+
+def local_dt(value: "Any") -> "Optional[datetime]":
+    """The same instant, expressed in the libraries' timezone.
+
+    Separate from `local_ts` because one caller needs the DATE, not a
+    display string: the cost dashboard buckets spend with
+    `createdAt.date()`, and on a UTC clock an 8pm Eastern conversation
+    falls on the FOLLOWING day. Evening is peak library use, so every
+    night's spend was landing on tomorrow's row.
+    """
+    if not isinstance(value, datetime):
+        return None
+    try:
+        from zoneinfo import ZoneInfo
+
+        aware = value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+        return aware.astimezone(ZoneInfo(LIBRARY_TZ))
+    except Exception:  # noqa: BLE001
+        return value
+
+
+def local_ts(value: "Any") -> str:
+    """A timestamp a librarian in Oxford can read, without doing arithmetic.
+
+    THE BOX RUNS UTC AND OXFORD DOES NOT. Postgres hands these back as
+    timezone-aware UTC, and `str(dt)` rendered them verbatim:
+
+        created: 2026-08-15 22:35:04.964000+00:00
+
+    That is 6:35pm Eastern. A librarian reviewing a conversation should not
+    have to subtract four hours -- and worse, cannot tell whether a given
+    row is off by four or five without knowing whether that date was in DST.
+
+    Same reasoning as `config.budget.library_now()`, which already exists for
+    exactly this reason on the budget side.
+
+    Rendered as `2026-08-15 18:35 EDT`: seconds and microseconds are noise
+    for review, and the abbreviation is kept so the value is unambiguous
+    rather than merely different.
+
+    Defensive like everything else here -- anything unparseable comes back as
+    its own string rather than raising into a page.
+    """
+    if not value:
+        return ""
+    if not isinstance(value, datetime):
+        return str(value)
+    # Naive values are assumed UTC: that is what Postgres stores and what
+    # every writer in this codebase uses.
+    local = local_dt(value)
+    if local is None:
+        return str(value)
+    try:
+        return local.strftime("%Y-%m-%d %H:%M %Z")
+    except Exception:  # noqa: BLE001 -- a clock bug must not 500 the page
+        return str(value)
+
+
+
 # Recognized list filters. Anything else falls back to "flagged".
 FILTERS = ("flagged", "thumbs_down", "thumbs_up", "refusal",
            "low_confidence", "rated", "reviewed", "all")
@@ -44,7 +108,7 @@ def _msg_dict(m: Any) -> dict:
         "id": getattr(m, "id", None),
         "role": getattr(m, "type", None),
         "content": getattr(m, "content", "") or "",
-        "time": str(getattr(m, "timestamp", "") or ""),
+        "time": local_ts(getattr(m, "timestamp", None)),
         "intent": getattr(m, "intent", None),
         "scope_campus": getattr(m, "scopeCampus", None),
         "scope_library": getattr(m, "scopeLibrary", None),
@@ -119,7 +183,7 @@ async def list_flagged(
         {
             "message_id": getattr(m, "id", None),
             "conversation_id": getattr(m, "conversationId", None),
-            "time": str(getattr(m, "timestamp", "") or ""),
+            "time": local_ts(getattr(m, "timestamp", None)),
             "role": getattr(m, "type", None),
             "preview": (getattr(m, "content", "") or "")[:240],
             "intent": getattr(m, "intent", None),
@@ -128,7 +192,7 @@ async def list_flagged(
             "confidence": getattr(m, "confidence", None),
             "is_positive_rated": getattr(m, "isPositiveRated", None),
             "reviewed_at": (
-                str(getattr(m, "reviewedAt", "") or "") or None
+                local_ts(getattr(m, "reviewedAt", None)) or None
             ),
         }
         for m in (rows or [])
@@ -308,14 +372,14 @@ async def conversation_detail(db: Any, conversation_id: str) -> Optional[dict]:
             "cached_input": getattr(t, "cachedInputTokens", 0),
             "completion": getattr(t, "completionTokens", 0),
             "total": getattr(t, "totalTokens", 0),
-            "time": str(getattr(t, "createdAt", "") or ""),
+            "time": local_ts(getattr(t, "createdAt", None)),
         }
         for t in (toks or [])
     ]
     return {
         "conversation_id": str(conversation_id),
-        "created_at": str(getattr(conv, "createdAt", "") or ""),
-        "updated_at": str(getattr(conv, "updatedAt", "") or ""),
+        "created_at": local_ts(getattr(conv, "createdAt", None)),
+        "updated_at": local_ts(getattr(conv, "updatedAt", None)),
         # Derived from the ToolExecution rows rather than read straight
         # from Conversation.toolUsed. That column is only written by the
         # ARCHIVED legacy orchestrator, so for all v2 traffic it is empty
@@ -332,7 +396,7 @@ async def conversation_detail(db: Any, conversation_id: str) -> Optional[dict]:
                 "tool": getattr(t, "toolName", None),
                 "success": bool(getattr(t, "success", False)),
                 "ms": getattr(t, "executionTime", 0),
-                "time": str(getattr(t, "timestamp", "") or ""),
+                "time": local_ts(getattr(t, "timestamp", None)),
             }
             for t in (tools or [])
         ],

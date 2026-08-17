@@ -23,6 +23,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from src.api.admin.review_queries import local_dt as _local_dt
 from src.api.admin.review_view_router import make_token_guard  # reuse the guard
 
 try:
@@ -100,7 +101,13 @@ async def _aggregate(db: Any, days: int) -> dict:
     by_key: dict = defaultdict(lambda: {"in": 0, "cached": 0, "out": 0, "n": 0})
     by_day: dict = defaultdict(lambda: {"in": 0, "cached": 0, "out": 0, "n": 0, "usd": 0.0})
     for r in rows:
-        day = r.createdAt.date().isoformat()
+        # LIBRARY-LOCAL day, not the UTC one. The box runs UTC, so an 8pm
+        # Eastern conversation has a createdAt of 00:xx the NEXT day and was
+        # being counted against tomorrow. Evening is peak library use, so
+        # every night's spend was landing on the following row and the daily
+        # chart was wrong every day.
+        _local = _local_dt(r.createdAt)
+        day = (_local or r.createdAt).date().isoformat()
         model = r.llmModelName or "?"
         site = r.callSite or "—"
         p = int(r.promptTokens or 0)

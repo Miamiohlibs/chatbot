@@ -328,3 +328,57 @@ def test_the_trouble_shapes_still_reach_it():
               "my computer is broken",
               "who can help me with my miami account"):
         assert computer_help_answer(q) is not None, q
+
+
+# --- "Is there free printing?" -- a real student, first week of beta --------
+
+
+def test_free_printing_gets_a_price_not_a_how_to_guide():
+    """A real student asked this on 2026-08-15 and got the MUprint and Wi-Fi
+    guides -- how to print, when they asked what it costs.
+
+    _NOT_PRINTING_RE already excluded cost questions (cost, price, how much,
+    charge, fines); it just did not list the words people actually use.
+    "Free" and "pay" were missing, so these fell through to the generic
+    pointer.
+
+    We know the answer exactly (FAQ 163327), so the fix is to give it. "Is it
+    free?" deserves yes or no, not a link.
+    """
+    from src.graph.facility_facts import printing_cost_answer
+
+    body, cites = printing_cost_answer("Is there free printing?")
+    low = body.lower()
+    assert "not free" in low, "answer the question that was asked"
+    assert "$0.10" in body and "$0.25" in body
+    assert "mulaa" in low, "say how they pay, or the price is not actionable"
+    assert cites and "163327" in cites[0]["url"]
+
+
+def test_the_cost_phrasings_people_actually_use():
+    from src.graph.facility_facts import printing_cost_answer
+
+    for q in ("Is there free printing?", "is printing free",
+              "do I have to pay to print", "how much does printing cost",
+              "printing charges", "how much is color printing",
+              "what does it cost per page to print"):
+        assert printing_cost_answer(q) is not None, q
+
+
+def test_cost_answer_does_not_take_the_how_to_questions():
+    """The step-by-step guides are still the right answer for those."""
+    from src.graph.facility_facts import printing_cost_answer
+
+    for q in ("how do I print", "how do I connect to wifi",
+              "where can I scan something",
+              "how much does 3d printing cost"):
+        assert printing_cost_answer(q) is None, q
+
+
+def test_a_scanning_only_cost_question_is_not_given_printing_prices():
+    """The FAQ prices PRINTING. We hold no scanning price, and quoting the
+    printing figure would be a new wrong answer in place of a vague one."""
+    from src.graph.facility_facts import printing_cost_answer
+
+    assert printing_cost_answer("is scanning free") is None
+    assert printing_cost_answer("how much does it cost to scan") is None

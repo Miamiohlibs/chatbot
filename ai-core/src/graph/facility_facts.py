@@ -355,6 +355,63 @@ def nursing_room_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
     )
 
 
+PRINT_COST_FAQ_URL = "https://libanswers.lib.miamioh.edu/faq/163327"
+"""FAQ 163327: "Printing costs in the Libraries are $0.10/page for B&W and
+$0.25/page for Color." Corroborated by FAQ 174591, which adds that students
+pay through MUlaa with their student ID. Both live in the index, checked
+2026-08-16."""
+
+# "IS THERE FREE PRINTING?" -- a real student, 2026-08-15, the first week of
+# the beta. The bot answered with the MUprint and Wi-Fi guides: how to print,
+# when they asked what it costs.
+#
+# _NOT_PRINTING_RE already excluded cost questions -- it lists cost, price,
+# how much, charge, fines -- so the generic pointer was never meant to take
+# this one. It just did not list the words people actually use. Measured:
+#
+#     "how much does printing cost"   -> correctly excluded
+#     "printing charges"              -> correctly excluded
+#     "Is there free printing?"       -> NOT excluded, got the guide
+#     "is printing free"              -> NOT excluded, got the guide
+#     "do I have to pay to print"     -> NOT excluded, got the guide
+#
+# Excluding them is not enough on its own: we know the answer exactly, so the
+# honest thing is to give it. "Free?" deserves yes or no, not a link.
+_PRINT_COST_RE = re.compile(
+    r"\b(free|cost|costs|price|pricing|how\s+much|charge|charges|"
+    r"pay|paid|paying|fee|fees|expensive|cheap|per\s+page)\b",
+    re.IGNORECASE,
+)
+
+
+def printing_cost_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
+    """What printing costs. Leads with the answer to "is it free": no."""
+    m = message or ""
+    if not _PRINT_SCAN_WIFI_RE.search(m) or not _PRINT_COST_RE.search(m):
+        return None
+    # 3D printing has its own pricing and its own page.
+    if re.search(r"\b(3d|three-?d|makerspace|maker\s*space)\b", m, re.IGNORECASE):
+        return None
+    # The FAQ prices PRINTING. A question only about scanning or Wi-Fi must
+    # not be answered with per-page printing charges -- we do not hold a
+    # scanning price, and inventing one from the printing figure would be a
+    # new wrong answer in place of the old vague one.
+    if not re.search(r"\b(print|prints|printing|printer|printers|photocopy|"
+                     r"copier|copy|copies|per\s+page)\b", m, re.IGNORECASE):
+        return None
+    return (
+        "**Printing is not free** -- it is charged by the page:\n\n"
+        "- **Black and white: $0.10 a page**\n"
+        "- **Colour: $0.25 a page**\n\n"
+        "You pay through your **MUlaa** account with your student ID, so "
+        "there is nothing to set up at the machine [1].\n\n"
+        f"If a print job fails or a machine takes your money, call "
+        f"{KING_PHONE} and someone at the desk can sort it out.",
+        [_cite(1, PRINT_COST_FAQ_URL,
+               "Miami University Libraries — how much does it cost to print?")],
+    )
+
+
 def printing_scanning_wifi_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
     """Printing, scanning and Wi-Fi all live in university IT's guides.
 

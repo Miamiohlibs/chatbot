@@ -33,6 +33,7 @@ import logging
 from typing import Any, Optional
 
 from src.api.admin import admin_ui as ui
+from src.api.admin.review_queries import local_ts
 
 try:
     from starlette.requests import Request  # type: ignore
@@ -220,7 +221,7 @@ def render_admin_list(tickets: list[dict], key: str,
         cards.append(
             f"<div class='card{' attn' if status == 'open' else ''}'>"
             f"<div class='meta'>{ui.pill(status, extra=mail_pill)}"
-            f"<span>{ui.e(str(t.get('createdAt', ''))[:16])}</span>"
+            f"<span>{ui.e(local_ts(t.get('createdAt')))}</span>"
             f"<span>{ui.e(t.get('librarianName'))} "
             f"&lt;{ui.e(t.get('librarianEmail'))}&gt;</span></div>"
             f"<div class='q'>{ui.e(t.get('question'))}</div>"
