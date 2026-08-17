@@ -96,3 +96,37 @@ def test_the_query_layer_exposes_cited_urls():
         content = "old"
 
     assert _msg_dict(_Old())["cited_urls"] == []
+
+
+# --- link-click plumbing ----------------------------------------------------
+
+
+def test_linkclick_is_in_the_purge_child_tables_and_before_message():
+    """Every FK into Conversation is ON DELETE RESTRICT, and that one list
+    drives BOTH the archive dump and the delete. A child missing from it
+    fails the next purge; worse, since the list also drives the archive, the
+    rows would be deleted without ever being written to the archive.
+
+    LinkClick points at Message as well, so it must come BEFORE Message or
+    the Message delete hits a RESTRICT violation.
+    """
+    import re
+    from pathlib import Path
+
+    src = (Path(__file__).resolve().parents[3] / "scripts"
+           / "archive_conversations.py").read_text(encoding="utf-8")
+    block = src[src.index("CHILD_TABLES = ["):]
+    block = block[: block.index("]")]
+    names = re.findall(r'\("(\w+)",', block)
+    assert "LinkClick" in names, "the next purge would fail"
+    assert names.index("LinkClick") < names.index("Message")
+
+
+def test_the_socket_handler_is_actually_registered():
+    """Same wiring discipline as test_guards_are_wired: a handler defined but
+    never bound to an event is invisible until someone notices no data."""
+    from pathlib import Path
+
+    src = (Path(__file__).resolve().parents[2] / "main.py").read_text(encoding="utf-8")
+    assert "async def _v2_link_click" in src
+    assert 'sio_v2.on("linkClick", _v2_link_click)' in src

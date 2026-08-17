@@ -45,6 +45,48 @@ const ChatBotComponent = ({ askUsStatus = { isOpen: false, hoursToday: null, nex
     };
   }, [messageContextValues.isTyping, messageContextValues.thinkingStartTime]);
 
+  // Did the patron actually FOLLOW a link we gave them?
+  //
+  // ONE DELEGATED LISTENER, not a callback threaded through the components.
+  // Anchors are rendered in three different places -- markdown links inside
+  // ParseLinks, the expandable CitationChip, and the "Sources" list below
+  // each answer -- and a prop through all three would be three chances to
+  // miss one. A listener on the transcript catches every anchor, including
+  // any added later.
+  //
+  // Reported over the existing socket rather than a fetch: no new public
+  // endpoint, and the connection is already bound to this conversation and
+  // already rate-limited. The server drops anything whose URL was not in
+  // that message's citations (see conversation_store.record_link_click).
+  //
+  // Deliberately does NOT preventDefault or delay: the click navigates
+  // immediately as it always did. Losing a click record is fine; making a
+  // patron wait on telemetry is not.
+  // Reuses the existing `chatRef` on the transcript container -- a second
+  // ref on the same node would just be another thing to keep in sync.
+  useEffect(() => {
+    const node = chatRef.current;
+    const socket = socketContextValues.socket;
+    if (!node || !socket) return undefined;
+    const onClick = (e) => {
+      try {
+        const anchor = e.target && e.target.closest && e.target.closest('a[href]');
+        if (!anchor || !node.contains(anchor)) return;
+        const url = anchor.getAttribute('href') || '';
+        if (!/^https?:/i.test(url)) return;   // ignore in-page anchors
+        const holder = anchor.closest('[data-message-id]');
+        socket.emit('linkClick', {
+          url,
+          messageId: holder ? holder.getAttribute('data-message-id') : undefined,
+        });
+      } catch {
+        /* telemetry must never break navigation */
+      }
+    };
+    node.addEventListener('click', onClick);
+    return () => node.removeEventListener('click', onClick);
+  }, [socketContextValues.socket]);
+
   const handleFormSubmit = (e) => {
     e.preventDefault();
     if (messageContextValues.inputMessage && socketContextValues.socket) {
@@ -209,6 +251,11 @@ const ChatBotComponent = ({ askUsStatus = { isOpen: false, hoursToday: null, nex
             return (
               <div
                 key={index}
+                /* Carries the message id so the delegated link-click listener
+                   below can attribute a click to the answer it came from,
+                   without threading a callback through ParseLinks AND
+                   CitationChip -- both of which render anchors. */
+                data-message-id={message.messageId || undefined}
                 className={message.sender === 'user' ? 'self-end' : 'self-start'}
               >
                 <div

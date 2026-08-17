@@ -13,6 +13,7 @@ on `Message` and `ModelTokenUsage`:
 Existing functions are unchanged so the legacy bot keeps working
 during the rollout. When the legacy path retires, fold v2 -> v1 names.
 """
+import logging
 import os
 from typing import List, Dict, Any, Optional
 from datetime import datetime
@@ -382,3 +383,55 @@ __all_v2__ = [
     "cache_hit_rate",
     "log_token_usage_v2",
 ]
+
+
+async def record_link_click(
+    *,
+    conversation_id: str,
+    url: str,
+    message_id: Optional[str] = None,
+) -> bool:
+    """Record that the patron followed a link we gave them.
+
+    Returns True if a row was written.
+
+    THE URL MUST BE ONE WE ACTUALLY SHOWED.
+        Checked against Message.citedUrls, which exists precisely because it
+        is the list the patron saw. This is the whole anti-abuse story for a
+        write that arrives on an unauthenticated public socket: an attacker
+        must first guess a live message id AND a URL we really sent.
+
+        When no message id is supplied we cannot check, so the click is
+        recorded unattributed rather than dropped -- a lost attribution is
+        better than a lost click, and the conversation id still bounds it.
+
+    Never raises. A click is telemetry; the patron is already navigating
+    away and must never see a failure from it.
+    """
+    try:
+        await ensure_connection()
+        prisma = get_prisma_client()
+
+        if message_id:
+            msg = await prisma.message.find_unique(where={"id": message_id})
+            if msg is None:
+                return False
+            allowed = list(getattr(msg, "citedUrls", None) or [])
+            if url not in allowed:
+                # Not a link this answer carried. Silently ignored: saying so
+                # would tell a prober which ids and URLs are real.
+                return False
+            # Trust the row over the payload for the conversation binding.
+            conversation_id = getattr(msg, "conversationId", None) or conversation_id
+
+        await prisma.linkclick.create(
+            data={
+                "conversationId": conversation_id,
+                "messageId": message_id,
+                "url": url,
+            }
+        )
+        return True
+    except Exception as e:  # noqa: BLE001
+        logging.warning(f"link-click not recorded: {e}")
+        return False

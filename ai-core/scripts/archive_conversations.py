@@ -84,6 +84,12 @@ ARCHIVE_ROOT = Path(
 # Children before parent: every FK into Conversation is ON DELETE RESTRICT.
 # (LibrarianReview -> Message is CASCADE, so message deletes carry it.)
 CHILD_TABLES = [
+    # LinkClick FIRST: it points at BOTH Conversation and Message, so it has
+    # to go before Message or the Message delete hits a RESTRICT violation.
+    # Added 2026-08-16 with the table itself -- this list drives the ARCHIVE
+    # loop as well as the delete loop, so forgetting it would both break the
+    # purge AND delete rows that were never written to the archive.
+    ("LinkClick", "linkclick"),
     ("ConversationFeedback", "conversationfeedback"),
     ("ToolExecution", "toolexecution"),
     ("ModelTokenUsage", "modeltokenusage"),

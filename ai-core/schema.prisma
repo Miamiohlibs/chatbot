@@ -45,6 +45,7 @@ model Message {
   /// patron saw, and so "which pages do we send people to" is answerable.
   citedUrls      String[]          @default([])
   reviews        LibrarianReview[]
+  linkClicks     LinkClick[]
   /// Operator triage state for the admin review queue (added 2026-07-27).
   /// Distinct from LibrarianReview, which is the per-librarian verdict
   /// system and needs a Librarian identity; this is just "I, the
@@ -67,6 +68,7 @@ model Conversation {
   messageList          Message[]
   tokenUsages          ModelTokenUsage[]
   toolExecutions       ToolExecution[]
+  linkClicks           LinkClick[]
   createdAt            DateTime              @default(now())
   updatedAt            DateTime              @updatedAt
 }
@@ -116,6 +118,42 @@ model ConversationFeedback {
   userComment    String
   conversationId String       @unique
   conversation   Conversation @relation(fields: [conversationId], references: [id])
+}
+
+/// Did the patron actually FOLLOW a link we gave them?
+///
+/// Operator decision 2026-08-16: recorded per conversation, not merely as an
+/// aggregate count, because the question worth answering is "we handed this
+/// person a link and they ignored it" -- which an aggregate cannot express.
+/// Sensitivity is the same order as the transcript itself, which is already
+/// stored in full; this adds behaviour, not a new data subject.
+///
+/// WRITTEN OVER THE EXISTING SOCKET, not a public HTTP endpoint. The socket
+/// is already bound to a conversation and already behind the per-address and
+/// per-connection rate limits, and the handler only accepts a URL that this
+/// message actually carried (Message.citedUrls). Forging a click therefore
+/// means guessing a live messageId AND a URL we really sent, for no gain.
+///
+/// PURGE: listed FIRST in archive_conversations.CHILD_TABLES. Every FK into
+/// Conversation is ON DELETE RESTRICT, so a child missing from that list
+/// makes the next purge fail -- and the list drives the ARCHIVE too, so
+/// missing it would also mean the rows were deleted without being kept.
+model LinkClick {
+  id             String       @id @default(uuid())
+  conversationId String
+  /// Which answer the link was in. Nullable so a click can still be recorded
+  /// if the message id is somehow missing -- a lost attribution is better
+  /// than a dropped click.
+  messageId      String?
+  url            String
+  clickedAt      DateTime     @default(now())
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+  message        Message?     @relation(fields: [messageId], references: [id])
+
+  @@index([conversationId])
+  @@index([messageId])
+  @@index([url])
+  @@index([clickedAt])
 }
 
 // MyGuide Subject Mapping Models

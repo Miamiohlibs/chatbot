@@ -51,6 +51,7 @@ from src.memory.conversation_store import (
     create_conversation,
     add_message,
     add_message_v2,
+    record_link_click,
     get_conversation_history,
     update_message_rating,
     save_conversation_feedback,
@@ -1066,6 +1067,49 @@ async def _v2_message_rating(sid, data):
         await sio_v2.emit("ratingAck", {"success": False, "error": str(e)}, to=sid)
 
 
+async def _v2_link_click(sid, data):
+    """The patron followed one of the links we gave them.
+
+    WHY OVER THE SOCKET AND NOT A PUBLIC HTTP ENDPOINT
+        Operator decision 2026-08-16. A public write endpoint is an abuse
+        surface that has to be designed; this connection already exists, is
+        already bound to a conversation, and already sits behind the
+        per-address and per-connection rate limits from _v2_connect. Nothing
+        new is exposed.
+
+    WHAT MAKES A FORGED CLICK POINTLESS
+        The URL must be one this message actually carried. We look up
+        Message.citedUrls -- the list we now store precisely because it is
+        what the patron was shown -- and drop anything else. So faking a
+        click means first guessing a live message id AND a URL we really
+        sent, to move a number nobody is paid on.
+
+    Best effort throughout: a click that fails to record must never surface
+    to the patron, who is mid-navigation to another page.
+    """
+    try:
+        payload = data or {}
+        url = (payload.get("url") or "").strip()
+        message_id = (payload.get("messageId") or "").strip() or None
+        conversation_id = (
+            (payload.get("conversationId") or "").strip()
+            or client_conversations.get(sid)
+        )
+        if not url or not conversation_id:
+            return
+        # Bound the write, same reasoning as validate_message: this is an
+        # unauthenticated public socket.
+        if len(url) > 2048:
+            return
+        await record_link_click(
+            conversation_id=conversation_id,
+            message_id=message_id,
+            url=url,
+        )
+    except Exception as e:  # noqa: BLE001 -- never reaches the patron
+        logging.warning(f"⚠️ [v2] link-click log failed: {e}")
+
+
 async def _v2_user_feedback(sid, data):
     """End-of-conversation rating + comment. Ported like _v2_message_rating."""
     try:
@@ -1097,6 +1141,7 @@ async def _v2_user_feedback(sid, data):
 sio_v2.on("connect", _v2_connect)
 sio_v2.on("messageRating", _v2_message_rating)
 sio_v2.on("userFeedback", _v2_user_feedback)
+sio_v2.on("linkClick", _v2_link_click)
 sio_v2.on("disconnect", _v2_disconnect)
 sio_v2.on("message", _v2_message)
 
