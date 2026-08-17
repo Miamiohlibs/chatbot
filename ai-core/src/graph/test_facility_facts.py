@@ -527,3 +527,74 @@ def test_page_backed_questions_survive_the_broadened_matcher():
         if got != want:
             wrong.append(f"{q!r}: expected {want}, got {got}")
     assert not wrong, "misrouted:\n  " + "\n  ".join(wrong)
+
+
+# --- parking / temporary / game night (operator ruling 2026-08-18) -----------
+
+
+def test_parking_is_answered_because_it_is_documented():
+    """The operator listed parking among the things to defer to the desk. It
+    is one of the better-documented topics we have -- libanswers 176243 plus
+    the campus pages -- so deferring it would withhold pages we hold, which is
+    the mistake they themselves ruled out with the reading-room example.
+    """
+    body, cites = F.parking_answer("where can I park")
+    low = body.lower()
+    assert "permit" in low
+    assert "garage" in low and "meter" in low
+    assert cites and "176243" in cites[0]["url"]
+
+
+def test_parking_names_the_hamilton_lot_when_hamilton_is_named():
+    body, cites = F.parking_answer("is there parking at Rentschler")
+    assert "free visitor parking" in body.lower()
+    assert cites[0]["url"] == F.HAMILTON_ABOUT_URL
+
+
+def test_parking_defers_only_the_live_state():
+    """What is on no page is whether a garage is FULL right now. The answer
+    says so and hands that part to the desk."""
+    body, _ = F.parking_answer("where can I park")
+    assert F.KING_PHONE in body
+    assert "full" in body.lower()
+
+
+def test_temporary_and_current_state_go_to_the_desk():
+    """A crawl is a snapshot. This content changes, so it is deferred by
+    definition rather than because it happens to be missing."""
+    for q in ("is the elevator out of service",
+              "is there construction in the library",
+              "why is the third floor closed",
+              "is anything different over winter break?"):
+        r = F.temporary_notice_answer(q)
+        assert r is not None, q
+        assert F.KING_PHONE in r[0], q
+
+
+def test_hours_are_the_explicit_carve_out_and_never_deferred():
+    """The operator named hours as the exception: they come live from LibCal,
+    holiday and break hours included, and must keep that path."""
+    for q in ("what are the hours",
+              "what time does the library close on Thanksgiving",
+              "are you open over spring break",
+              "when does King open tomorrow",
+              "are you closed on Christmas"):
+        assert F.temporary_notice_answer(q) is None, q
+
+
+def test_game_night_gives_the_durable_half_and_navigates_to_the_dates():
+    """The one event the operator handed over. The page's indexed text carries
+    what it IS and who it is for, but not the schedule -- which is exactly the
+    date-bearing content the navigator rule says to link rather than repeat."""
+    body, cites = F.games_night_answer("when is library game night")
+    low = body.lower()
+    assert "meeples" in low
+    assert "welcome" in low
+    assert F.GAMES_NIGHT_EMAIL in body
+    assert "check the page" in low, "the schedule must be navigated to"
+    assert cites[0]["url"] == F.GAMES_NIGHT_URL
+    # It must not invent a day or time.
+    import re as _re
+    assert not _re.search(r"\b(monday|tuesday|wednesday|thursday|friday|"
+                          r"saturday|sunday|\d{1,2}\s*(am|pm))\b", low), \
+        "invented a schedule"

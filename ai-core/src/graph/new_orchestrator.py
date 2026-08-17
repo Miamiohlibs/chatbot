@@ -989,6 +989,12 @@ def _run_turn(
             # _NOT_PRINTING_RE already declines "how much"/"cost"/"charge",
             # so this only has to win on the phrasings it misses -- but it has
             # to run first to do that.
+            # Page-backed, so they run BEFORE the desk fallback below.
+            # Parking is documented (libanswers 176243 + the campus pages), so
+            # deferring it would withhold pages we hold. Game night is the one
+            # event the operator handed over explicitly.
+            ("parking", _ff.parking_answer),
+            ("games_night", _ff.games_night_answer),
             ("printing_cost", _ff.printing_cost_answer),
             ("print_scan_wifi", _ff.printing_scanning_wifi_answer),
             # OPERATOR RULING 2026-08-17, restated 2026-08-18: any library
@@ -1003,6 +1009,11 @@ def _run_turn(
             # the site, send them to the desk. Moving this earlier would make
             # it steal page-backed answers, which is why it started out too
             # early and had to be moved.
+            # Short-term / temporary / current-state -> the desk, by
+            # definition: a crawl is a snapshot and this content changes.
+            # Hours are the operator's explicit carve-out and are excluded
+            # inside the function -- they come live from LibCal.
+            ("temporary_notice", _ff.temporary_notice_answer),
             ("building_facility", _ff.building_facility_answer),
             # LAST in this group on purpose: its matcher is the broadest of
             # all of them, so every specific answer above gets first refusal.

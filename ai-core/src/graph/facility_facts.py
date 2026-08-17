@@ -530,3 +530,174 @@ def building_facility_answer(message: str) -> "Optional[tuple[str, list[dict]]]"
         "If you would rather write it down, Ask Us reaches a librarian [1].",
         [_cite(1, ASK_US_URL, "Miami University Libraries — Ask Us")],
     )
+
+
+# --- parking: DOCUMENTED, so it is answered, not deferred -------------------
+#
+# The operator listed parking among the things to send to the desk
+# (2026-08-18). Checked first, and it is one of the better-documented topics
+# we have, so deferring it would mean withholding pages we hold -- which is
+# the mistake they themselves ruled out with the reading-room example ("页面
+# 提供过的信息比如locker" gets given).
+#
+# In the live index 2026-08-18:
+#   libanswers 176243 "Where can I park on campus?" -- two garages, ~100
+#       meters, no permit needed at either, permit required elsewhere, areas
+#       colour-coded by privilege
+#   ham.miamioh.edu/library/about/ -- "Free visitor parking ... in the large
+#       parking lot just north of the library"
+#   spec.../home/visiting/ -- metered street parking, Oxford Municipal garage,
+#       visitor permits from the Parking Office
+#
+# What is NOT on any page is the live state -- whether a garage is full right
+# now, whether a lot is closed for an event. Those are temporary, and
+# `temporary_notice_answer` below takes them.
+PARKING_FAQ_URL = "https://libanswers.lib.miamioh.edu/faq/176243"
+HAMILTON_ABOUT_URL = "https://www.ham.miamioh.edu/library/about/"
+
+_PARKING_RE = re.compile(
+    r"\b(park|parking|garage|garages|meter|meters|permit|permits|"
+    r"where\s+(can|do)\s+i\s+park|lot|lots)\b",
+    re.IGNORECASE,
+)
+_PARKING_NOT_RE = re.compile(
+    # "parking lot" senses that are not about parking a car, plus the live-state
+    # questions that belong to the temporary-notice answer.
+    r"\b(bike\s+rack|full\s+right\s+now|any\s+spaces?\s+(left|free)|"
+    r"closed\s+(today|for)|blocked)\b",
+    re.IGNORECASE,
+)
+
+
+def parking_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
+    """Where to park. Page-backed, so it gets answered."""
+    m = message or ""
+    if not _PARKING_RE.search(m) or _PARKING_NOT_RE.search(m):
+        return None
+    if re.search(r"\b(hamilton|rentschler)\b", m, re.IGNORECASE):
+        return (
+            "Rentschler Library is on the 2nd floor of Schwarm Hall on the "
+            "Hamilton campus, and **free visitor parking** is in the large "
+            "lot just north of the library [1].",
+            [_cite(1, HAMILTON_ABOUT_URL, "Rentschler Library — about")],
+        )
+    return (
+        "On the Oxford campus, **a permit is required** to park on campus and "
+        "on the streets running through it, with two exceptions: Miami has "
+        "**two parking garages** and about **100 metered spaces** that need no "
+        "permit -- you just pay for the time you are there. Parking areas are "
+        "colour-coded by who may use them [1].\n\n"
+        f"For anything the page does not cover -- whether a garage is full, or "
+        f"a lot is closed for an event -- the service desk will know: "
+        f"**{KING_PHONE}**.",
+        [_cite(1, PARKING_FAQ_URL,
+               "Miami University Libraries — where can I park on campus?")],
+    )
+
+
+# --- temporary and short-term: the desk always, by definition ---------------
+#
+# OPERATOR RULING 2026-08-18: anything short-term, temporary or event-shaped
+# goes to the desk. The reasoning is the same as for unsourced building facts,
+# only stronger: this content is not merely absent from the site, it CHANGES,
+# and a crawl is a snapshot. Nothing in the index describes current closures
+# or construction (checked -- the only "closed" hits are two unrelated FAQs).
+#
+# Hours are the explicit exception the operator named, and they are excluded
+# here: those come live from LibCal, including holiday and break hours, and
+# must keep reaching that path.
+_TEMPORARY_RE = re.compile(
+    r"\b(construction|renovat\w*|refurbish\w*|"
+    r"out\s+of\s+(service|order)|temporarily\s+(closed|shut|unavailable)|"
+    r"closed\s+(today|right\s+now|at\s+the\s+moment|for\s+(repairs?|"
+    r"maintenance|an?\s+event))|"
+    r"why\s+is\s+[^.?!]{0,30}\s+closed|"
+    r"any\s+(delays?|disruptions?|outages?)|"
+    r"road\s*works?|scaffolding|blocked\s+off|cordoned)\b",
+    re.IGNORECASE,
+)
+# Holiday / break questions that are NOT hours -- "will the bookdrop be
+# emptied over winter break", "is anything different at Thanksgiving".
+_HOLIDAY_NON_HOURS_RE = re.compile(
+    r"\b(thanksgiving|christmas|winter\s+break|spring\s+break|"
+    r"fall\s+break|summer\s+break|holiday|holidays|new\s+year)\b",
+    re.IGNORECASE,
+)
+_IS_AN_HOURS_QUESTION_RE = re.compile(
+    r"\b(hour|hours|open|opens|opening|close|closes|closing|shut|"
+    r"what\s+time|when\s+(do|does|are|is)\s+[^.?!]{0,20}\b(open|close))\b",
+    re.IGNORECASE,
+)
+
+
+def temporary_notice_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
+    """Short-term, temporary or current-state questions -> the desk.
+
+    HOURS ARE EXCLUDED, by the operator's explicit carve-out: they come live
+    from LibCal, holiday and break hours included, and must keep that path.
+    """
+    m = message or ""
+    if _IS_AN_HOURS_QUESTION_RE.search(m):
+        return None
+    if not (_TEMPORARY_RE.search(m)
+            or (_HOLIDAY_NON_HOURS_RE.search(m) and "?" in m)):
+        return None
+    return (
+        "That is the kind of thing that changes week to week, and I only know "
+        "what was on the website when it was last indexed -- so I would rather "
+        "not tell you something that was true a month ago.\n\n"
+        f"The service desk has today's picture: **{KING_PHONE}**, or ask at the "
+        "desk on the first floor of King.\n\n"
+        "Library **hours** I can look up live, including over holidays and "
+        "breaks -- just ask. And current events and exhibits are on the News & "
+        "Events page [1].",
+        [_cite(1, "https://www.lib.miamioh.edu/about/news-events/news/",
+               "Miami University Libraries — News & Events")],
+    )
+
+
+# --- game night: the one event the operator DID hand over -------------------
+#
+# Operator, 2026-08-18: events go to the desk "except the page info I gave
+# you" -- the games page. So this is the deliberate exception to the events
+# exclusion, and it is worth being precise about which half is answerable.
+#
+# From libguides.lib.miamioh.edu/games-night in the live index, all DURABLE:
+#   "Co-sponsored by MU Meeples! Come with a group or join a table when you
+#    get here. All Miami University students, faculty, staff, and families are
+#    welcome!" ... "Questions? librarygamesnights@miamioh.edu" ... "we have
+#    created a pop-up game night kit! Host your own game night with a variety
+#    of easy to play games, all in one convenient tub."
+#
+# What the page does NOT put in the indexed text is the SCHEDULE, which is
+# exactly the date-bearing content the operator's navigator rule says we
+# navigate to rather than repeat. So: say what it is and who it is for, and
+# send them to the page for when.
+GAMES_NIGHT_URL = "https://libguides.lib.miamioh.edu/games-night"
+GAMES_NIGHT_EMAIL = "librarygamesnights@miamioh.edu"
+
+_GAMES_RE = re.compile(
+    r"\b(game\s*night|games\s*night|game\s*nights|board\s*game|"
+    r"tabletop|meeples|game\s+kit)\b",
+    re.IGNORECASE,
+)
+
+
+def games_night_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
+    """The games programme. Durable facts here, the schedule on the page."""
+    m = message or ""
+    if not _GAMES_RE.search(m):
+        return None
+    return (
+        "**Library Game Nights** are board and tabletop game evenings at the "
+        "library, co-sponsored by MU Meeples. **All Miami students, faculty, "
+        "staff and families are welcome** -- come with a group or join a table "
+        "when you arrive, and there are snacks [1].\n\n"
+        "**For the dates, check the page** [1] -- the schedule changes and I "
+        "would rather send you to the current one than quote an old date.\n\n"
+        "There is also a **pop-up game night kit**: a tub of easy-to-play "
+        "games you can borrow to host your own [1].\n\n"
+        f"Questions about the programme go to {GAMES_NIGHT_EMAIL}.",
+        [_cite(1, GAMES_NIGHT_URL,
+               "Miami University Libraries — Library Game Nights")],
+    )
