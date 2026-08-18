@@ -135,6 +135,32 @@ def render_markdown(report: DiffReport) -> str:
             lines.append(f"- ... and {len(report.upsert.tombstoned_urls) - 50} more")
         lines.append("")
 
+    # WHAT IS BEING ADDED, by page. `UpsertResult.new_urls` has carried this
+    # since preview was written -- {source_url: chunk_count} -- and the report
+    # never rendered it. So a librarian was asked to approve "212 new chunks"
+    # with no way to see which pages they came from, which is not an approval
+    # gate so much as a rubber stamp. Sorted by weight: the pages contributing
+    # most content are the ones worth a look.
+    if getattr(report.upsert, "new_urls", None):
+        _nu = report.upsert.new_urls
+        lines.append("")
+        lines.append("## ➕ New or rewritten content, by page")
+        lines.append("")
+        lines.append(
+            f"{len(_nu)} page(s) contribute the "
+            f"{sum(_nu.values())} new/rewritten chunks above. A page you do "
+            "NOT recognise is the thing to catch here, the same way a page you "
+            "still need is the thing to catch in the tombstone list."
+        )
+        lines.append("")
+        lines.append("| chunks | URL |")
+        lines.append("|---:|---|")
+        for _u, _n in sorted(_nu.items(), key=lambda kv: (-kv[1], kv[0]))[:60]:
+            lines.append(f"| {_n} | {_u} |")
+        if len(_nu) > 60:
+            lines.append(f"| … | and {len(_nu) - 60} more page(s) |")
+        lines.append("")
+
     if report.unreachable_protected:
         lines.append("")
         lines.append("## 🛡 Unreachable — kept in the index, NOT tombstoned")

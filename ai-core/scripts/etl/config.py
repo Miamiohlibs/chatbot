@@ -127,6 +127,28 @@ SEED_URLS: Final[dict[str, list[str]]] = {
 TLS_SKIP_ALLOWLIST: Final[set[str]] = {
     "mid.miamioh.edu",       # cert expired as of plan-write time, file IT ticket
     "www.mid.miamioh.edu",
+    # Hamilton, added 2026-08-18. Its chain is COMPLETE and its cert is valid;
+    # the problem is the root it ends at:
+    #
+    #   www.ham.miamioh.edu
+    #     <- InCommon Intermediate CA - OVG2C   (Internet2, served correctly)
+    #     <- emSign Root TLS CA - G1            <- not in any bundle we have
+    #
+    # Verified by passing each bundle to openssl explicitly: the system store
+    # (ca-certificates 20260601) carries no emSign roots at all, and certifi
+    # 2026.6.17 carries four but not this one. curl fails identically. So this
+    # is not a stale bundle on our side and no package update fixes it.
+    #
+    # WHY IT MATTERED ENOUGH TO ADD: every Hamilton page failed to fetch, so
+    # the corpus held four Rentschler pages against 130-odd for Oxford. That
+    # is the long-unexplained "Hamilton gap", and it is a whole campus --
+    # Rentschler's director and staff answer for it.
+    #
+    # Same standing as the Middletown entries: temporary, logs a WARN on every
+    # use, and the real fix is an IT ticket asking for a chain that ends at a
+    # widely-trusted root.
+    "ham.miamioh.edu",
+    "www.ham.miamioh.edu",
 }
 
 

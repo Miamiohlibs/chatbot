@@ -253,3 +253,54 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+def test_the_report_lists_what_is_being_added_by_page():
+    """An approval gate that does not show what is being approved is a rubber
+    stamp.
+
+    `UpsertResult.new_urls` -- {source_url: chunk_count} -- has been populated
+    by preview since it was written, and the report never rendered it. On
+    2026-08-18 a librarian was being asked to sign off 212 new chunks with no
+    way to see which pages they came from, while the SAME report itemised
+    every page being removed.
+    """
+    import datetime as dt
+
+    from scripts.etl.diff_report import DiffReport, render_markdown
+    from scripts.etl.upsert import UpsertResult
+
+    now = dt.datetime(2026, 8, 18, 4, 0)
+    up = UpsertResult(weaviate_collection_version="(preview)")
+    up.new_urls = {
+        "https://www.ham.miamioh.edu/library/about/mission-and-policies/": 15,
+        "https://www.lib.miamioh.edu/about/organization/staff/": 39,
+        "https://www.lib.miamioh.edu/small/": 1,
+    }
+    md = render_markdown(DiffReport(run_started_at=now, run_finished_at=now,
+                                    discovered_url_count=3, upsert=up))
+
+    assert "New or rewritten content, by page" in md
+    assert "3 page(s) contribute the 55 new/rewritten chunks" in md
+    for url in up.new_urls:
+        assert url in md, url
+    # Heaviest first -- those are the ones worth a reviewer's attention.
+    assert md.index("/about/organization/staff/") < md.index("/small/")
+
+
+def test_unreachable_urls_are_reported_as_kept_not_lost():
+    """The reviewer must be able to tell "we could not reach this, so we kept
+    it" from "this was deleted from the website"."""
+    import datetime as dt
+
+    from scripts.etl.diff_report import DiffReport, render_markdown
+
+    now = dt.datetime(2026, 8, 18, 4, 0)
+    md = render_markdown(DiffReport(
+        run_started_at=now, run_finished_at=now, discovered_url_count=1,
+        unreachable_protected=[
+            ("https://www.ham.miamioh.edu/library/", "SSLError: CERT...")],
+    ))
+    assert "NOT tombstoned" in md
+    assert "www.ham.miamioh.edu/library/" in md
+    assert "Only 404 and 410 count" in md
