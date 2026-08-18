@@ -294,13 +294,22 @@ _FIXTURES: list[SmokeFixture] = [
     ),
     # 4. SERVICE_UNAVAILABLE: MakerSpace at Hamilton
     SmokeFixture(
-        name="makerspace_hamilton",
-        user_message="where is the makerspace at the Hamilton library",
+        # WHAT THIS FIXTURE IS FOR: the agent_then_refusal PATH, not the
+        # MakerSpace. RefusalContext is injected by the fixture, so the
+        # message only has to reach synthesis.
+        #
+        # It used to ask "where is the makerspace at the Hamilton library".
+        # On 2026-08-18 `ms_campus` started answering that properly -- naming
+        # King's MakerSpace, Middletown's TEC Lab, and Rentschler's desk -- so
+        # the message no longer reaches synthesis and this fixture tested
+        # nothing. Deliberately a service no deterministic short-circuit owns.
+        name="service_not_at_building",
+        user_message="where is the sound studio at the Hamilton library",
         expected_path="agent_then_refusal",  # post-processor short-circuits
-        classification=_classification("makerspace_3d"),
+        classification=_classification("space_info"),
         service_refusal=RefusalContext(
             campus_display="Hamilton",
-            service_name="MakerSpace",
+            service_name="Sound Studio",
             service_available_at="King Library on the Oxford campus",
         ),
     ),

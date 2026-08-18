@@ -311,7 +311,10 @@ def test_account_path_response_is_refusal_with_myaccount_link() -> None:
 
 
 def test_makerspace_hamilton_path_refuses_with_service_not_at_building() -> None:
-    fix = next(f for f in _FIXTURES if f.name == "makerspace_hamilton")
+    """The agent_then_refusal PATH. The fixture no longer uses the MakerSpace:
+    `ms_campus` answers that one properly now, which would have left this
+    asserting a refusal that never happens (see smoke_e2e.py)."""
+    fix = next(f for f in _FIXTURES if f.name == "service_not_at_building")
     deps = _build_deps(fix)
     from src.graph.new_orchestrator import TurnRequest, run_turn  # noqa: E402
     resp = run_turn(
@@ -323,7 +326,7 @@ def test_makerspace_hamilton_path_refuses_with_service_not_at_building() -> None
     # circuit) or any other refusal trigger that surfaces the service
     # context. In the current wiring it's SERVICE_NOT_AT_BUILDING.
     assert resp.refusal_trigger == "service_not_at_building"
-    assert "MakerSpace" in resp.answer
+    assert "Sound Studio" in resp.answer
 
 
 def test_king_hours_path_returns_answer_with_citations() -> None:

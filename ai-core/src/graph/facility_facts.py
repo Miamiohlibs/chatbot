@@ -119,7 +119,17 @@ _NOT_PRINTING_RE = re.compile(
     # "Where is the printing POLICY?" is asking for one specific page, and the
     # gold checks that only the approved page is cited -- a four-link answer
     # fails it by construction (gold cit_blacklisted_url_dropped).
-    r"|policy|policies)\b",
+    r"|policy|policies"
+    # "SCAN" IS NOT ALWAYS OUR SCANNER. Two real asks on 2026-08-17 got the
+    # MUprint guide because the word appeared in them at all:
+    #   "...can I use interlibrary loan if I only need a photo or a SCAN of
+    #    an image from a 2001 issue?"        -> an ILL question
+    #   "an OCR SOFTWARE capable of SCANNING and translating Japanese ... do
+    #    we have access to ABBYY?"           -> a software-access question
+    # In both, scanning is the deliverable or the software's function, not
+    # something the patron wants to do at our machines.
+    r"|interlibrary\s+loan|\bill\s+request|\bocr\b|software|translat\w*"
+    r"|subscri\w*)\b",
     re.IGNORECASE,
 )
 

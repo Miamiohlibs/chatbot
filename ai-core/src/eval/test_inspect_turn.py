@@ -193,11 +193,26 @@ def test_inspect_explicit_campus_in_question_resolves_correctly() -> None:
 
 def test_inspect_service_unavailable_short_circuits() -> None:
     """When --service-unavailable is set, post-processor returns the
-    SERVICE_NOT_AT_BUILDING refusal regardless of synthesizer output."""
+    SERVICE_NOT_AT_BUILDING refusal regardless of synthesizer output.
+
+    "where is the makerspace at Hamilton" used to be the example. On
+    2026-08-18 `ms_campus` started answering that question properly, so the
+    turn stopped reaching synthesis and this asserted a refusal that no longer
+    happened.
+
+    Two things are needed to reach the flag now, and both are deliberate: a
+    message no deterministic short-circuit owns, and `forced_intent`, because
+    the classifier calls this one out_of_scope and step 2.5 refuses before
+    synthesis. Without the forced intent there is no message left that gets
+    here -- worth knowing, since it means the SERVICE_NOT_AT_BUILDING path is
+    not reachable in production either (Library.servicesOffered is empty in
+    Postgres, so lookup_service_availability returns None for everything).
+    """
     buf = io.StringIO()
     with redirect_stdout(buf):
         resp, _ = inspect(
-            "where is the makerspace at Hamilton",
+            "does Hamilton have a media lab",
+            forced_intent="space_info",
             service_unavailable=True,
             print_trace=False,
         )

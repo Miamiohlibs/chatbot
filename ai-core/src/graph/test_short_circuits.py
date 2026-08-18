@@ -4253,3 +4253,99 @@ def test_both_hours_short_circuits_are_actually_DISPATCHED():
              for n in ("open_right_now", "close_today", "named_day",
                        "week_hours", "today_hours")]
     assert order == sorted(order), order
+
+
+# --- a poster you are MAKING is not a poster you are PUTTING UP --------------
+
+
+def test_conduct_answer_yields_on_making_a_poster():
+    """A librarian pasted this real ask twice on 2026-08-17 and got the
+    building policy answer both times: food and drink, alcohol, napping."""
+    from src.graph.new_orchestrator import _facilities_policy_answer as F
+
+    for q in ("Can I get help making a poster?",
+              "can you help me design a poster for my research",
+              "where do I go to create a poster",
+              "can I get a flyer laminated"):
+        assert F(q) is None, q
+    # The conduct sense survives -- putting one up IS ours to police.
+    for q in ("Can I hang a poster in the library?",
+              "am I allowed to put up flyers in king",
+              "can I leave handouts on a table in the library"):
+        assert F(q) is not None, q
+    # And the rest of the conduct answer is untouched.
+    for q in ("can I eat food in the library",
+              "is alcohol allowed at a library event",
+              "can I bring my dog into king"):
+        assert F(q) is not None, q
+
+
+# --- "does Rentschler have a MakerSpace" ------------------------------------
+
+
+def test_makerspace_campus_answer_never_denies_middletowns_tec_lab():
+    """THE FACT THAT ALMOST GOT INVENTED.
+
+    Special Collections genuinely is Oxford-only, and copying that answer for
+    the MakerSpace would have told Middletown students they had no makerspace.
+    Gardner-Harvey has run the TEC Lab Makerspace since Fall 2014. This test
+    exists to keep a future edit from taking the shortcut.
+    """
+    from src.graph.new_orchestrator import _makerspace_campus_answer as F
+
+    for q in ("does Gardner-Harvey have a makerspace",
+              "is there a makerspace at Middletown",
+              "which campuses have a makerspace",
+              "does Rentschler have a MakerSpace"):
+        res = F(q)
+        assert res is not None, q
+        body = res[0].lower()
+        for lie in ("no makerspace", "neither", "only at oxford",
+                    "not at middletown", "middletown does not"):
+            assert lie not in body, f"{q}: claims {lie!r}"
+    # Middletown's own answer must name its space and where it is.
+    mid = F("does Gardner-Harvey have a makerspace")[0].lower()
+    assert "tec lab" in mid and "125" in mid and "014" in mid
+    assert "free" in mid
+    # All-campus answer names all three.
+    every = F("which campuses have a makerspace")[0].lower()
+    for token in ("oxford", "middletown", "hamilton", "tec lab"):
+        assert token in every, token
+
+
+def test_makerspace_campus_answer_does_not_assert_a_no_for_hamilton():
+    """Operator rule, 2026-08-17: nothing posted is not the same as nothing
+    there. Hamilton gets their equipment page and their desk, not a flat no."""
+    from src.graph.new_orchestrator import _makerspace_campus_answer as F
+
+    res = F("does Rentschler have a MakerSpace")
+    assert res is not None
+    body, cites = res
+    low = body.lower()
+    assert "pages list" in low or "posted" in low, body
+    assert "(513) 785-3235" in body            # the desk that would know
+    assert any("ham.miamioh.edu" in c["url"] for c in cites)
+    # It still tells them where the named space IS, on both other campuses.
+    assert "king library" in low and "tec lab" in low
+
+
+def test_makerspace_campus_answer_leaves_kings_own_paths_alone():
+    from src.graph.new_orchestrator import _makerspace_campus_answer as F
+
+    for q in ("where is the MakerSpace at King",
+              "can I 3d print at King Library",
+              "what are the makerspace hours",
+              "what are the makerspace hours at Hamilton"):
+        assert F(q) is None, q
+
+
+def test_clarifying_question_does_not_carry_the_research_banner():
+    """Three turns on 2026-08-17/18 told the patron to consult a librarian
+    about a question the bot had just said it did not understand."""
+    from src.graph.new_orchestrator import _is_disclaimer_exempt
+
+    assert _is_disclaimer_exempt("clarify")
+    # The suffix rule and the rest of the set are unchanged.
+    assert _is_disclaimer_exempt("injection_backstop")
+    assert _is_disclaimer_exempt("today_hours_short_circuit")
+    assert not _is_disclaimer_exempt("agent_then_answer")

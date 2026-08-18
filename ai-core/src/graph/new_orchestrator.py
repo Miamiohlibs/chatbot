@@ -915,6 +915,10 @@ def _run_turn(
             # the hours short-circuits -- which is the point. "Can I schedule
             # a workshop for my class in the makerspace?" was answered with
             # opening hours (Kevin Messner, 2/5).
+            # BEFORE the King-only MakerSpace paths. The 2.10 3D answer
+            # already declines when a regional campus is named; nothing
+            # caught what it dropped until 2026-08-18.
+            ("ms_campus", _makerspace_campus_answer),
             ("makerspace_instruction", _makerspace_instruction_answer),
             ("makerspace_equipment", _makerspace_equipment_answer),
             # BEFORE course_reserves: "do you have the book for BIO116" says
@@ -1827,6 +1831,17 @@ _DISCLAIMER_EXEMPT_REASONS = frozenset({
     # Reasons that do NOT end in `_short_circuit` and still must be exempt.
     # Kept explicit; the suffix rule below covers everything else.
     "injection_backstop",
+    # A CLARIFYING QUESTION IS NOT AN ANSWER.
+    #
+    # Three real turns on 2026-08-17/18 came back as
+    #   "If this is a research question you should consult a librarian for
+    #    further assistance.
+    #    I'm not sure which of these you meant. Can you pick one?"
+    # -- telling the patron to go and consult a librarian about a question the
+    # bot has just admitted it has not understood. The banner exists to frame
+    # an ANSWER as reference material rather than a consultation; there is no
+    # answer here yet to frame.
+    "clarify",
 })
 
 
@@ -2532,6 +2547,33 @@ _ITEM_TRANSACTION_CTX_RE = re.compile(
 )
 
 
+# A poster you are MAKING is not a poster you are PUTTING UP.
+#
+# "posters" sits in _CONDUCT_WEAK_RE because "can I hang a poster in the
+# library?" is a conduct question. But a librarian pasted a real patron ask on
+# 2026-08-17 -- "Can I get help making a poster?" -- and it got the building
+# policy answer: food and drink, alcohol, sleeping/napping, pets. Twice in the
+# same session. "Can I" satisfied _PERMISSION_RE and "poster" satisfied the
+# weak term, and nothing looked at the verb.
+#
+# Same fix as the `can i` overfire on 2026-08-13: tie it to what the patron
+# said they were DOING. Displaying it is ours to police; making it is not a
+# conduct question at all.
+# Paired, not either-or. Vetoing on the verb alone would also veto the STRONG
+# conduct terms, which need no permission phrasing -- "can I make a drink in
+# the library" would have lost the food-and-drink answer. Both halves must be
+# present: a thing you display, and a word about producing it.
+_POSTER_FAMILY_RE = re.compile(
+    r"\b(posters?|flyers?|fliers?|leaflets?|handbills?|handouts?)\b",
+    re.IGNORECASE,
+)
+_MAKING_VERB_RE = re.compile(
+    r"\b(make|making|made|design\w*|creat\w*|produc\w*|format\w*|"
+    r"laminat\w*|print\w*|edit|editing|draft|drafting)\b",
+    re.IGNORECASE,
+)
+
+
 def _facilities_policy_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
     """Deterministic pointer to the Facilities & Events Policies doc for
     building-conduct questions (food/drink/alcohol/sleeping/noise/pets/
@@ -2543,6 +2585,8 @@ def _facilities_policy_answer(message: str) -> "Optional[tuple[str, list[dict]]]
         return None  # "the book titled ... Wine ..." -> a title, not a rule
     if _ITEM_TRANSACTION_CTX_RE.search(m):
         return None  # "my ILL request for ..." -> a transaction, not a rule
+    if _POSTER_FAMILY_RE.search(m) and _MAKING_VERB_RE.search(m):
+        return None  # "help MAKING a poster" -> a service, not a conduct rule
     if not (_CONDUCT_STRONG_RE.search(m)
             or (_CONDUCT_WEAK_RE.search(m) and _PERMISSION_RE.search(m))):
         return None
@@ -2766,6 +2810,117 @@ _MS_REGIONAL_RE = re.compile(
     r"\b(hamilton|rentschler|middletown|gardner|gardner-harvey|regional)\b",
     re.IGNORECASE,
 )
+
+
+# "DOES RENTSCHLER HAVE A MAKERSPACE?" -- three campuses, three answers.
+#
+# The 2.10 short-circuit correctly DECLINES when a regional campus is named
+# (it only knows King's), and nothing caught what it dropped: on 2026-08-18
+# the question reached the agent twice and came back "I don't have a reliable
+# answer to that." Special Collections had already been given this treatment;
+# the MakerSpace had not.
+#
+# The obvious move -- copy the Special Collections answer and say neither
+# regional campus has one -- WOULD HAVE SHIPPED A FALSE CLAIM. Gardner-Harvey
+# has run the TEC Lab Makerspace since Fall 2014, in Rooms 125 and 014, and
+# says so on its own guide. So each campus is answered from its own page:
+#
+#   Oxford      the King Library MakerSpace, 3rd floor, Room 303
+#   Middletown  the TEC Lab Makerspace at Gardner-Harvey, Rooms 125 + 014,
+#               equipment free to use (materials may cost)
+#   Hamilton    nothing on Rentschler's pages names a makerspace. Per the
+#               operator's 2026-08-17 rule, an absence on the website is not
+#               a fact to assert -- so this points at their equipment page
+#               and their desk rather than saying "no".
+_TEC_LAB_URL = "https://libguides.lib.miamioh.edu/middletown_tec_lab/home"
+_HAMILTON_EQUIPMENT_URL = (
+    "https://www.ham.miamioh.edu/library/services/equipment-you-can-borrow/"
+)
+# "Do you have a makerspace / 3D printer / is there one at ..." -- a question
+# about WHETHER a campus has one, not about how to use King's.
+_MS_HAVE_RE = re.compile(
+    r"\b(have|has|got|there|any|is\s+there|are\s+there|where|which|does|do)\b",
+    re.IGNORECASE,
+)
+
+
+def _makerspace_campus_answer(
+    message: str,
+) -> "Optional[tuple[str, list[dict]]]":
+    """A MakerSpace question about a REGIONAL campus. King's answer is wrong."""
+    m = message or ""
+    # A named regional campus, or a question that spans all of them
+    # ("which campuses have a makerspace").
+    if not (_MS_REGIONAL_RE.search(m) or _SPANS_CAMPUSES_RE.search(m)):
+        return None
+    if not (_MAKERSPACE_RE.search(m) or _MS_3D_RE.search(m)):
+        return None
+    if not _MS_HAVE_RE.search(m):
+        return None
+    # An hours question is an hours question on any campus.
+    if _MS_HOURS_Q_RE.search(m):
+        return None
+
+    ham = bool(re.search(r"\b(hamilton|rentschler)\b", m, re.IGNORECASE))
+    mid = bool(re.search(r"\b(middletown|gardner[- ]?harvey)\b", m,
+                         re.IGNORECASE))
+    king_cite = {"n": 1, "url": _MAKERSPACE_GUIDE_URL,
+                 "snippet": "Miami University Libraries — MakerSpace (Create)"}
+    tec_cite = {"n": 2, "url": _TEC_LAB_URL,
+                "snippet": "Gardner-Harvey Library — TEC Lab Makerspace "
+                           "(Middletown)"}
+
+    if mid and not ham:
+        return (
+            "Yes -- Middletown has its own. Gardner-Harvey Library runs the "
+            "**TEC Lab Makerspace**, in **Room 125 (the TEC Lab)** and "
+            "**Room 014 (the TEC SPACE)**, and it has been going since Fall "
+            "2014 [1].\n\n"
+            "**The equipment is free to use**; materials used with it may "
+            "cost something. You can also book a session to be shown how a "
+            "particular machine works, which is worth doing before you need "
+            "it for an assignment [1].\n\n"
+            f"The desk is {_GARDNER_HARVEY_DESK_PHONE}. Oxford's MakerSpace "
+            "is a separate space in King Library [2] -- you do not need to "
+            "travel for this.",
+            [tec_cite | {"n": 1}, king_cite | {"n": 2}],
+        )
+
+    if ham and not mid:
+        return (
+            "Not that Rentschler's pages list. The space **called** the "
+            "MakerSpace is at Oxford -- third floor of King Library, Room "
+            "303 [1] -- and **Middletown** has its own, the TEC Lab "
+            "Makerspace at Gardner-Harvey [2].\n\n"
+            "For Hamilton specifically I would rather not tell you there is "
+            "nothing when all I know is that nothing is posted. Rentschler "
+            "does lend equipment -- cameras and other digital kit, with a "
+            f"form to sign the first time [3] -- and the desk on "
+            f"{_RENTSCHLER_DESK_PHONE} can tell you what is actually in the "
+            "building.",
+            [king_cite, tec_cite,
+             {"n": 3, "url": _HAMILTON_EQUIPMENT_URL,
+              "snippet": "Rentschler Library (Hamilton) — Equipment you can "
+                         "borrow"}],
+        )
+
+    # Both named, or "any campus" -- give the whole picture.
+    return (
+        "It differs by campus:\n\n"
+        "- **Oxford** -- the **MakerSpace** in King Library, third floor, "
+        "Room 303 [1].\n"
+        "- **Middletown** -- the **TEC Lab Makerspace** at Gardner-Harvey, "
+        "Rooms 125 and 014. Equipment is free to use; materials may cost "
+        "[2].\n"
+        "- **Hamilton** -- nothing posted under that name. Rentschler does "
+        f"lend digital equipment [3]; the desk on {_RENTSCHLER_DESK_PHONE} "
+        "will know what is in the building.",
+        [king_cite, tec_cite,
+         {"n": 3, "url": _HAMILTON_EQUIPMENT_URL,
+          "snippet": "Rentschler Library (Hamilton) — Equipment you can "
+                     "borrow"}],
+    )
+
 
 
 def _makerspace_3d_answer(message: str, scope: "Scope") -> "Optional[tuple[str, list[dict]]]":

@@ -598,3 +598,23 @@ def test_game_night_gives_the_durable_half_and_navigates_to_the_dates():
     assert not _re.search(r"\b(monday|tuesday|wednesday|thursday|friday|"
                           r"saturday|sunday|\d{1,2}\s*(am|pm))\b", low), \
         "invented a schedule"
+
+
+def test_printing_pointer_yields_when_scan_is_not_about_our_scanner():
+    """Two real asks on 2026-08-17 got the MUprint guide because the word
+    "scan" appeared in them at all -- one was an interlibrary loan question,
+    the other was about OCR software."""
+    from src.graph.facility_facts import printing_scanning_wifi_answer as P
+
+    for q in ("I need to access O Globo's digital archive to find an image. "
+              "Can I use interlibrary loan if I only need a photo or a scan "
+              "of an image from a 2001 issue?",
+              "I am trying to find an OCR software capable of scanning and "
+              "translating Japanese. Do we have access to ABBYY?",
+              "does the university have a subscription to a scanning service"):
+        assert P(q) is None, q
+    # The real thing still works.
+    for q in ("how do I print at the library",
+              "where can I scan a document",
+              "how do I connect to the wifi"):
+        assert P(q) is not None, q
