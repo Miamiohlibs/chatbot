@@ -2640,27 +2640,40 @@ def test_close_today_fires_on_how_patrons_ask_and_not_otherwise():
     weekday breakdown followed by "I haven't covered today's specific closing
     time because the hours listing does not identify which date is today",
     with today's row marked in evidence (observed live 2026-08-04).
-    """
-    from src.graph.new_orchestrator import (
-        _CLOSE_TODAY_RE, _OTHER_DAY_RE, _TODAY_WORD_RE,
-    )
 
-    def fires(q):
-        return bool(_CLOSE_TODAY_RE.search(q) and _TODAY_WORD_RE.search(q)
-                    and not _OTHER_DAY_RE.search(q))
+    Calls the real predicate. This test used to re-implement the gate as
+    `_CLOSE_TODAY_RE and _TODAY_WORD_RE and not _OTHER_DAY_RE`, and when the
+    _TODAY_WORD_RE requirement was dropped on 2026-08-18 the copy would have
+    stayed green while asserting a rule the code no longer had.
+    """
+    from src.graph.new_orchestrator import _close_today_matches as fires
 
     for q in ("what time does king library close today",
               "when do you close today",
               "how late are you open today",
               "what time does the makerspace close today",
               "closing time today?",
-              "when does the library close tonight"):
+              "when does the library close tonight",
+              # NO DAY NAMED IS TODAY. These fell through to the agent until
+              # 2026-08-18 and came back as a week the patron had to scan.
+              "when does the main library close",
+              "what time does the art library close",
+              "what time do you close",
+              "how late are you open"):
         assert fires(q), q
     for q in ("what time does king close tomorrow",   # other day has its path
               "when do you close on friday",
               "what are your hours",                  # not a closing question
               "when do you open today",               # opening, not closing
-              "is the library open right now"):       # open-now has its path
+              "is the library open right now",         # open-now has its path
+              # Not ours. Matches the closing shape and is gold out_of_scope;
+              # the literal-"today" requirement was hiding this by accident.
+              "what time does the dining hall close",
+              "when does the rec center close",
+              # A whole term or a holiday belongs to the long-period pointer.
+              "how late is king open during finals week",
+              "what time does king close over winter break",
+              "when does the library close for the semester"):
         assert not fires(q), q
 
 
@@ -4055,3 +4068,188 @@ def test_regional_reserves_catches_a_course_code_plus_a_campus():
         "do you have the textbook for BIO 116 at Hamilton")
     assert res is not None
     assert "circulation desk" in res[0].lower()
+
+
+# --- "What are the hours at X?" must answer for TODAY ------------------------
+#
+# The sibling of the close-today hole, found by the same 2026-08-18 eval run.
+# "What are the hours at the Hamilton library?" reached the agent and came back
+# "Rentschler Library's listed hours are 8:00am to 5:00pm" -- no day, no
+# open/closed status -- and "what are the hours at Rentschler" came back as the
+# whole week. Four cross_campus gold cases ask for today's status by name.
+
+
+def _live_week(name="King Library", hours="7:30am to 9:00pm"):
+    """A LibCal-shaped table centred on TODAY, so the test is not date-pinned.
+
+    _open_state reads the row whose ISO date is today's; a fixed fixture would
+    pass on one day of 2026 and fail on the other 364.
+    """
+    import datetime as dt
+    import pytz
+    now = dt.datetime.now(pytz.timezone("America/New_York"))
+    monday = now.date() - dt.timedelta(days=now.weekday())
+    rows = [f"**{name} Hours (Week of {monday.isoformat()}):**", ""]
+    for i in range(7):
+        d = monday + dt.timedelta(days=i)
+        shown = "Closed" if i == 5 else hours
+        rows.append(f"• **{d.strftime('%A')} ({d.isoformat()})**: {shown}")
+    return "\n".join(rows) + "\n"
+
+
+def _hours_deps(week):
+    class _Res:
+        def __init__(self):
+            self.data = {"success": True, "hours": week,
+                         "source_url": "https://example.invalid/hours"}
+            self.error = None
+
+    class _Registry:
+        def dispatch(self, call):
+            return _Res()
+
+    class _Deps:
+        def __init__(self):
+            self.tool_registry = _Registry()
+
+    return _Deps()
+
+
+def test_today_hours_gate_fires_on_a_bare_hours_question_only():
+    from src.graph.new_orchestrator import _today_hours_matches as fires
+
+    for q in ("what are the hours at the hamilton library",
+              "what are king's hours",
+              "what are the hours",
+              "whats the schedule for wertz",
+              "what are the hours today"):
+        assert fires(q), q
+    for q in (
+            # Each of these has its own, better path.
+            "is the library open right now",
+            "what time does king library close today",
+            "when does the main library close",
+            "is king open on saturday",
+            # Long periods point at the hours page instead of LibCal.
+            "what are the summer hours at king",
+            "what are wertz library's summer hours",
+            "are king library hours extended for finals",
+            # "hours" that are not a timetable.
+            "how many hours can i book a study room",
+            "how long is the loan period",
+            "what are the hours i can renew a book",
+            # Not ours.
+            "what are the hours of the rec center",
+            "what are the dining hall hours",
+            # Not a question about a timetable at all.
+            "is the library 24 hours"):
+        assert not fires(q), q
+
+
+def test_today_hours_leads_with_today_then_names_the_week():
+    from src.graph.new_orchestrator import _today_hours_answer
+    import datetime as dt
+    import pytz
+    from src.scope.resolver import Scope
+
+    now = dt.datetime.now(pytz.timezone("America/New_York"))
+    deps = _hours_deps(_live_week())
+    res = _today_hours_answer(
+        "what are King's hours", deps,
+        Scope(campus="oxford", library="king", source="test"))
+    assert res is not None
+    body, cites = res
+    first = body.split("\n\n")[0]
+    # TODAY, by name, in the first sentence -- that is the whole point.
+    assert now.strftime("%A") in first, first
+    assert "today" in first.lower(), first
+    # And the week, so "what are the hours" is answered as asked too.
+    assert "rest of this week" in body.lower(), body
+    assert cites and cites[0]["url"] == "https://example.invalid/hours"
+
+
+def test_today_hours_says_closed_when_today_is_closed():
+    from src.graph.new_orchestrator import _today_hours_answer
+    import datetime as dt
+    import pytz
+    from src.scope.resolver import Scope
+
+    now = dt.datetime.now(pytz.timezone("America/New_York"))
+    monday = now.date() - dt.timedelta(days=now.weekday())
+    rows = [f"**King Library Hours (Week of {monday.isoformat()}):**", ""]
+    for i in range(7):
+        d = monday + dt.timedelta(days=i)
+        rows.append(f"• **{d.strftime('%A')} ({d.isoformat()})**: "
+                    + ("Closed" if d == now.date() else "9:00am to 5:00pm"))
+    deps = _hours_deps("\n".join(rows) + "\n")
+    res = _today_hours_answer(
+        "what are the hours", deps,
+        Scope(campus="oxford", library="king", source="test"))
+    assert res is not None
+    assert "closed today" in res[0].lower(), res[0]
+
+
+def test_today_hours_yields_the_two_subspaces_to_week_hours():
+    """The MakerSpace and Special Collections keep the collapsed-week answer:
+    their hours differ from the building's and the operator asked for the days
+    to be named there (gold fs_makerspace_hours)."""
+    from src.graph.new_orchestrator import _today_hours_answer
+    from src.scope.resolver import Scope
+
+    deps = _hours_deps(_live_week())
+    for q in ("what are the makerspace hours",
+              "what are special collections hours"):
+        assert _today_hours_answer(
+            q, deps, Scope(campus="oxford", library="king",
+                           source="test")) is None, q
+
+
+def test_close_today_answers_when_no_day_is_named():
+    """"When does the main library close" -- the case the eval caught."""
+    from src.graph.new_orchestrator import _close_today_answer
+    import datetime as dt
+    import pytz
+    from src.scope.resolver import Scope
+
+    now = dt.datetime.now(pytz.timezone("America/New_York"))
+    deps = _hours_deps(_live_week())
+    res = _close_today_answer(
+        "when does the main library close", deps,
+        Scope(campus="oxford", library="king", source="test"))
+    if now.weekday() == 5:      # the fixture closes Saturday
+        assert res is not None and "closed today" in res[0].lower()
+        return
+    assert res is not None
+    assert "today" in res[0].lower() and now.strftime("%A") in res[0]
+    # It must name a single closing time, not a range of days.
+    assert "vary" not in res[0].lower(), res[0]
+
+
+def test_both_hours_short_circuits_are_actually_DISPATCHED():
+    """The function existing is not the function running.
+
+    Five times in this codebase something was written, tested and recorded as
+    done while nothing called it (a rate limit keyed on the wrong id, an unused
+    turn cap, a stale exemption list, a backup cron with no cd, an unregistered
+    answer function). Derived from the source so it cannot pass vacuously.
+    """
+    import ast
+    from pathlib import Path
+
+    src = (Path(__file__).resolve().parent / "new_orchestrator.py").read_text(
+        encoding="utf-8")
+    tree = ast.parse(src)
+    called = {
+        node.func.id
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    }
+    for fn in ("_close_today_answer", "_today_hours_answer",
+               "_close_today_matches", "_today_hours_matches"):
+        assert fn in called, f"{fn} is defined but never called"
+    # Ordering: the more specific paths run first, and the sub-space week
+    # answer runs before the building's today answer.
+    order = [src.index(f"_{n}_answer(request.user_message")
+             for n in ("open_right_now", "close_today", "named_day",
+                       "week_hours", "today_hours")]
+    assert order == sorted(order), order

@@ -426,7 +426,7 @@ def _run_turn(
 
     # --- 2.026. Hours shorthand rescued from out_of_scope ---
     # Same failure as 2.025, different vocabulary. The deterministic hours
-    # short-circuits live at steps 3.55-3.59, but step 2.5 refuses an
+    # short-circuits live at steps 3.55-3.595, but step 2.5 refuses an
     # `out_of_scope` intent long before that -- so on 2026-08-04 "open rn?" and
     # "r u open rn" were told that asking whether the library is open is
     # outside what a library chatbot covers. The regexes matched perfectly; the
@@ -1334,6 +1334,26 @@ def _run_turn(
                 tokens={"input": 0, "cached_input": 0, "output": 0},
                 fired_corrections=[],
                 agent_stopped_reason="week_hours_short_circuit",
+                latency_ms=latency_ms, cited_chunk_ids=[],
+            )
+
+    # --- 3.595. "What are the hours at X?" -> today's, then the week ---
+    # After week_hours, which owns the MakerSpace and Special Collections.
+    if True:  # see the note on the open-now gate above
+        _th = _today_hours_answer(request.user_message, deps, scope)
+        if _th is not None:
+            _ans, _cites = _th
+            latency_ms = int((time.monotonic() - turn_start) * 1000)
+            record_request(endpoint="/chat", status="today_hours",
+                           latency_s=latency_ms / 1000)
+            return TurnResponse(
+                answer=_ans, is_refusal=False, refusal_trigger=None,
+                citations=_cites, confidence="high",
+                intent=classification.intent, scope=scope.as_filter(),
+                model_used=model_basic,
+                tokens={"input": 0, "cached_input": 0, "output": 0},
+                fired_corrections=[],
+                agent_stopped_reason="today_hours_short_circuit",
                 latency_ms=latency_ms, cited_chunk_ids=[],
             )
 
@@ -7171,15 +7191,45 @@ _OTHER_DAY_RE = re.compile(
 )
 
 
+def _close_today_matches(message: str) -> bool:
+    """Is this "when do you close?", about us, and about today?
+
+    A PREDICATE, not a condition to be copied. The test for this gate used to
+    re-implement it by hand, so the gate could change underneath the test and
+    the test would stay green asserting a rule that no longer existed. Both
+    sides call this now.
+
+    NO DAY NAMED MEANS TODAY. This used to require the literal word "today",
+    and the comment on _TODAY_WORD_RE said a question with "no day at all"
+    belonged to "the paths that already handle those". No such path existed:
+    _named_day_answer needs a named day and _week_hours_answer covers only the
+    two sub-spaces. So "when does the main library close" fell through to the
+    agent, and on 2026-08-18 the eval caught what that produces -- "King
+    Library's listed closing times vary: 9:00pm on some days, 5:00pm on
+    another, and 1:00am on another", where a month earlier the same question
+    got "closes at 9:00pm today, Wednesday". A patron asking when we close
+    means today, and gold says so in four separate cases.
+    """
+    m = message or ""
+    if not _CLOSE_TODAY_RE.search(m):
+        return False
+    if _OTHER_DAY_RE.search(m):
+        return False
+    # Guards the literal-"today" requirement was accidentally providing.
+    # Without them this would answer "what time does the dining hall close" (a
+    # gold out_of_scope case) with King's hours, and "how late is King open
+    # during finals week" with tonight's closing time instead of the
+    # long-period pointer.
+    if _NOT_SIMPLE_DAY_RE.search(m) or _NON_LIBRARY_THING_RE.search(m):
+        return False
+    return not _is_long_period_hours(m)
 def _close_today_answer(
     message: str, deps: "OrchestratorDeps", scope: "Scope",
 ) -> "Optional[tuple[str, list[dict]]]":
     """"King Library is open today (Tuesday) from 7:30am to 9pm." -- or None."""
+    if not _close_today_matches(message):
+        return None
     m = message or ""
-    if not _CLOSE_TODAY_RE.search(m) or not _TODAY_WORD_RE.search(m):
-        return None
-    if _OTHER_DAY_RE.search(m):
-        return None
     library = _open_now_library(m, scope)
     data = _get_hours_data(deps, library)
     if data is None:
@@ -7314,6 +7364,106 @@ def _week_hours_answer(
                                  "University Archives"})
     return body, cites
 
+
+
+# "WHAT ARE THE HOURS AT X?" -- TODAY'S, NOT A WEEK TO SCAN.
+#
+# The sibling hole to the one in _close_today_answer. This shape carries no
+# closing verb, so _CLOSE_TODAY_RE never sees it, and no day, so
+# _named_day_answer declines; _week_hours_answer covers only the MakerSpace and
+# Special Collections. Everything else reached the agent, which on 2026-08-18
+# answered "What are the hours at the Hamilton library?" with "Rentschler
+# Library's listed hours are 8:00am to 5:00pm" -- no day, no open/closed
+# status -- and "what are the hours at Rentschler" with the whole week.
+#
+# Gold asks for today's status by name in four cross_campus cases. Today leads;
+# the rest of the week follows in one clause, because "what are the hours" is
+# also fairly read as the timetable and a patron should not have to ask twice.
+_HOURS_NOUN_RE = re.compile(
+    r"\b(hours|opening\s+times|schedule)\b", re.IGNORECASE)
+_HOURS_ASK_RE = re.compile(
+    r"\b(what|whats|what's|when|how\s+late|tell\s+me)\b", re.IGNORECASE)
+# "hours" is not always a timetable: a loan period, a booking length and an
+# office hour are all counted in hours and none of them is this question.
+_HOURS_NOT_A_TIMETABLE_RE = re.compile(
+    r"\bhow\s+many\s+hours\b|\bhow\s+long\b|\bper\s+day\b|\boffice\s+hours\b"
+    r"|\b(book|booking|reserve|reservation|renew|renewal|loan|borrow|"
+    r"checkout|check\s+out|overdue|fine|fee)\b",
+    re.IGNORECASE,
+)
+
+
+def _today_hours_matches(message: str) -> bool:
+    """Is this "what are the hours at X?", about us, with no day named?
+
+    A predicate for the same reason _close_today_matches is one: the test
+    calls this, not a copy of it.
+    """
+    m = message or ""
+    if not (_HOURS_NOUN_RE.search(m) and _HOURS_ASK_RE.search(m)):
+        return False
+    if _HOURS_NOT_A_TIMETABLE_RE.search(m):
+        return False
+    # "Is it open right now" is a yes/no with a better answer of its own, and
+    # "when do you close" is _close_today_matches's -- it runs first.
+    if _OPEN_NOW_RE.search(m) or _CLOSE_TODAY_RE.search(m):
+        return False
+    # A named day, a holiday, a whole term, or something that is not ours.
+    if _OTHER_DAY_RE.search(m) or _NOT_SIMPLE_DAY_RE.search(m):
+        return False
+    if _NON_LIBRARY_THING_RE.search(m):
+        return False
+    return not _is_long_period_hours(m)
+def _today_hours_answer(
+    message: str, deps: "OrchestratorDeps", scope: "Scope",
+) -> "Optional[tuple[str, list[dict]]]":
+    """"What are King's hours?" -> today's status first, then the week."""
+    if not _today_hours_matches(message):
+        return None
+    m = message or ""
+    library = _open_now_library(m, scope)
+    # The two sub-spaces keep _week_hours_answer: their hours differ from the
+    # building's and the operator asked for the week to be named there.
+    if library in ("makerspace", "special"):
+        return None
+    data = _get_hours_data(deps, library)
+    if data is None:
+        return None
+
+    import datetime as _datetime
+
+    import pytz as _pytz
+    now = _datetime.datetime.now(_pytz.timezone("America/New_York"))
+    hours_text = str(data.get("hours") or "")
+    state = _open_state(hours_text, now)
+    if state is None:
+        log.info("today-hours: declining, could not read today's row for %s",
+                 library)
+        return None
+
+    name = _LIBRARY_DISPLAY.get(library, library.title())
+    day = now.strftime("%A")
+    if state["closed_all_day"]:
+        line = f"{name} is closed today ({day})."
+    elif state["always"]:
+        line = f"{name} is open around the clock today ({day})."
+    else:
+        line = (f"{name} is open today ({day}) from "
+                f"{_fmt_clock(state['opens'])} to "
+                f"{_fmt_clock(state['closes'])}.")
+        if state.get("note"):
+            line += f" Access is {state['note']}."
+    line = line[0].upper() + line[1:] if line else line
+
+    week = _collapse_week(hours_text)
+    if week:
+        line += f"\n\nThe rest of this week: {week}."
+    return (
+        line + " [1]",
+        [{"n": 1, "url": str(data.get("source_url") or "")
+          or _HOURS_PAGE_URL["oxford"],
+          "snippet": "Miami University Libraries — Hours (live from LibCal)"}],
+    )
 
 def _special_collections_hours_answer(
     deps: "OrchestratorDeps",
