@@ -921,6 +921,12 @@ def _run_turn(
             # nothing about reserves, so course_reserves cannot catch it, and
             # whether it reached a reserves answer depended on whether the
             # classifier happened to have a same-department exemplar.
+            # BEFORE both Oxford reserves paths: each regional campus
+            # buys its own textbooks for its own courses. Measured
+            # 2026-08-18, "textbooks on reserve" at Hamilton and at
+            # Oxford returned WORD FOR WORD the same reply.
+            ("regional_course_reserves",
+             _regional_course_reserves_answer),
             ("course_book", _course_book_answer),
             ("course_reserves", _course_reserves_answer),
             ("digital_exhibits", _digital_exhibits_answer),
@@ -5339,6 +5345,176 @@ def _course_reserves_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
           "snippet": "Miami University Libraries — Reserves and Textbooks"}],
     )
 
+
+
+# COURSE RESERVES ARE RUN SEPARATELY ON EACH CAMPUS.
+#
+# Cross-campus probe, 2026-08-18: "does King Library have textbooks on
+# reserve" and "does the Hamilton library have textbooks on reserve" came back
+# WORD FOR WORD identical -- Oxford's search-Primo answer, handed to a
+# Hamilton student. Each regional campus buys its own textbooks for its own
+# courses, holds them at its own desk under its own loan rule, and documents
+# them on its own page, so Oxford's answer here is not a near-miss, it is the
+# wrong library:
+#
+#   Rentschler       copies of SELECTED Miami Hamilton textbooks; you ask at
+#                    the circulation desk whether yours is one. Textbooks on
+#                    Reserve are 2-hour, in-library use and cannot leave.
+#   Gardner-Harvey   ~100 textbooks covering ~100 Middletown courses, bought
+#                    each semester, and the page LISTS the courses covered.
+#                    Gold-highlighted entries have multiple copies and
+#                    circulate for a whole semester. Checkout at the InfoDesk.
+#
+# Registered before `course_book` as well as `course_reserves`, so a course
+# code plus a campus name ("the book for BIO116 at Hamilton") cannot pick up
+# Oxford's reserves guide on the way past.
+_HAMILTON_RESERVES_URL = (
+    "https://www.ham.miamioh.edu/library/services/"
+    "course-reserves-and-textbooks/"
+)
+_MIDDLETOWN_TEXTBOOKS_URL = (
+    "https://www.mid.miamioh.edu/library/textbookreserves.htm"
+)
+_MIDDLETOWN_RESERVES_URL = "https://www.mid.miamioh.edu/library/reserves.htm"
+_RENTSCHLER_DESK_PHONE = "(513) 785-3235"
+_GARDNER_HARVEY_DESK_PHONE = "(513) 727-3222"
+
+_HAM_CAMPUS_RE = re.compile(r"\b(hamilton|rentschler)\b", re.IGNORECASE)
+_MID_CAMPUS_RE = re.compile(
+    r"\b(middletown|gardner[- ]?harvey)\b", re.IGNORECASE,
+)
+
+_HAM_RESERVES_CITE = {
+    "n": 1, "url": _HAMILTON_RESERVES_URL,
+    "snippet": "Rentschler Library (Hamilton) — Course Reserves and Textbooks",
+}
+_MID_TEXTBOOKS_CITE = {
+    "n": 1, "url": _MIDDLETOWN_TEXTBOOKS_URL,
+    "snippet": "Gardner-Harvey Library (Middletown) — Textbooks on Reserve",
+}
+
+
+def _regional_course_reserves_answer(
+    message: str,
+) -> "Optional[tuple[str, list[dict]]]":
+    """A reserves question about a REGIONAL campus. Oxford's answer is wrong."""
+    m = message or ""
+    ham = bool(_HAM_CAMPUS_RE.search(m))
+    mid = bool(_MID_CAMPUS_RE.search(m))
+    if not (ham or mid):
+        return None
+    # 'reserve a room/space' belongs to the booking paths, same as Oxford's.
+    if re.search(r"\b(rooms?|space|study)\b", m, re.IGNORECASE):
+        return None
+
+    # A comparison IS a question shape: "what is the difference between
+    # reserves at Hamilton and Middletown" carries none of the words in
+    # _RESERVES_Q_RE, and it is precisely the cross-campus question this
+    # answer exists to get right.
+    reserves_shape = bool(
+        _COURSE_RESERVES_RE.search(m)
+        and (_RESERVES_Q_RE.search(m) or _SPANS_CAMPUSES_RE.search(m))
+    )
+    course_book_shape = bool(
+        _COURSE_BOOK_RE.search(m) and _COURSE_CODE_RE.search(m)
+    )
+    submitting = bool(_RESERVES_SUBMIT_RE.search(m))
+    if not (reserves_shape or course_book_shape or submitting):
+        return None
+
+    # INSTRUCTOR SIDE. Middletown publishes its forms; Hamilton does not, so
+    # Hamilton gets a named desk rather than an invented form.
+    if submitting:
+        if mid and not ham:
+            return (
+                "Reserves at Middletown are handled by Gardner-Harvey, not "
+                "by Oxford, and faculty submit them themselves. Physical "
+                "items and textbooks go on the library's **Reserve Request "
+                "Form**; streaming video has its own form; and the Reserves "
+                "Policy on the same page sets out the process [1].\n\n"
+                "Worth checking the Textbooks on Reserve list first -- "
+                "Gardner-Harvey may already hold the book for your course "
+                f"[2]. The InfoDesk is {_GARDNER_HARVEY_DESK_PHONE}.",
+                [{"n": 1, "url": _MIDDLETOWN_RESERVES_URL,
+                  "snippet": "Gardner-Harvey Library — Reserves (faculty "
+                             "request forms and policy)"},
+                 {"n": 2, "url": _MIDDLETOWN_TEXTBOOKS_URL,
+                  "snippet": "Gardner-Harvey Library — Textbooks on Reserve"}],
+            )
+        return (
+            "I can't place materials on reserve for you, and at Hamilton this "
+            "does not go through Oxford -- Rentschler Library runs its own "
+            "reserve collection [1].\n\n"
+            f"Rentschler's circulation desk, {_RENTSCHLER_DESK_PHONE}, is who "
+            "to talk to: they hold the collection and they will know what is "
+            "already on reserve for your course. Their course reserves and "
+            "textbooks page is the campus reference [1].",
+            [_HAM_RESERVES_CITE],
+        )
+
+    # BOTH CAMPUSES NAMED -- a comparison. Answering only the first one
+    # named would drop half the question.
+    if ham and mid:
+        return (
+            "They are two separate collections, run separately:\n\n"
+            "- **Rentschler (Hamilton)** holds copies of selected Miami "
+            "Hamilton textbooks. You ask at the circulation desk whether "
+            "your course's textbook is one of them. Textbooks on Reserve "
+            "there are **2-hour, in-library use only** and cannot leave the "
+            "building [1].\n"
+            "- **Gardner-Harvey (Middletown)** keeps roughly **100 textbooks "
+            "covering about 100 Middletown courses**, and its page **lists "
+            "the courses** that currently have one. Entries highlighted in "
+            "gold have multiple copies and circulate for an **entire "
+            "semester** [2]. You check them out at the InfoDesk.\n\n"
+            "So \"is my textbook on reserve\" depends on which campus your "
+            "course is at -- neither list covers the other's courses, and "
+            "neither is Oxford's.",
+            [_HAM_RESERVES_CITE,
+             {"n": 2, "url": _MIDDLETOWN_TEXTBOOKS_URL,
+              "snippet": "Gardner-Harvey Library — Textbooks on Reserve"}],
+        )
+
+    if ham:
+        return (
+            "Rentschler Library (Hamilton) runs its own textbook reserves, "
+            "separate from Oxford's. It holds copies of **selected Miami "
+            "Hamilton textbooks**, and the way to find out whether yours is "
+            "one of them is to **ask at the circulation desk** -- "
+            f"{_RENTSCHLER_DESK_PHONE} [1].\n\n"
+            "**Textbooks on Reserve at Rentschler are 2-hour use only and "
+            "cannot leave the library** [1]. Course reserves proper -- items "
+            "in high demand, extra reading set by a professor, or videos to "
+            "be watched in a particular week -- are mostly a 2-hour checkout "
+            "as well [1]. It is also worth checking course reserves to see "
+            "whether your professor put a copy of the textbook there.\n\n"
+            "If you are not sure which textbook your class requires, the MUH "
+            "Bookstore publishes the full textbook list. And some courses "
+            "use **Inclusive Access** instead, where the material comes to "
+            "you digitally through Canvas and is billed to your Bursar "
+            "account -- in that case there is nothing to borrow [1].",
+            [_HAM_RESERVES_CITE],
+        )
+
+    return (
+        "Gardner-Harvey Library (Middletown) runs its own textbook reserve "
+        "programme, and the useful part is that **the page lists the "
+        "courses** that currently have a textbook on reserve or a licensed "
+        "e-book -- check your course against that list rather than guessing "
+        "[1].\n\n"
+        "The collection runs to roughly **100 textbooks covering about 100 "
+        "Middletown courses**, bought new each semester. Most are for short "
+        "in-library use, but the entries **highlighted in gold have multiple "
+        "copies and circulate for an entire semester** [1].\n\n"
+        f"Reserve items are checked out at the **InfoDesk**, "
+        f"{_GARDNER_HARVEY_DESK_PHONE} [2].\n\n"
+        "This is not Oxford's reserve collection and not Hamilton's -- each "
+        "campus buys for its own courses.",
+        [_MID_TEXTBOOKS_CITE,
+         {"n": 2, "url": _MIDDLETOWN_RESERVES_URL,
+          "snippet": "Gardner-Harvey Library — Reserves (checkout at the "
+                     "InfoDesk)"}],
+    )
 
 # Case #33: 'Can I renew my book?' got a single generic OhioLINK-account
 # answer. Renewal differs by material type -- give both policy paths.

@@ -68,6 +68,7 @@ from src.graph.new_orchestrator import (
     _makerspace_equipment_answer,
     _renewal_paths_answer,
     _course_reserves_answer,
+    _regional_course_reserves_answer,
     _digital_exhibits_answer,
 )
 
@@ -3917,3 +3918,140 @@ def test_the_regional_answer_is_registered_before_the_oxford_one():
         encoding="utf-8")
     assert src.index("_regional_loan_period_answer(request.user_message)") < \
         src.index("_renewal_paths_answer(request.user_message)")
+
+
+# --- course reserves are a DIFFERENT collection on each campus -------------
+#
+# Cross-campus probe 2026-08-18: "does King Library have textbooks on reserve"
+# and "does the Hamilton library have textbooks on reserve" returned word for
+# word the same reply. A Hamilton student was being told to search Primo and
+# read Oxford's loan rules for a collection Rentschler holds at its own desk.
+
+
+def _reserves_registration_order() -> "list[str]":
+    """Short-circuit names in the order new_orchestrator runs them.
+
+    Parsed from the source, not copied. A copied list goes stale, and the
+    ordering IS the thing under test -- registering the regional answer after
+    the Oxford ones would restore the bug with every unit test still green.
+    """
+    import ast
+    from pathlib import Path
+
+    tree = ast.parse(
+        (Path(__file__).resolve().parent / "new_orchestrator.py").read_text(
+            encoding="utf-8"))
+    names: "list[str]" = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Tuple) or len(node.elts) != 2:
+            continue
+        first, second = node.elts
+        if not (isinstance(first, ast.Constant)
+                and isinstance(first.value, str)):
+            continue
+        if isinstance(second, ast.Name):
+            names.append(first.value)
+    return names
+
+
+def test_regional_reserves_runs_before_the_oxford_reserves_paths():
+    order = _reserves_registration_order()
+    for name in ("regional_course_reserves", "course_book", "course_reserves"):
+        assert name in order, f"{name} is not registered at all"
+    assert (order.index("regional_course_reserves")
+            < order.index("course_book")
+            < order.index("course_reserves"))
+
+
+def test_regional_reserves_does_not_reply_with_oxfords_answer():
+    """The measured failure: identical replies for a fact that differs."""
+    oxford = _course_reserves_answer(
+        "does King Library have textbooks on reserve")
+    assert oxford is not None
+    ham = _regional_course_reserves_answer(
+        "does the Hamilton library have textbooks on reserve")
+    mid = _regional_course_reserves_answer(
+        "does Gardner-Harvey have textbooks on reserve")
+    assert ham is not None and mid is not None
+    # Three campuses, three answers -- and none of them Oxford's.
+    assert ham[0] != oxford[0]
+    assert mid[0] != oxford[0]
+    assert ham[0] != mid[0]
+    # Oxford's citation must not travel to a regional campus.
+    for body, cites in (ham, mid):
+        assert all("libguides.lib.miamioh.edu/reserves-textbooks"
+                   not in c["url"] for c in cites), cites
+
+
+def test_regional_reserves_carries_hamiltons_own_page_facts():
+    for q in ("does the Hamilton library have textbooks on reserve",
+              "how do I find course reserves at Rentschler",
+              "where are textbooks on reserve at rentschler library"):
+        res = _regional_course_reserves_answer(q)
+        assert res is not None, q
+        body, cites = res
+        low = body.lower()
+        # The three facts that make Hamilton's answer Hamilton's.
+        assert "circulation desk" in low, q
+        assert "2-hour" in low, q
+        assert "cannot leave" in low, q
+        assert any("ham.miamioh.edu" in c["url"] for c in cites), q
+
+
+def test_regional_reserves_carries_middletowns_own_page_facts():
+    for q in ("does Gardner-Harvey have textbooks on reserve",
+              "how do I find textbooks on reserve at Middletown"):
+        res = _regional_course_reserves_answer(q)
+        assert res is not None, q
+        body, cites = res
+        low = body.lower()
+        # The page's own list is the answer to "is MY course covered".
+        assert "list" in low, q
+        assert "semester" in low, q
+        assert "infodesk" in low, q
+        assert any("mid.miamioh.edu" in c["url"] for c in cites), q
+
+
+def test_regional_reserves_answers_both_when_both_are_named():
+    res = _regional_course_reserves_answer(
+        "what is the difference between reserves at Hamilton and Middletown")
+    assert res is not None
+    body, cites = res
+    low = body.lower()
+    assert "rentschler" in low and "gardner-harvey" in low
+    assert any("ham.miamioh.edu" in c["url"] for c in cites)
+    assert any("mid.miamioh.edu" in c["url"] for c in cites)
+
+
+def test_regional_reserves_routes_faculty_submissions_per_campus():
+    mid = _regional_course_reserves_answer(
+        "can you put my book on course reserves at Middletown")
+    assert mid is not None
+    assert "reserve request form" in mid[0].lower()
+    ham = _regional_course_reserves_answer(
+        "can you put my book on course reserves at Rentschler")
+    assert ham is not None
+    # No invented form for Hamilton -- their page publishes none.
+    assert "request form" not in ham[0].lower()
+    assert "(513) 785-3235" in ham[0]
+
+
+def test_regional_reserves_leaves_the_other_paths_alone():
+    # Room booking is a different path on every campus.
+    for q in ("how do I reserve a study room at Hamilton",
+              "can I book a room at Rentschler"):
+        assert _regional_course_reserves_answer(q) is None, q
+    # No campus named -> Oxford's own answer still handles it.
+    assert _regional_course_reserves_answer(
+        "how do I find course reserves") is None
+    # A campus named but nothing reserves-shaped.
+    assert _regional_course_reserves_answer(
+        "what are the hours at Rentschler") is None
+
+
+def test_regional_reserves_catches_a_course_code_plus_a_campus():
+    """'the book for BIO116 at Hamilton' must not reach Oxford's guide."""
+    res = _regional_course_reserves_answer(
+        "do you have the textbook for BIO 116 at Hamilton")
+    assert res is not None
+    assert "circulation desk" in res[0].lower()
