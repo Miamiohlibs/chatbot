@@ -3848,3 +3848,72 @@ def test_lola_does_not_fire_on_a_room_called_lola():
 
     assert _lola_answer("where is the lola room") is None
     assert _lola_answer("how do I print") is None
+
+
+# --- Hamilton's loan periods are not Oxford's --------------------------------
+
+
+def test_hamilton_gets_three_weeks_not_oxfords_six():
+    """Found 2026-08-18 while checking what a corpus refresh would buy. Asked
+    "how long can a student keep a book from the HAMILTON library", the bot
+    answered "6 weeks to undergraduates" and cited the Oxford circulation
+    policy. Rentschler's own FAQ says 3 weeks for students.
+
+    A student told they had double their real loan period, confidently and
+    with a citation, at $0.50 a day overdue.
+    """
+    from src.graph.new_orchestrator import _regional_loan_period_answer
+
+    body, cites = _regional_loan_period_answer(
+        "how long can a student keep a book from the Hamilton library")
+    assert "3 weeks" in body
+    assert "6 weeks" in body, "the contrast with Oxford is the point"
+    assert "not the same as Oxford" in body
+    assert cites and "ham.miamioh.edu" in cites[0]["url"]
+
+
+def test_a_stated_borrower_type_gets_hamiltons_figure_for_that_type():
+    from src.graph.new_orchestrator import _regional_loan_period_answer
+
+    body, _ = _regional_loan_period_answer(
+        "as a grad student how long can I keep a Hamilton book")
+    assert "one semester" in body
+
+
+def test_middletown_is_not_guessed_at():
+    """Gardner-Harvey may differ too and no page we hold states its figures.
+    Naming a number there would be the same mistake in a different postcode.
+    """
+    from src.graph.new_orchestrator import _regional_loan_period_answer
+
+    body, _ = _regional_loan_period_answer(
+        "how long can I keep a book from Gardner-Harvey")
+    low = body.lower()
+    assert "don't have gardner-harvey's in writing" in low
+    for figure in ("3 weeks", "6 weeks", "one semester"):
+        assert figure not in low, f"invented {figure!r} for Middletown"
+
+
+def test_oxford_questions_are_untouched():
+    """The Oxford answer keeps its questions -- this only intercepts a named
+    regional campus."""
+    from src.graph.new_orchestrator import (
+        _regional_loan_period_answer, _renewal_paths_answer,
+    )
+
+    for q in ("how long can I keep a book",
+              "what is the loan period for books",
+              "how do I renew a book"):
+        assert _regional_loan_period_answer(q) is None, q
+        assert _renewal_paths_answer(q) is not None, q
+
+
+def test_the_regional_answer_is_registered_before_the_oxford_one():
+    """Order is the whole mechanism: renewal_paths would answer first and give
+    Oxford's table."""
+    from pathlib import Path
+
+    src = (Path(__file__).resolve().parent / "new_orchestrator.py").read_text(
+        encoding="utf-8")
+    assert src.index("_regional_loan_period_answer(request.user_message)") < \
+        src.index("_renewal_paths_answer(request.user_message)")

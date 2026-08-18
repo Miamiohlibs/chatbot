@@ -1149,6 +1149,27 @@ def _run_turn(
             )
 
     if not booking_flow:
+        # BEFORE _renewal_paths_answer: its _BORROWER_LOAN_PERIOD table is
+        # Oxford-only, so a Hamilton student asking about a Rentschler book was
+        # told 6 weeks when their real loan is 3. See the note on
+        # _regional_loan_period_answer.
+        _regional_loan = _regional_loan_period_answer(request.user_message)
+        if _regional_loan is not None:
+            _ans, _cites = _regional_loan
+            latency_ms = int((time.monotonic() - turn_start) * 1000)
+            record_request(endpoint="/chat", status="regional_loan_period",
+                           latency_s=latency_ms / 1000)
+            return TurnResponse(
+                answer=_ans, is_refusal=False, refusal_trigger=None,
+                citations=_cites, confidence="high",
+                intent=classification.intent, scope=scope.as_filter(),
+                model_used=model_basic,
+                tokens={"input": 0, "cached_input": 0, "output": 0},
+                fired_corrections=[],
+                agent_stopped_reason="regional_loan_period_short_circuit",
+                latency_ms=latency_ms, cited_chunk_ids=[],
+            )
+
         _renew = _renewal_paths_answer(request.user_message)
         if _renew is not None:
             _ans, _cites = _renew
@@ -5629,6 +5650,95 @@ _LOAN_ARRIVAL_RE = re.compile(
     r"|\bwhen\s+will\b.{0,30}\b(arrive|come|be\s+(here|ready|in))\b",
     re.IGNORECASE,
 )
+
+
+# HAMILTON'S LOAN PERIODS ARE DIFFERENT, AND WE WERE GIVING THEM OXFORD'S.
+#
+# Found 2026-08-18 while checking what a corpus refresh would buy. Asked "how
+# long can a student keep a book from the HAMILTON library", the bot answered
+# "6 weeks to undergraduates" and cited the Oxford circulation policy.
+# Rentschler's own FAQ says three:
+#
+#   "Books: Students and Community Borrowers-3 weeks; Grad Students-1
+#    semester; Faculty-Until June 30th of that academic year"
+#   -- www.ham.miamioh.edu/library/about/faq/, read 2026-08-18
+#
+# So a Hamilton student was being told they had DOUBLE the loan period they
+# actually have, confidently and with a citation. Overdue books cost $0.50 a
+# day there, so this one has a price attached.
+#
+# WHY A CORPUS REFRESH WOULD NOT HAVE FIXED IT: _BORROWER_LOAN_PERIOD is a
+# hard-coded Oxford table and this short-circuit runs BEFORE retrieval, so it
+# would keep answering 6 weeks however good the Hamilton pages got. Worth
+# stating because the Hamilton crawl fix landed the same day and it would be
+# easy to assume it covered this.
+#
+# MIDDLETOWN IS DELIBERATELY NOT GUESSED AT. Gardner-Harvey may well differ
+# too, and no page we hold states its figures. Naming a number there would be
+# the same mistake in a different postcode, so it points at the campus -- the
+# pattern John Burke's report established for regional questions.
+_HAMILTON_LOAN_PERIOD = {
+    "undergraduates": "3 weeks",
+    "students": "3 weeks",
+    "graduate students": "one semester",
+    "faculty": "until 30 June of that academic year",
+    "staff": "3 weeks",
+}
+_ALL_STAFF_FOR_REGIONAL = "https://www.lib.miamioh.edu/about/organization/staff/"
+_HAMILTON_FAQ_URL = "https://www.ham.miamioh.edu/library/about/faq/"
+_REGIONAL_LOAN_RE = re.compile(
+    r"\b(hamilton|rentschler|middletown|gardner[- ]?harvey|regional)\b",
+    re.IGNORECASE,
+)
+
+
+def _regional_loan_period_answer(
+    message: str,
+) -> "Optional[tuple[str, list[dict]]]":
+    """A loan-period question about a REGIONAL campus. Oxford's table is wrong."""
+    m = message or ""
+    if not _REGIONAL_LOAN_RE.search(m):
+        return None
+    if not (_LOAN_PERIOD_RE.search(m) or _RENEW_HOWTO_RE.search(m)):
+        return None
+    if _LOAN_PERIOD_EXCLUDE_RE.search(m):
+        return None
+
+    if re.search(r"\b(hamilton|rentschler)\b", m, re.IGNORECASE):
+        _stated = _stated_borrower_type(m)
+        lead = (
+            f"At Rentschler Library (Hamilton), books circulate for "
+            f"**{_HAMILTON_LOAN_PERIOD[_stated]}** for {_stated} [1]."
+            if _stated and _stated in _HAMILTON_LOAN_PERIOD else
+            "At Rentschler Library (Hamilton) the loan periods are **3 weeks** "
+            "for students and community borrowers, **one semester** for "
+            "graduate students, and **until 30 June** of that academic year "
+            "for faculty [1]."
+        )
+        return (
+            f"{lead}\n\n"
+            "**Hamilton is not the same as Oxford** -- an Oxford undergraduate "
+            "gets 6 weeks, so do not go by the main circulation policy for a "
+            "Rentschler book.\n\n"
+            "Also from Rentschler's FAQ [1]: audiovisual items 1 week, "
+            "equipment 3 days or 1 week, reserve items 2 hours for in-library "
+            "use, and OhioLINK 3 weeks. Overdue books are $0.50 a day up to "
+            "$15 per item.",
+            [{"n": 1, "url": _HAMILTON_FAQ_URL,
+              "snippet": "Rentschler Library — FAQ (loan periods and fines)"}],
+        )
+
+    # Middletown / Gardner-Harvey: no page we hold states their figures.
+    return (
+        "Loan periods differ by campus -- Hamilton's are shorter than "
+        "Oxford's -- and I don't have Gardner-Harvey's in writing, so I would "
+        "rather not quote you Oxford's and have you rely on it.\n\n"
+        "The Gardner-Harvey desk will tell you for your borrower type, and "
+        "they are the people who would waive a fine if it came to that. Their "
+        "staff are listed in the Libraries' staff directory [1].",
+        [{"n": 1, "url": _ALL_STAFF_FOR_REGIONAL,
+          "snippet": "Miami University Libraries — staff directory"}],
+    )
 
 
 def _renewal_paths_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
