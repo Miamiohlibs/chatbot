@@ -121,6 +121,20 @@ SEED_URLS: Final[dict[str, list[str]]] = {
     ],
 }
 
+# TRAILING SLASHES ARE NOT COSMETIC ON THIS SITE.
+#
+# 2026-08-18, while reviewing a diff: /use/borrow/department-delivery returns
+# 200 and /use/borrow/department-delivery/ returns 404. Same page, one slash.
+#
+# This cost a wrong conclusion. Checking whether the old /borrow/... URL had
+# merely MOVED, I tested the new path WITH a trailing slash, got 404, and
+# recorded that the page was deleted -- in a commit that claimed both forms had
+# been checked. The crawler had in fact found the new URL and the diff was
+# handling the move correctly all along.
+#
+# When deciding whether a URL is gone, test the exact form the site serves.
+# A 404 on one variant says nothing about the other.
+
 # Hosts allowed to be fetched with TLS verification disabled. STRICTLY
 # temporary -- every entry here logs a WARN on use and emits a metric so
 # we notice when the cert is finally renewed (then remove from list).
