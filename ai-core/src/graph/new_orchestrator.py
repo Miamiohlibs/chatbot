@@ -4413,7 +4413,40 @@ _FIND_HELP_EXCLUDE_RE = re.compile(
     r"maker\s*space|3d)\b"
     # A course code means the course-reserves answer, which runs earlier in
     # the chain anyway -- belt and braces in case the order is ever changed.
-    r"|\b[A-Z]{3,4}\s*-?\s*\d{3}\b",
+    r"|\b[A-Z]{3,4}\s*-?\s*\d{3}\b"
+    # NAMING A SPECIFIC THING IS NOT "HELP ME FIND MATERIAL ON A TOPIC".
+    #
+    # The 2026-08-18 run showed this answer taking 26 gold cases and getting
+    # 11 of them WRONG -- every one of those a question that named something
+    # with its own answer, replaced by the generic Primo / Databases A-Z /
+    # subject-librarian menu:
+    #
+    #   "How do I get Adobe?" / "Where can I get Acrobat Pro?"  (x5)
+    #   "Where can I find an APA citation generator?"
+    #   "Where can I get help with data analysis?"
+    #   "How do I find a finding aid for the Walter Havighurst papers?"
+    #   "Where do I find Miami master's theses?"
+    #   "I lost my AirPods -- can you help me file a lost-and-found report?"
+    #   "How do I get a book from another library to Hamilton?"
+    #   "How long does the library hold a book after it's ready for pickup?"
+    #
+    # The gate is an OR, and _FIND_HELP_ASK_RE alone matches "how do I get",
+    # which is how a patron asks for ANYTHING. Tightening the OR to an AND was
+    # measured first and rejected: it would also have freed 12 cases the
+    # answer currently gets RIGHT. Excluding the named things keeps all 12 and
+    # frees 13 of the 14.
+    #
+    # Deliberately NOT excluded, because this answer handles them well:
+    # "Zotero help" (no cite/APA/MLA token), "help me with GIS" (not
+    # `data analysis`), "my dissertation literature review" (not `theses`).
+    r"|\badobe\b|\bphotoshop\b|\bacrobat\b|\billustrator\b|\bpremiere\b"
+    r"|creative\s+cloud|\bsoftware\b"
+    r"|\bcitations?\b|\bcite\b|\bapa\b|\bmla\b|chicago\s+manual|\bbibliograph\w*"
+    r"|data\s+analysis|\bstatistic\w*|\bspss\b|\bstata\b"
+    r"|finding\s+aid|\btheses\b"
+    r"|\blost\b|lost\s+and\s+found"
+    r"|from\s+another\s+librar\w*"
+    r"|\bhow\s+long\b[^.?!]{0,40}\bhold\b",
     re.IGNORECASE,
 )
 
@@ -4436,6 +4469,8 @@ def _finding_help_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
         "- **Not sure where to start, or the topic is broad**: your **subject "
         "librarian** [3] does this for a living and will meet with you -- for "
         "a topic search that is usually faster than guessing.\n\n"
+        "- **Want to ask a person right now**: **Ask Us** [4] is chat, email, "
+        "phone and appointment booking in one place.\n\n"
         "If you tell me the subject or the course, I can name the right "
         "librarian for it.",
         [
@@ -4445,6 +4480,9 @@ def _finding_help_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
              "snippet": "Miami University Libraries — Databases A-Z"},
             {"n": 3, "url": _LIAISONS_URL,
              "snippet": "Miami University Libraries — subject librarians"},
+            {"n": 4, "url": _ASKUS_URL,
+             "snippet": "Miami University Libraries — Ask Us (chat, email, "
+                        "phone, appointments)"},
         ],
     )
 

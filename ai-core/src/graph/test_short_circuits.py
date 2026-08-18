@@ -3753,10 +3753,15 @@ def test_finding_help_covers_the_two_refused_live_questions():
         assert _finding_help_answer(q) is not None, q
 
 
-def test_finding_help_offers_all_three_routes():
+def test_finding_help_offers_all_four_routes():
     """A database name is indistinguishable from any other proper noun --
     "GrantForward" only reads as a database if you already know. So rather
-    than guess, name the three routes by what the patron is after."""
+    than guess, name the routes by what the patron is after.
+
+    Ask Us was the fourth, added 2026-08-18: the eval judged this answer
+    `partial` on "how do I get research help?" for naming the subject
+    librarian but not the chat/email/phone/appointment route.
+    """
     from src.graph.new_orchestrator import _finding_help_answer
 
     body, cites = _finding_help_answer("can you direct me to GrantForward")
@@ -3764,7 +3769,8 @@ def test_finding_help_offers_all_three_routes():
     assert "primo" in low
     assert "databases a-z" in low
     assert "subject librarian" in low
-    assert len(cites) == 3
+    assert "ask us" in low
+    assert len(cites) == 4
 
 
 def test_finding_help_is_last_and_yields_to_every_specific_answer():
@@ -4349,3 +4355,69 @@ def test_clarifying_question_does_not_carry_the_research_banner():
     assert _is_disclaimer_exempt("injection_backstop")
     assert _is_disclaimer_exempt("today_hours_short_circuit")
     assert not _is_disclaimer_exempt("agent_then_answer")
+
+
+# --- the find-help menu must not take questions that NAME something ---------
+#
+# 2026-08-18 eval: this one answer took 26 gold cases and got 11 wrong, every
+# one of them a question naming something with its own answer -- Adobe, a
+# citation style, data analysis, a finding aid, theses, lost-and-found, ILL to
+# a regional campus, the hold-shelf window -- all replaced by the generic
+# Primo / Databases A-Z / subject-librarian menu.
+#
+# The gate is an OR and _FIND_HELP_ASK_RE alone matches "how do I get", which
+# is how a patron asks for anything at all. Tightening OR to AND was measured
+# and REJECTED: it would also have freed 12 cases this answer gets right.
+
+
+def test_find_help_menu_keeps_the_questions_it_answers_well():
+    """All twelve it got right on 2026-08-18. Losing any of these would mean
+    the exclusion list went too far."""
+    from src.graph.new_orchestrator import _finding_help_answer as F
+
+    for q in ("I'm looking for an article about climate change",
+              "Can you find a journal article for me?",
+              "Where can I find books on Ohio history?",
+              "Find me a book about Ohio history.",
+              "How do I find articles in PsycINFO?",
+              "I need help with research strategy for my paper",
+              "How do I get research help?",
+              # Deliberately NOT excluded, and each is one token away from a
+              # term that IS: Zotero is not "cite/APA/MLA", GIS is not "data
+              # analysis", a dissertation lit review is not "theses".
+              "Do you have Zotero help?",
+              "Can someone help me with GIS?",
+              "I need help with my dissertation literature review."):
+        assert F(q) is not None, q
+
+
+def test_find_help_menu_yields_when_the_question_names_a_specific_thing():
+    from src.graph.new_orchestrator import _finding_help_answer as F
+
+    for q in ("How do I get Adobe?",
+              "How do I get Adobe as a student?",
+              "Where can I get Acrobat Pro?",
+              "Where do I get Photoshop?",
+              "Where can I find an APA citation generator?",
+              "Where can I find Chicago Manual of Style help?",
+              "Where can I get help with data analysis?",
+              "How do I find a finding aid for the Walter Havighurst papers?",
+              "Where do I find Miami master's theses?",
+              "I lost my AirPods in the library -- can you help me file a "
+              "lost-and-found report?",
+              "How do I get a book from another library to Hamilton?",
+              "How long does the library hold a book for me after it's ready "
+              "for pickup?"):
+        assert F(q) is None, q
+
+
+def test_find_help_menu_offers_a_way_to_reach_a_person():
+    """Judged `partial` on 2026-08-18 for naming the subject librarian but not
+    the chat/email/phone/appointment route."""
+    from src.graph.new_orchestrator import _finding_help_answer as F
+
+    res = F("How do I get research help?")
+    assert res is not None
+    body, cites = res
+    assert "Ask Us" in body
+    assert any("research-support/ask" in c["url"] for c in cites), cites
