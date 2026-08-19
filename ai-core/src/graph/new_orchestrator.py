@@ -1006,6 +1006,11 @@ def _run_turn(
             ("parking", _ff.parking_answer),
             ("games_night", _ff.games_night_answer),
             ("printing_cost", _ff.printing_cost_answer),
+            # BEFORE print_scan_wifi (Adobe questions say nothing about
+            # printing, but "Acrobat" invites a PDF/print reading) and
+            # before the find-help menu, which took all five Adobe gold
+            # cases on 2026-08-18 and answered them with Primo.
+            ("adobe_access", _ff.adobe_access_answer),
             ("print_scan_wifi", _ff.printing_scanning_wifi_answer),
             # OPERATOR RULING 2026-08-17, restated 2026-08-18: any library
             # hardware or infrastructure that the WEBSITE does not cover goes
@@ -4451,6 +4456,73 @@ _FIND_HELP_EXCLUDE_RE = re.compile(
 )
 
 
+# A TOPIC NAMED IS A SEARCH WE CAN RUN, NOT A MENU TO OFFER.
+#
+# 2026-08-18, first star rating from a real person on a real question:
+#
+#   "I'm looking for a book about totalitarianism"   ->  2 / 5
+#
+# They got the three-way menu below. Nothing in it is wrong, and the eval judge
+# scores this shape `correct` -- "Where can I find books on Ohio history?" was
+# marked correct the same day. The human disagreed, and the human is right:
+# they had already said what they wanted, and got directions instead of
+# arrival. This bot is a navigator; when the destination is computable, go
+# there.
+#
+# So when the message NAMES a topic, the answer is a Primo search already run
+# on it. When it doesn't ("how do I get research help?"), the menu is still the
+# honest answer, because there is nothing to search for yet.
+_TOPIC_AFTER_RE = re.compile(
+    r"\b(?:books?|ebooks?|materials?|resources?|sources?|articles?|journals?|"
+    r"literature|readings?|studies|research)\b[^.?!]{0,20}?"
+    r"\b(?:on|about|regarding|covering|related\s+to)\s+(?P<topic>[^.?!]{3,80})",
+    re.IGNORECASE,
+)
+# Trailing scaffolding a patron adds that is not part of the subject.
+_TOPIC_TAIL_RE = re.compile(
+    r"\b(please|thanks|thank\s+you|for\s+my\s+(class|paper|essay|thesis|"
+    r"assignment|project|research)|for\s+a\s+(class|paper|essay|assignment)|"
+    r"in\s+the\s+librar\w*|at\s+king|if\s+possible)\b.*$",
+    re.IGNORECASE,
+)
+
+
+def _find_help_topic(message: str) -> "Optional[str]":
+    """The subject a patron named, clean enough to put in a search box.
+
+    Deliberately conservative: anything it is unsure about returns None and the
+    menu answers instead. A bad query is worse than a good menu -- it looks
+    like we understood and then finds nothing.
+    """
+    hit = _TOPIC_AFTER_RE.search(message or "")
+    if not hit:
+        return None
+    topic = _TOPIC_TAIL_RE.sub("", hit.group("topic")).strip()
+    topic = topic.strip(" \t\"'`.,;:!?-()[]")
+    if not topic or len(topic) < 3:
+        return None
+    words = topic.split()
+    if len(words) > 8:
+        return None          # a sentence, not a subject
+    if any(w.startswith(("http", "www.")) for w in words):
+        return None
+    # A question word inside the "topic" means the regex swallowed a clause.
+    if re.search(r"\b(how|what|where|when|why|who|which|can|could|do|does|"
+                 r"should|is|are)\b", topic, re.IGNORECASE):
+        return None
+    return topic
+
+
+def _primo_topic_url(topic: str) -> str:
+    """Primo pre-filled. Verified 2026-08-18: this form 302s to Primo's newer
+    discovery URL and lands on results with the query intact."""
+    from urllib.parse import quote
+
+    return (f"{_PRIMO_SEARCH_URL}&tab=Everything"
+            f"&search_scope=MyInst_and_CI"
+            f"&query=any,contains,{quote(topic)}")
+
+
 def _finding_help_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
     """Someone wants help finding material and we were refusing them."""
     m = message or ""
@@ -4458,6 +4530,27 @@ def _finding_help_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
         return None
     if not (_FIND_HELP_TOPIC_RE.search(m) or _FIND_HELP_ASK_RE.search(m)):
         return None
+    topic = _find_help_topic(m)
+    if topic:
+        return (
+            f"Searching the catalogue for **{topic}** -- here are the "
+            f"results [1]. Primo covers our own shelves plus OhioLINK "
+            f"partner libraries, so if Miami does not hold something you can "
+            f"request it from there.\n\n"
+            f"Two things that make a topic search behave: narrow it with a "
+            f"second term if there is too much, and use the **Resource Type** "
+            f"filter on the left to keep it to books.\n\n"
+            f"If the results are not what you meant, your **subject "
+            f"librarian** [2] will do this with you -- for a topic search "
+            f"that is usually faster than another round of guessing.",
+            [
+                {"n": 1, "url": _primo_topic_url(topic),
+                 "snippet": f"Primo — Miami University Libraries catalogue, "
+                            f"searching for \u201c{topic}\u201d"},
+                {"n": 2, "url": _LIAISONS_URL,
+                 "snippet": "Miami University Libraries — subject librarians"},
+            ],
+        )
     return (
         "I can point you at the right starting place -- which one depends on "
         "what you are after:\n\n"

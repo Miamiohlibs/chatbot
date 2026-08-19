@@ -4421,3 +4421,103 @@ def test_find_help_menu_offers_a_way_to_reach_a_person():
     body, cites = res
     assert "Ask Us" in body
     assert any("research-support/ask" in c["url"] for c in cites), cites
+
+
+# --- a named topic gets a search, not a menu --------------------------------
+#
+# 2026-08-18, first star rating from a real person on a real question:
+# "I'm looking for a book about totalitarianism" -> 2/5, and they got the
+# three-way menu. The eval judge scores that shape `correct`; the human did
+# not, and the human is right -- they had said what they wanted.
+
+
+def test_named_topic_gets_a_prefilled_search():
+    from src.graph.new_orchestrator import _finding_help_answer as F
+
+    body, cites = F("I'm looking for a book about totalitarianism")
+    assert "totalitarianism" in body
+    # The link is the search already run, not the catalogue front door.
+    assert "query=any,contains,totalitarianism" in cites[0]["url"]
+    # And it is still Primo, so gold's allowed_urls entry is the same page.
+    assert cites[0]["url"].startswith(
+        "https://ohiolink-mu.primo.exlibrisgroup.com/discovery/search")
+    # The subject librarian stays -- a topic search often needs a person.
+    assert "subject librarian" in body.lower()
+
+
+def test_topic_extraction_is_conservative():
+    """A bad query is worse than a good menu: it looks like we understood, and
+    then finds nothing. Anything uncertain returns None and the menu answers."""
+    from src.graph.new_orchestrator import _find_help_topic as T
+
+    assert T("I'm looking for a book about totalitarianism") == "totalitarianism"
+    assert T("Where can I find books on Ohio history?") == "Ohio history"
+    assert T("I need articles on climate change for my paper") == "climate change"
+    assert T('some assistance with books on "vision statements".') == \
+        "vision statements"
+    # No topic named -> the menu, which is the honest answer when there is
+    # nothing to search for yet.
+    for q in ("how do I get research help?",
+              "Can you find a journal article for me?",
+              "I need help with research strategy for my paper"):
+        assert T(q) is None, q
+    # A whole clause swallowed by the regex is not a subject.
+    assert T("Best way to find articles, books or book chapters about the "
+             "Berlin Airlift from the Soviet point of view and the Western "
+             "Allies") is None
+    assert T("books about how do I renew") is None
+
+
+def test_vague_asks_still_get_the_menu():
+    from src.graph.new_orchestrator import _finding_help_answer as F
+
+    body, cites = F("How do I get research help?")
+    assert "right starting place" in body
+    assert len(cites) == 4
+
+
+# --- Adobe: "Reserve" is a button label, not a hold -------------------------
+
+
+def test_adobe_answer_explains_the_word_reserve():
+    """A librarian, 4/5 on 2026-08-18: "Students might not understand the word
+    'Reserve' in regards to software." The word is the software page's own
+    button, so the answer names it AND says what it does."""
+    from src.graph.facility_facts import adobe_access_answer as A
+
+    for q in ("How do I check out Adobe Creative Cloud?",
+              "How do I get Adobe?",
+              "How do I get Adobe as a student?",
+              "Where do I get Photoshop?",
+              "Where can I get Acrobat Pro?"):
+        res = A(q)
+        assert res is not None, q
+        body = res[0]
+        # Both audiences, because gold says answering both is correct and a
+        # forced clarify is not.
+        assert "(Student)" in body and "(Faculty/Staff)" in body, q
+        # The button named, and decoded.
+        assert "just the wording on the button" in body, q
+        assert "course reserves" in body, q
+        assert "adobe.com" in body, q
+
+
+def test_adobe_answer_refuses_to_rule_on_part_time_eligibility():
+    """gold fs2_adobe_employee_eligibility: the page offers a student link and a
+    faculty/staff link and says nothing about part-time, so neither may we."""
+    from src.graph.facility_facts import adobe_access_answer as A
+
+    body, cites = A("I'm a part-time staff member -- am I eligible for Adobe "
+                    "Creative Cloud access?")
+    assert "part-time" in body
+    assert "rather not tell you either way" in body
+    assert len(cites) == 2, "the library-computer software page is the second"
+
+
+def test_adobe_answer_leaves_pdf_trouble_alone():
+    from src.graph.facility_facts import adobe_access_answer as A
+
+    for q in ("Why can't I view PDFs in EBSCO?",
+              "how do I convert a file to pdf",
+              "my acrobat won't open this file"):
+        assert A(q) is None, q

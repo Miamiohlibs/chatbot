@@ -461,6 +461,90 @@ def printing_scanning_wifi_answer(message: str) -> "Optional[tuple[str, list[dic
 
 
 
+# --- Adobe Creative Cloud: "Reserve" is a button, not a hold ----------------
+#
+# A librarian rated this 4/5 on 2026-08-18 with the reason written out:
+# "Takes you to the correct library webpage. Students might not understand the
+# word 'Reserve' in regards to software."
+#
+# They are right, and the word is not ours to change -- the software page's two
+# links literally read "Reserve Adobe Creative Cloud (Student)" and
+# "(Faculty/Staff)". To a student, "reserve" means a room for Tuesday or a
+# textbook behind the desk. Here it means claiming one of the Libraries'
+# licences for your own machine, permanently enough to install with. So the
+# answer names the button, because that is what they have to click, AND says
+# what it does.
+#
+# Deterministic because Adobe is the highest-volume software ask (it has its
+# own intent, `adobe_access`) and the flow is stable page content: two links,
+# then adobe.com with Miami credentials.
+SOFTWARE_CHECKOUT_URL = "https://www.lib.miamioh.edu/software/"
+"""In the index 2026-08-18: "Downloadable software you can check out on your
+device ... Reserve Adobe Creative Cloud (Student) / Reserve Adobe Creative
+Cloud (Faculty/Staff) ... After you have checked out a license you will be able
+to login at adobe.com using your Miami credentials." """
+
+LIBRARY_COMPUTER_SOFTWARE_URL = "https://www.lib.miamioh.edu/use/technology/software/"
+"""In the index 2026-08-18: "Adobe Creative Cloud: installed, but requires
+license checkout"."""
+
+_ADOBE_RE = re.compile(
+    r"\badobe\b|creative\s+cloud|\bcc\s+apps?\b|\bphotoshop\b|\bindesign\b|"
+    r"\billustrator\b|\bpremiere\b|\bacrobat\b|\bafter\s+effects\b|\blightroom\b",
+    re.IGNORECASE,
+)
+# Not the licence flow: a PDF that will not open, a font, a file conversion.
+_ADOBE_NOT_RE = re.compile(
+    r"\bpdf\b|\bebsco\b|\bwon'?t\s+open\b|\bcan'?t\s+open\b|\bcorrupt\w*|"
+    r"\bconvert\b|\bfont\b|\bdigital\s+editions\b",
+    re.IGNORECASE,
+)
+_ADOBE_ELIGIBILITY_RE = re.compile(
+    r"\beligib\w*|\bqualify\b|\ballowed\b|\bentitled\b|\bpart[-\s]?time\b|"
+    r"\badjunct\b|\bcontingent\b|\bemerit\w*|\balumn\w*|\bretired\b|"
+    r"\bvisiting\b|\baffiliate\b",
+    re.IGNORECASE,
+)
+
+
+def adobe_access_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
+    """How to get Adobe, in words a student has not had to decode."""
+    m = message or ""
+    if not _ADOBE_RE.search(m) or _ADOBE_NOT_RE.search(m):
+        return None
+
+    body = (
+        "Adobe Creative Cloud -- Photoshop, InDesign, Premiere Pro, Acrobat "
+        "Pro and the rest -- is something you check out from the Libraries and "
+        "install on your **own** computer or tablet [1].\n\n"
+        "On the software page there are two links. Take the one that matches "
+        "you:\n\n"
+        "- **Reserve Adobe Creative Cloud (Student)**\n"
+        "- **Reserve Adobe Creative Cloud (Faculty/Staff)**\n\n"
+        "**\"Reserve\" is just the wording on the button.** It does not hold "
+        "anything for a date and it is nothing to do with course reserves -- "
+        "it checks out one of the Libraries' licences to you.\n\n"
+        "Once you have the licence, sign in at **adobe.com** with your Miami "
+        "credentials and download whichever apps you want [1]."
+    )
+    cites = [_cite(1, SOFTWARE_CHECKOUT_URL,
+                   "Miami University Libraries — software you can check out")]
+
+    if _ADOBE_ELIGIBILITY_RE.search(m):
+        body += (
+            "\n\nOn who is eligible, the page offers a student link and a "
+            "faculty/staff link and does not break it down further -- it says "
+            "nothing about part-time, adjunct, emeritus or alumni status, so I "
+            f"would rather not tell you either way. The desk on {KING_PHONE} "
+            "can check your case before you count on it.\n\n"
+            "On a library computer Adobe Creative Cloud is already installed, "
+            "but it still needs a licence checked out to run [2]."
+        )
+        cites.append(_cite(2, LIBRARY_COMPUTER_SOFTWARE_URL,
+                           "Miami University Libraries — software on library "
+                           "computers"))
+    return body, cites
+
 # BUILDING FACTS WE CANNOT SOURCE GO TO THE SERVICE DESK.
 #
 # OPERATOR RULING 2026-08-17, reversing the 2026-08-04 decision this module was
