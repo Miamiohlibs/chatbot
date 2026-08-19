@@ -134,6 +134,20 @@ _NOT_PRINTING_RE = re.compile(
 )
 
 
+# Which PART of print/scan/wifi the patron actually asked about.
+_WIFI_ONLY_RE = re.compile(r"\b(wifi|wi-?fi|wireless|internet|network)\b",
+                           re.IGNORECASE)
+_PRINT_OR_SCAN_RE = re.compile(
+    r"\b(print|prints|printing|printer|printers|photocopy|copier|"
+    r"scan|scans|scanning|scanner|scanners)\b", re.IGNORECASE)
+# "How do I ...", "what are the steps" -- someone who wants to be walked
+# through it. A yes/no ("can I print here?") does not need a video.
+_HOWTO_RE = re.compile(
+    r"\bhow\s+(do|can|would)\s+i\b|\bhow\s+to\b|\bsteps?\b|"
+    r"\bwalk\s+me\b|\binstructions?\b|\bguide\b|\bset\s*up\b",
+    re.IGNORECASE)
+
+
 COMPUTER_LABS_URL = "https://www.lib.miamioh.edu/use/spaces/computer-labs/"
 """In the live index 2026-08-13: "Open-use Computers ... on every floor of King
 Library as well as at the Art & Architecture Library. To use these computers,
@@ -390,29 +404,61 @@ def printing_scanning_wifi_answer(message: str) -> "Optional[tuple[str, list[dic
     retrieved 231 characters of menu and answered "King Library offers
     printing/scanning services" without ever giving the student the guide.
     Those destinations are what the question is actually asking for.
+
+    ANSWER THE PART THAT WAS ASKED. Until 2026-08-18 this returned all four
+    links every time, so "How do I print from my laptop?" and "Can I print
+    here?" both came back reciting the Wi-Fi service page and a how-to video.
+    The eval scored both `partial` for exactly that -- extra URLs beyond the
+    one the question needed -- and it is the house failure mode besides:
+    answering next to the question rather than at it. Wi-Fi appears only when
+    Wi-Fi is asked about; the video only when someone wants the steps.
     """
     m = message or ""
     if not _PRINT_SCAN_WIFI_RE.search(m) or _NOT_PRINTING_RE.search(m):
         return None
-    return (
-        "Printing, scanning and Wi-Fi at the libraries all run on the "
-        "University's central systems, so the step-by-step guides live with "
-        "IT:\n\n"
-        f"- **Printing and scanning** — MUprint user guide [1]. Miami's "
-        f"multifunction printers in the libraries both print and scan.\n"
-        f"- **Wi-Fi** — the University Wi-Fi service page [2] covers "
-        f"connecting your device.\n"
-        f"- There is also a short **how-to video** [3], linked from the "
-        f"Libraries' own Printing and WiFi page [4].\n\n"
-        f"If something is broken or you are stuck at a machine, call "
-        f"{KING_PHONE} and someone at the desk can help.",
-        [
-            _cite(1, MUPRINT_GUIDE_URL, "Miami University IT — MUprint User Guide"),
-            _cite(2, WIFI_SERVICE_URL, "Miami University IT — Wi-Fi"),
-            _cite(3, PRINTING_VIDEO_URL, "Miami University Libraries — printing how-to video"),
-            _cite(4, PRINTING_PAGE_URL, "Miami University Libraries — Printing and WiFi"),
-        ],
+
+    wants_wifi = bool(_WIFI_ONLY_RE.search(m))
+    wants_paper = bool(_PRINT_OR_SCAN_RE.search(m))
+    wants_steps = bool(_HOWTO_RE.search(m))
+    if not (wants_wifi or wants_paper):
+        wants_paper = True       # the gate matched something; default to paper
+
+    lines: "list[str]" = []
+    cites: "list[dict]" = []
+
+    def _add(url: str, snippet: str) -> int:
+        cites.append(_cite(len(cites) + 1, url, snippet))
+        return len(cites)
+
+    if wants_paper:
+        n = _add(MUPRINT_GUIDE_URL, "Miami University IT — MUprint User Guide")
+        lines.append(
+            f"Printing and scanning in the libraries run on the University's "
+            f"MUprint system, and the step-by-step guide is IT's [{n}]. "
+            f"Miami's multifunction printers in the libraries both print and "
+            f"scan."
+        )
+    if wants_wifi:
+        n = _add(WIFI_SERVICE_URL, "Miami University IT — Wi-Fi")
+        lines.append(
+            f"For Wi-Fi, the University's Wi-Fi service page covers "
+            f"connecting your device [{n}]."
+        )
+    if wants_paper and wants_steps:
+        n = _add(PRINTING_VIDEO_URL,
+                 "Miami University Libraries — printing how-to video")
+        lines.append(f"There is also a short how-to video [{n}].")
+    n = _add(PRINTING_PAGE_URL,
+             "Miami University Libraries — Printing and WiFi")
+    lines.append(
+        f"The Libraries' own Printing and WiFi page links to all of it [{n}]."
     )
+    lines.append(
+        f"If something is broken or you are stuck at a machine, call "
+        f"{KING_PHONE} and someone at the desk can help."
+    )
+    return "\n\n".join(lines), cites
+
 
 
 # BUILDING FACTS WE CANNOT SOURCE GO TO THE SERVICE DESK.
@@ -488,6 +534,22 @@ _FIXTURE_IS_ACADEMIC_RE = re.compile(
     r"program|programme|major|degree|course|class|students?|faculty|school)\b",
     re.IGNORECASE,
 )
+# A ROOM WITH A WHITEBOARD IS A BOOKING, NOT A FIXTURE HUNT.
+#
+# `whiteboard` belongs in the fixture list -- "is there a whiteboard I can use"
+# is a desk question. But on 2026-08-18 the eval showed this answer taking
+# "Need a room for 4 with a whiteboard at King", whose allowed URL is LibCal:
+# the patron is reserving a space and naming an amenity to filter on, and they
+# got the service-desk referral instead of the reservation page.
+#
+# The fixture senses ask WHERE SOMETHING IS. These ask FOR A ROOM.
+_FIXTURE_IS_A_ROOM_REQUEST_RE = re.compile(
+    r"\b(rooms?|spaces?)\b[^.?!]{0,30}\b(for|with|that\s+has|containing)\b"
+    r"|\b(book|booking|reserve|reserving|reservation|schedule|scheduling)\b"
+    r"[^.?!]{0,30}\b(rooms?|spaces?)\b"
+    r"|\b(need|want|looking\s+for|find\s+me)\b[^.?!]{0,24}\b(rooms?|spaces?)\b",
+    re.IGNORECASE,
+)
 _QUIET_SPACE_RE = re.compile(
     r"\b(silent|quiet)\b[^.?!]{0,30}\b(area|areas|floor|floors|space|spaces|"
     r"section|room|rooms|study|zone)\b"
@@ -513,6 +575,8 @@ def building_facility_answer(message: str) -> "Optional[tuple[str, list[dict]]]"
     fixture = bool(_BUILDING_FIXTURE_RE.search(m))
     if fixture and _FIXTURE_IS_ACADEMIC_RE.search(m):
         fixture = False          # the nursing LIBRARIAN, not a lactation room
+    if fixture and _FIXTURE_IS_A_ROOM_REQUEST_RE.search(m):
+        fixture = False          # "a room WITH a whiteboard" -> the booking path
     if not (reading_room or fixture or _QUIET_SPACE_RE.search(m)):
         return None
 
@@ -574,7 +638,20 @@ _PARKING_NOT_RE = re.compile(
     # "parking lot" senses that are not about parking a car, plus the live-state
     # questions that belong to the temporary-notice answer.
     r"\b(bike\s+rack|full\s+right\s+now|any\s+spaces?\s+(left|free)|"
-    r"closed\s+(today|for)|blocked)\b",
+    r"closed\s+(today|for)|blocked)\b"
+    # BUYING A PERMIT IS A TRANSACTION, NOT A LIBRARY FACT.
+    #
+    # "How do I buy a parking pass?" is Parking & Transportation Services'
+    # process -- rates, eligibility, the payment portal -- and none of it is on
+    # a library page. On 2026-08-18 the eval scored this
+    # answered_should_have_refused: the bot recited Oxford's permit policy and
+    # added a phone number, when gold asks it to decline and not invent a
+    # process. Telling someone where they may park is ours; selling them the
+    # permit is not.
+    r"|\b(buy|purchase|pay\s+for|order|renew|apply\s+for|register\s+for|"
+    r"get\s+a)\b[^.?!]{0,24}\b(pass|passes|permit|permits|decal|hangtag|"
+    r"sticker)\b"
+    r"|\bparking\s+(pass|permit)\b[^.?!]{0,24}\b(cost|price|how\s+much)\b",
     re.IGNORECASE,
 )
 

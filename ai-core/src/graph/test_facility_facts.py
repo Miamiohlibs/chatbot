@@ -118,15 +118,86 @@ def test_print_scan_wifi_fires(q):
 
 def test_print_answer_gives_the_actual_guides_not_a_shrug():
     """The old answer was "King Library offers printing/scanning services",
-    retrieved from 231 characters of navigation menu."""
-    r = F.printing_scanning_wifi_answer("how do I scan a document")
-    a, cites = r
+    retrieved from 231 characters of navigation menu.
+
+    It used to return all four links for every question, which this test used
+    to assert. The 2026-08-18 eval scored "How do I print from my laptop?" and
+    "Can I print here?" `partial` for citing the Wi-Fi page and a video that
+    neither question asked for, so the answer is now built from the part that
+    WAS asked -- and the test asserts that rule instead of the old fixed list.
+    """
+    a, cites = F.printing_scanning_wifi_answer("how do I scan a document")
     urls = [c["url"] for c in cites]
     assert F.MUPRINT_GUIDE_URL in urls
-    assert F.WIFI_SERVICE_URL in urls
-    assert F.PRINTING_VIDEO_URL in urls
+    assert F.PRINTING_PAGE_URL in urls
+    assert F.WIFI_SERVICE_URL not in urls, "nobody asked about Wi-Fi"
     assert "MUprint" in a
     assert "scan" in a.lower()
+
+
+def test_print_answer_includes_only_the_part_that_was_asked():
+    P = F.printing_scanning_wifi_answer
+
+    def urls(q):
+        r = P(q)
+        assert r is not None, q
+        return [c["url"] for c in r[1]]
+
+    # Printing only.
+    u = urls("How do I print from my laptop?")
+    assert F.MUPRINT_GUIDE_URL in u and F.WIFI_SERVICE_URL not in u
+    # ... and a how-to gets the video, a yes/no does not.
+    assert F.PRINTING_VIDEO_URL in u
+    u = urls("Can I print here?")
+    assert F.MUPRINT_GUIDE_URL in u
+    assert F.PRINTING_VIDEO_URL not in u and F.WIFI_SERVICE_URL not in u
+    # Wi-Fi only.
+    u = urls("how do I connect to the wifi")
+    assert F.WIFI_SERVICE_URL in u and F.MUPRINT_GUIDE_URL not in u
+    # Both, when both are asked about.
+    u = urls("is there wifi and printing here")
+    assert F.WIFI_SERVICE_URL in u and F.MUPRINT_GUIDE_URL in u
+    # The Libraries' own page is always there -- it is the one page a patron
+    # can navigate to, and the allowed_urls in gold are built on it.
+    for q in ("How do I print from my laptop?", "Can I print here?",
+              "how do I connect to the wifi"):
+        assert F.PRINTING_PAGE_URL in urls(q), q
+
+
+def test_room_with_a_whiteboard_is_a_booking_not_a_fixture_hunt():
+    """gold rb_king_4_people_whiteboard, whose allowed url is LibCal. The desk
+    referral was taking it because `whiteboard` is in the fixture list."""
+    B = F.building_facility_answer
+    for q in ("Need a room for 4 with a whiteboard at King.",
+              "I need a study room with a whiteboard",
+              "can I book a room with a whiteboard",
+              "looking for a room for 6 people"):
+        assert B(q) is None, q
+    # The fixture sense survives: this really is a "where is it" question.
+    for q in ("is there a whiteboard I can use in King",
+              "where are the bathrooms at King Library",
+              "where can I charge my laptop",
+              "is there a lactation room at King"):
+        assert B(q) is not None, q
+
+
+def test_parking_answer_declines_to_sell_a_permit():
+    """gold oos2_parking_pass expects a refusal: buying a permit is Parking &
+    Transportation's process and none of it is on a library page. The 2026-08-18
+    eval scored this answered_should_have_refused."""
+    P = F.parking_answer
+    for q in ("How do I buy a parking pass?",
+              "where do I purchase a parking permit",
+              "how much does a parking pass cost",
+              "can I renew my parking permit online",
+              "how do I get a parking decal"):
+        assert P(q) is None, q
+    # Where to park IS ours -- it is on the FAQ.
+    for q in ("where can I park at King Library",
+              "is there parking near the library",
+              "where can I park at Rentschler",
+              "do I need a permit to park on campus"):
+        assert P(q) is not None, q
 
 
 def test_all_cited_urls_are_the_verified_canonical_forms():
