@@ -124,7 +124,18 @@ def _flat(cats: Dict[str, List[str]]) -> List[str]:
 # the QUESTION, right side against the parsed list, so a rename on the page
 # breaks the match into a None (agent handles it) rather than a wrong answer.
 _SYNONYMS: Tuple[Tuple[str, str], ...] = (
-    (r"charg(er|ers|ing)\s*(cable|cord|brick|block)?|power\s*(cord|adapter|adaptor|supply)", "charger"),
+    # "charger" is a noun and stands alone; "charging" is a gerund and does
+    # not. A librarian's real question on 2026-08-17 -- "Since Inside Higher Ed
+    # has started CHARGING, will we also get an online subscription?" -- was
+    # answered "Yes, the equipment list includes Chargers (Mac, PC, assorted
+    # phones)", because the trailing noun was optional for every alternative.
+    # The classifier had the question right (`newspapers`, nearest exemplar
+    # "Do employees get free online access to the Chronicle for Higher
+    # Education?"); this short-circuit runs at 3.60, ahead of the agent and
+    # ungated by intent, so being right downstream did not help.
+    (r"charg(er|ers)\s*(cable|cord|brick|block)?"
+     r"|charging\s*(cable|cord|brick|block)"
+     r"|power\s*(cord|adapter|adaptor|supply)", "charger"),
     (r"calculator|calculators", "calculator"),
     (r"laptop|laptops|chromebook|notebook\s+computer", "laptop"),
     (r"ipad|i-pad|tablet|tablets", "tablet"),

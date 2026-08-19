@@ -317,3 +317,49 @@ def test_no_loan_period_is_invented_for_an_item_that_has_none():
     a = _ans("do you have calculators")
     assert a is not None
     assert "30 days" not in a and "24 hour" not in a
+
+
+def test_charging_the_gerund_is_not_a_charger():
+    """A librarian's real question, 2026-08-17:
+
+        "Since Inside Higher Ed has started CHARGING, will we also get an
+         online subscription to that for the university?"
+
+    answered "Yes -- the libraries' equipment checkout list includes Chargers
+    (Mac, PC, assorted phones)". Three things had to line up: _BORROW_RE
+    contains a bare `has`, so "has started" opened the gate; the charger
+    synonym allowed `charg(er|ers|ing)` with the trailing noun OPTIONAL, so
+    bare "charging" resolved to the page's Chargers entry; and this
+    short-circuit runs at step 3.60, ahead of the agent and ungated by intent.
+
+    The classifier was not the problem and is worth recording, because that
+    was the first hypothesis and it was wrong: the question scores `newspapers`
+    at 0.6444, nearest exemplar "Do employees get free online access to the
+    Chronicle for Higher Education?", and tech_checkout is not in the top five.
+
+    "charger" is a noun and stands alone. "charging" is a gerund and needs its
+    object.
+    """
+    import re
+    from src.graph.tech_checkout import _SYNONYMS
+
+    pat = next(p for p, canon in _SYNONYMS if canon == "charger")
+
+    for q in ("do you lend chargers",
+              "can I borrow a phone charger",
+              "got a laptop charger i can borrow",
+              "do u have chargers for macbooks",
+              "Does the library have dell chargers for rent/sale?",
+              # The gerund WITH its object is still the thing itself.
+              "do you have a charging cable",
+              "any charging cords available",
+              "where can I get a charging brick",
+              "do you lend power adapters"):
+        assert re.search(pat, q, re.IGNORECASE), q
+
+    for q in ("Since Inside Higher Ed has started charging, will we also get "
+              "an online subscription to that for the university?",
+              "are study rooms a charge to your Miami ID",
+              "is the library charging for printing now",
+              "do you have a charging policy"):
+        assert not re.search(pat, q, re.IGNORECASE), q
