@@ -431,3 +431,79 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+# --- out_of_scope must not drive a chip it is then hidden from --------------
+
+
+def _knn(pairs):
+    """A classifier over toy 2-d vectors, so scores are exact and readable."""
+    from src.router.intent_knn import Exemplar, IntentKNN
+    import math
+
+    def vec(angle):
+        return [math.cos(angle), math.sin(angle)]
+
+    exemplars = [Exemplar(intent=i, text=i, vector=vec(a)) for i, a in pairs]
+    return IntentKNN(exemplars=exemplars, embedder=lambda t: vec(0.0))
+
+
+def test_out_of_scope_yields_to_a_library_intent_it_barely_outscores():
+    """Real question 2026-08-17, "who can help me with my english":
+
+        out_of_scope      0.5559
+        human_handoff     0.5457   <- 0.0102 behind, so the chip fired
+        subject_librarian 0.4724
+
+    _clarify_response then drops out_of_scope from the options and offered
+    "talking to a librarian" vs "finding my subject librarian" -- 0.0733
+    apart, more than twice MARGIN_LOW. The patron was asked to settle an
+    uncertainty about an intent they were never shown, by picking between two
+    the classifier was sure about.
+    """
+    import math
+    from src.router.intent_knn import MARGIN_LOW, SCORE_FLOOR
+
+    # out_of_scope just ahead of a real intent, both above the floor.
+    a_oos = math.acos(0.56)
+    a_human = math.acos(0.55)
+    a_subj = math.acos(0.47)
+    clf = _knn([("out_of_scope", a_oos),
+                ("human_handoff", a_human),
+                ("subject_librarian", a_subj)])
+    c = clf.classify("who can help me with my english")
+
+    assert c.score >= SCORE_FLOOR
+    assert c.intent == "human_handoff", c.candidates
+    # And it is not a chip either: the gap to the next real intent is wide.
+    assert not c.needs_clarification
+    assert c.margin >= MARGIN_LOW
+    # Telemetry still shows what actually ranked first.
+    assert c.candidates[0][0] == "out_of_scope"
+
+
+def test_below_the_floor_out_of_scope_is_never_rescued():
+    """The floor gate is what makes the rescue safe.
+
+    "What's the score of the Bengals game?" scores 0.281 and ties `newspapers`
+    EXACTLY -- a tie is inside any margin. Without the floor gate that gold
+    case, and two others like it, would be rescued into a library intent and
+    the eval's off-topic coverage would go with them.
+    """
+    import math
+
+    a = math.acos(0.28)
+    clf = _knn([("out_of_scope", a), ("newspapers", a)])
+    c = clf.classify("what's the score of the bengals game")
+    assert c.intent == "out_of_scope", c.candidates
+    assert not c.needs_clarification
+
+
+def test_a_clear_out_of_scope_above_the_floor_still_refuses():
+    """The rescue is for a THIN margin only."""
+    import math
+
+    clf = _knn([("out_of_scope", math.acos(0.70)),
+                ("human_handoff", math.acos(0.55))])
+    c = clf.classify("something off topic but wordy enough to score")
+    assert c.intent == "out_of_scope", c.candidates

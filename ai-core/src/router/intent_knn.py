@@ -321,6 +321,47 @@ class IntentKNN:
                 candidates=ranked,
             )
 
+        # OUT_OF_SCOPE MUST NOT DRIVE A CLARIFICATION IT IS THEN HIDDEN FROM.
+        #
+        # Real question, 2026-08-17: "who can help me with my english".
+        #
+        #   out_of_scope      0.5559
+        #   human_handoff     0.5457   <- 0.0102 behind, so margin < MARGIN_LOW
+        #   subject_librarian 0.4724
+        #
+        # The chip fired on the out_of_scope/human_handoff margin. Then
+        # _clarify_response drops out_of_scope from the options -- correctly,
+        # since "out of scope" is not a thing a patron can pick -- and offered
+        # "talking to a librarian" vs "finding my subject librarian": two
+        # options 0.0733 apart, more than twice MARGIN_LOW, which is to say two
+        # options the classifier was NOT uncertain between. The patron was
+        # asked to resolve an uncertainty about a third intent they never saw,
+        # by choosing between two that mean the same thing.
+        #
+        # When a real library intent is within MARGIN_LOW of out_of_scope, take
+        # the library intent. Same idea as the orchestrator's 2.025/2.026
+        # rescues, applied to the score rather than to a phrase.
+        #
+        # Gated on SCORE_FLOOR, and that gate is what makes it safe. Below the
+        # floor nothing is genuinely close to any exemplar and out_of_scope is
+        # forced, not earned -- "What's the score of the Bengals game?" scores
+        # 0.281 and ties `newspapers` exactly. Measured across the whole gold
+        # set: with the floor gate, 0 of 234 cases change, including all 20
+        # out_of_scope cases. Without it, 3 of them flip and the eval's
+        # off-topic coverage goes with them.
+        if top_intent == "out_of_scope" and top_score >= SCORE_FLOOR:
+            in_scope = [(i, s) for i, s in ranked if i != "out_of_scope"]
+            if in_scope and (top_score - in_scope[0][1]) < MARGIN_LOW:
+                rescued_intent, rescued_score = in_scope[0]
+                second = in_scope[1][1] if len(in_scope) > 1 else 0.0
+                return Classification(
+                    intent=rescued_intent,
+                    score=rescued_score,
+                    margin=rescued_score - second,
+                    needs_clarification=(rescued_score - second) < MARGIN_LOW,
+                    candidates=ranked,
+                )
+
         # Same-capability bypass: a thin margin between two intents that
         # produce the SAME OUTCOME for the user (same templated URL, same
         # refusal trigger, or both run the agent) is not real ambiguity.
