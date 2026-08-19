@@ -4423,49 +4423,54 @@ def test_find_help_menu_offers_a_way_to_reach_a_person():
     assert any("research-support/ask" in c["url"] for c in cites), cites
 
 
-# --- a named topic gets a search, not a menu --------------------------------
+# --- every Primo search link is the BLANK search page ------------------------
 #
-# 2026-08-18, first star rating from a real person on a real question:
-# "I'm looking for a book about totalitarianism" -> 2/5, and they got the
-# three-way menu. The eval judge scores that shape `correct`; the human did
-# not, and the human is right -- they had said what they wanted.
+# OPERATOR RULING 2026-08-19, relaying the subject librarians: all Primo search
+# links must be the empty search box. A pre-filled topic search was tried and
+# rejected.
+#
+# For the record of why it was tried: the first star rating from a real person
+# was 2/5 on "I'm looking for a book about totalitarianism", which got the
+# three-way menu below and a link to Primo's front door. The fix was a search
+# already run on their topic. The librarians do not want that, so it is gone --
+# and this test guards the rule across the whole source tree rather than at the
+# one call site, because the next person to have that idea will put it
+# somewhere else.
 
 
-def test_named_topic_gets_a_prefilled_search():
-    from src.graph.new_orchestrator import _finding_help_answer as F
+def test_no_primo_search_url_anywhere_carries_a_query():
+    import re as _re
+    from pathlib import Path
+    from urllib.parse import urlsplit, parse_qs
 
-    body, cites = F("I'm looking for a book about totalitarianism")
-    assert "totalitarianism" in body
-    # The link is the search already run, not the catalogue front door.
-    assert "query=any,contains,totalitarianism" in cites[0]["url"]
-    # And it is still Primo, so gold's allowed_urls entry is the same page.
-    assert cites[0]["url"].startswith(
-        "https://ohiolink-mu.primo.exlibrisgroup.com/discovery/search")
-    # The subject librarian stays -- a topic search often needs a person.
-    assert "subject librarian" in body.lower()
+    src_root = Path(__file__).resolve().parent.parent
+    offenders = []
+    for py in src_root.rglob("*.py"):
+        if py.name.startswith("test_"):
+            continue
+        for m in _re.finditer(
+                r"https://ohiolink-mu\.primo\.exlibrisgroup\.com/discovery/search[^\s\"'\)\]]*",
+                py.read_text(encoding="utf-8")):
+            qs = parse_qs(urlsplit(m.group(0)).query)
+            extra = {k: v for k, v in qs.items() if k != "vid"}
+            if extra:
+                offenders.append(f"{py.relative_to(src_root)}: {sorted(extra)}")
+    assert not offenders, (
+        "Primo search links must be the blank search page (vid only): "
+        + "; ".join(offenders))
 
 
-def test_topic_extraction_is_conservative():
-    """A bad query is worse than a good menu: it looks like we understood, and
-    then finds nothing. Anything uncertain returns None and the menu answers."""
-    from src.graph.new_orchestrator import _find_help_topic as T
+def test_find_help_cites_the_blank_primo_search():
+    from src.graph.new_orchestrator import (
+        _PRIMO_SEARCH_URL, _finding_help_answer,
+    )
 
-    assert T("I'm looking for a book about totalitarianism") == "totalitarianism"
-    assert T("Where can I find books on Ohio history?") == "Ohio history"
-    assert T("I need articles on climate change for my paper") == "climate change"
-    assert T('some assistance with books on "vision statements".') == \
-        "vision statements"
-    # No topic named -> the menu, which is the honest answer when there is
-    # nothing to search for yet.
-    for q in ("how do I get research help?",
-              "Can you find a journal article for me?",
-              "I need help with research strategy for my paper"):
-        assert T(q) is None, q
-    # A whole clause swallowed by the regex is not a subject.
-    assert T("Best way to find articles, books or book chapters about the "
-             "Berlin Airlift from the Soviet point of view and the Western "
-             "Allies") is None
-    assert T("books about how do I renew") is None
+    # A question that names a topic as plainly as it can be named.
+    _, cites = _finding_help_answer(
+        "I'm looking for a book about totalitarianism")
+    primo = [c["url"] for c in cites
+             if "primo.exlibrisgroup.com" in c["url"]]
+    assert primo == [_PRIMO_SEARCH_URL], primo
 
 
 def test_vague_asks_still_get_the_menu():
