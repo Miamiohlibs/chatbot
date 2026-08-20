@@ -5079,3 +5079,61 @@ def test_family_history_goes_to_special_collections_as_a_lead_not_a_fact():
               "where is special collections",
               "what can I bring into the reading room"):
         assert S(q) is None, q
+
+
+def test_a_short_followup_inherits_the_building_under_discussion():
+    """Real pair, 2026-08-06: "is the Art and Architecture library open on
+    Labor Day weekend?" was answered for Wertz, and the very next turn -- "is
+    it normally open on Sundays?" -- was answered for KING. resolve_scope
+    reads one message, so "it" silently changed buildings. Verified with the
+    whole conversation replayed, so it is not a harness artefact."""
+    from src.graph.new_orchestrator import _carry_library_into_followup as C
+    from src.scope.resolver import resolve_scope
+
+    hist = [
+        {"role": "user",
+         "content": "is the Art and Architecture library open on Labor Day?"},
+        {"role": "assistant",
+         "content": "Wertz Art & Architecture Library is open on Monday."},
+    ]
+    for q in ("is it normally open on Sundays?", "what about tomorrow",
+              "is it open now"):
+        s = C(resolve_scope(q), q, hist)
+        assert s.library == "wertz", q
+        assert s.source == "history_carry", q
+
+    # Naming a library of its own wins; a long message is a new question;
+    # no history carries nothing.
+    assert C(resolve_scope("what are King's hours"),
+             "what are King's hours", hist).library == "king"
+    long_q = ("I have a completely different question about how long I can "
+              "keep a book from the library and whether I can renew it online")
+    assert C(resolve_scope(long_q), long_q, hist).library is None
+    assert C(resolve_scope("is it open?"), "is it open?", None).library is None
+
+
+def test_an_events_question_naming_a_campus_gets_that_campus_page():
+    """Events stay unanswered by design -- stale dates are the prime source of
+    confidently wrong answers -- but the ROUTE must exist. On 2026-08-20 the
+    Gardner-Harvey events question got a clarification chip naming nowhere,
+    while the same question with the words "and news" was answered well."""
+    from src.graph.new_orchestrator import _campus_events_answer as E
+
+    mid = E("How can I find information on events at the Gardner-Harvey Library?")
+    assert mid is not None
+    assert "calendar.htm" in mid[1][0]["url"]
+
+    ham = E("are there any events at Rentschler")
+    assert ham is not None
+    # Hamilton publishes no calendar; say so rather than sending them to
+    # Oxford's and having them turn up at the wrong campus.
+    assert "doesn't publish an events calendar" in ham[0]
+    assert "(513) 785-3235" in ham[0]
+
+    # Oxford keeps the existing news_excluded route, and the neighbouring
+    # topics keep their own answers.
+    assert E("what events are on at King") is None
+    for q in ("what newspapers do you have", "when is game night",
+              "what are the hours at Middletown",
+              "book a room at gardner-harvey"):
+        assert E(q) is None, q

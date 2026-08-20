@@ -262,6 +262,10 @@ def _run_turn(
     # --- 1. Resolve scope ---
     origin_campus = resolve_session_origin(request.session_origin_url)
     scope: Scope = resolve_scope(request.user_message, origin_campus)
+    # "is it normally open on Sundays?" means the building we were just
+    # talking about -- see _carry_library_into_followup.
+    scope = _carry_library_into_followup(
+        scope, request.user_message, request.conversation_history)
 
     bind_request_context(
         conversation_id=request.conversation_id,
@@ -985,6 +989,9 @@ def _run_turn(
             # Family history / rare materials -> SCUA. AFTER the specific
             # Special Collections answers, which own hours, lockers and
             # the reading room.
+            # Events name a campus -> that campus's own page. Oxford keeps
+            # the existing news_excluded route.
+            ("campus_events", _campus_events_answer),
             ("sc_referral", _special_collections_referral_answer),
             ("not_there_campus", _not_there_campus_answer),
             ("disturbance_report", _ff.disturbance_report_answer),
@@ -3473,6 +3480,78 @@ _SC_REFERRAL_NOT_RE = re.compile(
     r"where\s+is|located|parking)\b",
     re.IGNORECASE,
 )
+
+
+# EVENTS ARE STILL NOT ANSWERED -- BUT EACH CAMPUS HAS ITS OWN PAGE.
+#
+# The operator's rule stands: event listings are excluded from the index
+# because stale event content is the prime source of confidently wrong
+# answers, so the bot ROUTES and never states a date. What it was doing
+# instead, on 2026-08-20, was worse than either:
+#
+#   "How can I find information on events that happen at the Gardner-Harvey
+#    Library?"            -> a clarification chip, naming nowhere
+#   "How can I find information on events AND NEWS at the Gardner-Harvey
+#    Library?"            -> answered well
+#
+# Two words apart. The chip named no destination at all, which is the one
+# thing this class of question must always get.
+#
+#   Oxford      the Libraries' News & Events page
+#   Middletown  Gardner-Harvey's own Events Calendar (calendar.htm, verified)
+#   Hamilton    no events calendar is published; their site and "The Link"
+#               newsletter archive are what exists, and saying so beats
+#               inventing a calendar or sending them to Oxford's.
+_EVENTS_ASK_RE = re.compile(
+    r"\b(events?|calendar|exhibits?|exhibitions?|news|what'?s\s+(on|happening)|"
+    r"programming|workshops?\s+schedule)\b",
+    re.IGNORECASE,
+)
+_EVENTS_NOT_RE = re.compile(
+    # These have their own answers and must not be pulled in by the word
+    # "news" (newspapers) or "calendar" (hours, room bookings).
+    r"\bnewspapers?\b|\bmagazines?\b|\bhours?\b|\bopen\b|\bclosed?\b"
+    r"|\bbook\s+a\s+room\b|\breserve\b|\bgame\s+night\b",
+    re.IGNORECASE,
+)
+_EVENTS_OXFORD_URL = "https://www.lib.miamioh.edu/about/news-events/news/"
+_EVENTS_MIDDLETOWN_URL = "https://www.mid.miamioh.edu/library/calendar.htm"
+_HAMILTON_NEWSLETTER_URL = (
+    "https://www.ham.miamioh.edu/library/services/for-faculty/"
+    "the-link-newsletter-archives/"
+)
+
+
+def _campus_events_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
+    """An events question naming a campus -> that campus's own page."""
+    m = message or ""
+    if not _EVENTS_ASK_RE.search(m) or _EVENTS_NOT_RE.search(m):
+        return None
+    if re.search(r"\b(middletown|gardner[- ]?harvey|ghl)\b", m, re.IGNORECASE):
+        return (
+            "Gardner-Harvey keeps its own **Events Calendar** on the library "
+            "site [1], and the **Stay Aware** section of the same homepage "
+            "carries news and announcements.\n\n"
+            "I don't hold event listings myself -- dates change and an old one "
+            "is worse than none -- so the calendar is the current source.",
+            [{"n": 1, "url": _EVENTS_MIDDLETOWN_URL,
+              "snippet": "Gardner-Harvey Library (Middletown) — Events "
+                         "Calendar"}],
+        )
+    if re.search(r"\b(hamilton|rentschler)\b", m, re.IGNORECASE):
+        return (
+            "Rentschler doesn't publish an events calendar that I can find, "
+            "so I would rather say that than send you to Oxford's and have "
+            "you turn up to the wrong campus.\n\n"
+            "What they do publish is **\"The Link\"**, the library "
+            "newsletter, whose archive carries what has been going on [1]. "
+            f"For anything current, the desk on {_RENTSCHLER_DESK_PHONE} will "
+            "know what is actually happening in the building.",
+            [{"n": 1, "url": _HAMILTON_NEWSLETTER_URL,
+              "snippet": "Rentschler Library (Hamilton) — \"The Link\" "
+                         "newsletter archive"}],
+        )
+    return None      # Oxford keeps the existing news_excluded route
 
 
 def _special_collections_referral_answer(
@@ -8822,6 +8901,61 @@ def _is_bare_library_name(message: str) -> bool:
 # conversation_history carries no intent, so the marker phrases our
 # deterministic answers use are the only signal -- the same trick
 # _flow_active relies on.
+# A FOLLOW-UP INHERITS THE BUILDING THE CONVERSATION IS ABOUT.
+#
+# Real pair, 2026-08-06:
+#
+#   "is the Art and Architecture library open on Labor Day weekend?"
+#     -> Wertz, correctly
+#   "is it normally open on Sundays?"
+#     -> KING's Sunday hours
+#
+# resolve_scope reads one message. The follow-up names no library, so it falls
+# to the Oxford default, and "it" -- which meant Wertz one line earlier --
+# silently becomes King. Verified with the whole conversation replayed, so it
+# is not a harness artefact.
+#
+# Bounded on purpose. It only carries when the CURRENT message names no
+# library of its own, and only from the last two turns, and only for a short
+# message: a patron who types a whole new question gets a fresh resolution.
+# Carrying further would be worse than not carrying at all -- a stale building
+# is harder to notice than a defaulted one.
+_FOLLOWUP_MAX_WORDS = 14
+
+
+def _library_from_recent_history(history: "Optional[list]") -> "Optional[str]":
+    """The library named in the last couple of turns, or None."""
+    if not history:
+        return None
+    from src.scope.resolver import resolve_scope
+
+    for msg in reversed(list(history)[-4:]):
+        text = (msg.get("content") if isinstance(msg, dict)
+                else getattr(msg, "content", "")) or ""
+        if not text.strip():
+            continue
+        lib = resolve_scope(text).library
+        if lib:
+            return lib
+    return None
+
+
+def _carry_library_into_followup(
+    scope: "Scope", message: str, history: "Optional[list]",
+) -> "Scope":
+    """Give a short, library-less follow-up the building already under discussion."""
+    if scope.library:
+        return scope                      # they named one; nothing to carry
+    m = (message or "").strip()
+    if not m or len(m.split()) > _FOLLOWUP_MAX_WORDS:
+        return scope
+    lib = _library_from_recent_history(history)
+    if not lib or lib == scope.library:
+        return scope
+    log.info("scope carry: follow-up inherited library %r from history", lib)
+    return _dc_replace(scope, library=lib, source="history_carry")
+
+
 def _booking_flow_active(history: Optional[list]) -> bool:
     """True when a mid-flow booking text is still the open question,
     even if the patron asked something else in between."""
