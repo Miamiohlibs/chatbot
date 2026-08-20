@@ -4528,70 +4528,111 @@ def test_adobe_answer_leaves_pdf_trouble_alone():
         assert A(q) is None, q
 
 
-def test_purchase_suggestion_uses_only_the_campus_that_has_a_form():
-    """Operator, 2026-08-19: Hamilton's form is Hamilton's. Do not hand it to
-    every campus, and where no form was found, say to contact a librarian.
+def test_purchase_suggestion_routes_to_the_campus_that_has_the_form():
+    """Operator, 2026-08-19: use the campus's own form where there is one,
+    send everyone else to a person, and do NOT split this by material type --
+    a newspaper, a book and a database are the same request.
 
-    Searched before writing the answer: the corpus mentions a purchase
-    suggestion on one page out of 244 (Hamilton's), and nothing turned up for
-    Oxford or Middletown -- homepage nav, /use/services/faculty/ (a redirect
-    shell), the faculty LibGuide's links, four guessed paths (404), LibAnswers.
+    Middletown was reported as having nothing on the first pass. It has a
+    form; I had searched for Oxford's vocabulary ("suggest a purchase",
+    "purchase request") and Middletown calls it "Tell GHL to Buy It!". An
+    absence found by one phrasing is not an absence.
     """
-    from src.graph.new_orchestrator import _newspaper_answer
+    from src.graph.new_orchestrator import _purchase_suggestion_answer as P
     from src.scope.resolver import Scope
 
-    ask = ("Since Inside Higher Ed has started charging, will we also get an "
-           "online subscription for the university newspaper collection?")
+    OX = Scope(campus="oxford", library="king", source="default")
+    HA = Scope(campus="hamilton", library="rentschler", source="test")
+    MI = Scope(campus="middletown", library="gardner_harvey", source="test")
 
-    def urls(scope, q=ask):
-        res = _newspaper_answer(q, scope)
+    def urls(q, scope):
+        res = P(q, scope)
         assert res is not None, (q, scope)
         return [c["url"] for c in res[1]]
 
-    ham = urls(Scope(campus="hamilton", library="rentschler", source="test"))
+    ihe = ("Since Inside Higher Ed has started charging, will we also get an "
+           "online subscription to that for the university?")
+
     assert any("ham.miamioh.edu" in u and "suggest-a-purchase" in u
-               for u in ham), ham
+               for u in urls(ihe, HA))
+    assert any("docs.google.com/forms" in u for u in urls(ihe, MI))
 
-    # Every other campus, and no campus at all, gets a person -- never
-    # Hamilton's form.
-    for scope in (Scope(campus="oxford", library="king", source="default"),
-                  Scope(campus="middletown", library="gardner_harvey",
-                        source="test"),
-                  None):
-        got = urls(scope)
-        assert not any("suggest-a-purchase" in u for u in got), (scope, got)
-        assert any("research-support/ask" in u for u in got), (scope, got)
+    # Oxford has no form. Say so and give people -- never another campus's
+    # form.
+    ox = urls(ihe, OX)
+    assert not any("suggest-a-purchase" in u or "docs.google.com" in u
+                   for u in ox), ox
+    assert any("liaisons" in u for u in ox) and any(
+        "research-support/ask" in u for u in ox), ox
 
-    # Naming the campus in the message counts too, without a scope.
-    named = urls(Scope(campus="oxford", library="king", source="default"),
-                 "will Rentschler subscribe to the Chronicle newspaper?")
-    assert any("suggest-a-purchase" in u for u in named), named
+    # NOT SPLIT BY MATERIAL TYPE: a book gets the same routing as a paper.
+    assert any("docs.google.com/forms" in u
+               for u in urls("will GHL buy a book for me?", OX))
+    assert any("ham.miamioh.edu" in u
+               for u in urls("can Rentschler order a DVD for my course?", OX))
+    for q in ("can the library buy a book I need for my thesis?",
+              "I'd like to suggest a purchase",
+              "could Miami subscribe to that database?"):
+        assert P(q, OX) is not None, q
 
 
-def test_an_acquisition_ask_does_not_answer_with_a_paper_we_already_have():
-    """The librarian's question named the Chronicle and the NYT as background
-    and asked about Inside Higher Ed. It got the New York Times guide."""
+def test_purchase_suggestion_leaves_access_questions_alone():
+    """"does the library subscribe to Scopus" is asking what we HAVE.
+    `databases` alone has 27 exemplars of that shape, so only the
+    forward-looking modals may count."""
+    from src.graph.new_orchestrator import _purchase_suggestion_answer as P
+    from src.scope.resolver import Scope
+
+    ox = Scope(campus="oxford", library="king", source="default")
+    for q in ("does the library subscribe to Scopus",
+              "do we have a subscription to IEEE Xplore",
+              "How do I access the New York Times?",
+              "is ProQuest included in our subscription",
+              # Buying that is not the library acquiring material.
+              "does the Miami University bookstore buy back textbooks",
+              "how much does it cost to print",
+              "where can I buy a parking pass"):
+        assert P(q, ox) is None, q
+
+
+def test_newspaper_router_yields_an_acquisition_ask():
+    """It used to answer one: "will we also get a subscription to Inside
+    Higher Ed" returned the New York Times guide, because _NYT_RE matched a
+    paper the sentence named only as background. It yields now, so a
+    reordering cannot bring that back -- and the ordinary ACCESS phrasings are
+    untouched."""
     from src.graph.new_orchestrator import _newspaper_answer
     from src.scope.resolver import Scope
 
-    oxford = Scope(campus="oxford", library="king", source="default")
-    body, cites = _newspaper_answer(
+    ox = Scope(campus="oxford", library="king", source="default")
+    assert _newspaper_answer(
         "I appreciate that Miami has a subscription to the Chronicle of "
         "Higher Ed and the NYT. Since Inside Higher Ed has started charging, "
         "will we also get an online subscription to that for the university?",
-        oxford)
-    assert "New York Times access" not in body, body
-    assert not any("nyt" in c["url"].lower() for c in cites), cites
-    # It must not promise the acquisition either way.
-    low = body.lower()
-    assert "collection decision" in low
+        ox) is None
 
-    # The ordinary ACCESS questions are untouched.
     for q, expect in (("How do I access the New York Times?",
                        "New York Times access"),
                       ("do we have a wall street journal subscription as "
                        "faculty", "Wall Street Journal access"),
                       ("what newspapers does the library subscribe to",
                        "Newspapers guide lists")):
-        res = _newspaper_answer(q, oxford)
+        res = _newspaper_answer(q, ox)
         assert res is not None and expect in res[0], q
+
+
+def test_purchase_short_circuit_is_actually_dispatched():
+    """The function existing is not the function running, and this one runs
+    BEFORE the newspapers router by design."""
+    import ast
+    from pathlib import Path
+
+    src = (Path(__file__).resolve().parent / "new_orchestrator.py").read_text(
+        encoding="utf-8")
+    called = {
+        n.func.id for n in ast.walk(ast.parse(src))
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+    }
+    assert "_purchase_suggestion_answer" in called
+    assert (src.index("_purchase_suggestion_answer(request.user_message")
+            < src.index("_newspaper_answer(request.user_message"))

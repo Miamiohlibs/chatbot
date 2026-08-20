@@ -814,6 +814,27 @@ def _run_turn(
                 latency_ms=latency_ms, cited_chunk_ids=[],
             )
 
+    # --- 2.125. "Will the library buy it?" -> the campus's own route ---
+    # Before newspapers, which used to own this and answered it with the guide
+    # for a paper the question named only in passing.
+    if not booking_flow:
+        _buy = _purchase_suggestion_answer(request.user_message, scope)
+        if _buy is not None:
+            _ans, _cites = _buy
+            latency_ms = int((time.monotonic() - turn_start) * 1000)
+            record_request(endpoint="/chat", status="purchase_suggestion",
+                           latency_s=latency_ms / 1000)
+            return TurnResponse(
+                answer=_ans, is_refusal=False, refusal_trigger=None,
+                citations=_cites, confidence="high",
+                intent=classification.intent, scope=scope.as_filter(),
+                model_used=model_basic,
+                tokens={"input": 0, "cached_input": 0, "output": 0},
+                fired_corrections=[],
+                agent_stopped_reason="purchase_suggestion_short_circuit",
+                latency_ms=latency_ms, cited_chunk_ids=[],
+            )
+
     # --- 2.13. Newspapers -> correct LibGuide page (content-security: guide,
     # don't answer; every URL verified). ---
     if not booking_flow:
@@ -3423,52 +3444,123 @@ _NEWS_RE = re.compile(r"\bnewspapers?\b", re.IGNORECASE)
 _NEWS_RESEARCH_RE = re.compile(r"\barticles?\b.{0,30}\b(about|on|regarding)\b", re.IGNORECASE)
 
 
-# "WILL WE ALSO GET A SUBSCRIPTION TO X?" IS NOT AN ACCESS QUESTION.
+# "WILL THE LIBRARY BUY IT?" -- ONE ANSWER, NOT ONE PER MATERIAL TYPE.
 #
-# A librarian pasted this on 2026-08-17:
+# Operator, 2026-08-19: where a campus publishes a request form, use that
+# campus's form; everywhere else send them to a person; and do not split this
+# by what is being asked for. A purchase suggestion for a newspaper, a book, a
+# database or a film is the same request to the same people.
 #
-#   "I appreciate that Miami has a subscription to the Chronicle of Higher Ed
-#    and the NYT. Since Inside Higher Ed has started charging, will we also
-#    get an online subscription to that for the university?"
+# It started life inside _newspaper_answer, which meant a book recommendation
+# reached none of it. Lifted out and registered ahead of the newspapers
+# router, which now yields on this shape rather than answering it.
 #
-# and got the New York Times guide, because _NYT_RE matched a paper the
-# sentence mentions only as BACKGROUND. The paper being asked about is Inside
-# Higher Ed, and the ask is whether the Libraries will BUY it -- a collection
-# development request, which no guide answers and which the bot must not
-# promise either way.
+# WHAT EACH CAMPUS ACTUALLY HAS, searched 2026-08-19:
 #
-# So an acquisition ask skips the named-paper branches entirely. It still gets
-# a destination, per the operator's rule that this class of question is routed
-# rather than answered: the Newspapers guide for what Miami already provides,
-# and a librarian for the request itself.
-# Hamilton publishes a Suggest a Purchase form; Oxford and Middletown do not.
-#
-# Searched 2026-08-19 before writing this: the 244-page corpus mentions a
-# purchase suggestion on exactly one page (Hamilton's mission-and-policies),
-# and the Oxford side has nothing -- not on the homepage nav, not on
-# /use/services/faculty/ (a redirect shell to the faculty LibGuide), not in
-# that guide's links, not at four guessed paths (all 404), not in LibAnswers.
-# Middletown likewise. So Hamilton gets its form and the other two get a
-# person, per the operator's rule that an unfound page is not a page to
-# invent.
-#
-# Not faculty-only despite the URL: Hamilton's own policy page says "Faculty,
-# staff, and students can recommend titles to be added at any time."
+#   Hamilton    a Suggest a Purchase form, linked from their policy page.
+#   Middletown  "Tell GHL to Buy It!", a Google Form linked from their own
+#               navigation. Missed on the first pass because I searched for
+#               Oxford's vocabulary -- "suggest a purchase", "purchase
+#               request" -- and theirs is a sentence, not a term. Worth
+#               remembering: an absence found by one phrasing is not an
+#               absence.
+#   Oxford      nothing. Not in the 244-page corpus, not in the homepage nav,
+#               not on /use/services/faculty/ (a redirect shell), not in the
+#               faculty LibGuide's links, not at four guessed paths, not in
+#               LibAnswers, and not under "buy it"/"recommend a title"/
+#               "materials request" either. So Oxford gets a person, and the
+#               answer says plainly that there is no form rather than
+#               implying the patron failed to find one.
 _HAM_PURCHASE_URL = (
     "https://www.ham.miamioh.edu/library/services/for-faculty/"
     "suggest-a-purchase/"
 )
+_MID_PURCHASE_URL = (
+    "https://docs.google.com/forms/d/e/"
+    "1FAIpQLSfmpug1duf---aCvwt7wKRuJM51VK44rOhphqCFUTCyXARF5A/viewform"
+)
 
-_NEWS_ACQUIRE_RE = re.compile(
-    r"\bwill\s+(we|you|miami|the\s+librar\w+|the\s+university|rentschler|"
-    r"gardner[- ]?harvey|king)\b[^.?!]{0,40}"
-    r"\b(get|buy|purchase|subscribe|add|obtain)\b"
-    r"|\b(can|could|would)\s+(we|you|miami|the\s+librar\w+)\b[^.?!]{0,40}"
-    r"\b(get|buy|purchase|subscribe\s+to|add)\b[^.?!]{0,30}\bsubscription\b"
-    r"|\bsuggest\s+a\s+purchase\b|\brecommend\w*\b[^.?!]{0,30}\bpurchase\b"
-    r"|\bstarted\s+charging\b",
+# `does/do the library subscribe to X` is an ACCESS question and must not
+# land here -- `databases` alone has 27 exemplars of that shape. Only the
+# forward-looking modals count, and bare "get" only when it is getting a
+# SUBSCRIPTION.
+_PURCHASE_ASK_RE = re.compile(
+    r"\b(suggest|recommend|request)\w*\b[^.?!]{0,40}"
+    r"\b(purchase|buy|acquisition)\b"
+    r"|\b(will|can|could|would)\s+(we|you|miami|the\s+librar\w+|"
+    r"the\s+university|rentschler|gardner[- ]?harvey|king|ghl)\b[^.?!]{0,40}"
+    r"\b(buy|purchase|subscribe|acquire|order)\b"
+    r"|\b(will|can|could|would)\b[^.?!]{0,40}\bget\b[^.?!]{0,25}"
+    r"\bsubscription\b"
+    r"|\badd\b[^.?!]{0,40}\bto\s+the\s+(library\s+)?collection\b"
+    r"|\bstarted\s+charging\b"
+    r"|\btell\s+(ghl|the\s+library)\s+to\s+buy\b",
     re.IGNORECASE,
 )
+# Buying that is not the library acquiring material.
+_PURCHASE_NOT_RE = re.compile(
+    r"\bbuy\s*-?\s*back\b|\bbookstore\b|\bparking\b|\bcoffee\b|\bvending\b"
+    r"|\btickets?\b|\bmerch\w*\b|\bprint\w*\b|\bcopies\b|\bmy\s+own\s+"
+    r"materials?\b",
+    re.IGNORECASE,
+)
+
+
+def _purchase_suggestion_answer(
+    message: str, scope: "Optional[Scope]" = None,
+) -> "Optional[tuple[str, list[dict]]]":
+    """"Will the library buy X?" -- the campus's form, or the campus's people."""
+    m = message or ""
+    if not _PURCHASE_ASK_RE.search(m) or _PURCHASE_NOT_RE.search(m):
+        return None
+
+    lead = (
+        "Whether the Libraries buy something is a collection decision, and "
+        "not one I can speak for -- I would be guessing either way. What I "
+        "can do is put the request in front of the people who decide."
+    )
+    campus = getattr(scope, "campus", None) if scope is not None else None
+    if re.search(r"\b(hamilton|rentschler)\b", m, re.IGNORECASE):
+        campus = "hamilton"
+    elif re.search(r"\b(middletown|gardner[- ]?harvey|ghl)\b", m, re.IGNORECASE):
+        campus = "middletown"
+
+    if campus == "hamilton":
+        return (
+            f"{lead}\n\n"
+            "Rentschler has a **Suggest a Purchase** form [1]: author, title, "
+            "format, and why you want it. Subject liaisons read those and "
+            "make the selection decision, and **faculty, staff and students** "
+            "can all recommend titles -- the form lives under \"For Faculty\" "
+            "but it is not limited to them.",
+            [{"n": 1, "url": _HAM_PURCHASE_URL,
+              "snippet": "Rentschler Library (Hamilton) — Suggest a Purchase"}],
+        )
+
+    if campus == "middletown":
+        return (
+            f"{lead}\n\n"
+            "Gardner-Harvey has a form for exactly this -- **Tell GHL to Buy "
+            "It!** [1]. If you would rather talk to someone, the desk is "
+            f"{_GARDNER_HARVEY_DESK_PHONE}.",
+            [{"n": 1, "url": _MID_PURCHASE_URL,
+              "snippet": "Gardner-Harvey Library (Middletown) — Tell GHL to "
+                         "Buy It!"}],
+        )
+
+    return (
+        f"{lead}\n\n"
+        "Oxford does not publish a request form -- I looked, and I would "
+        "rather say so than send you hunting for one. So this goes to a "
+        "person: your **subject librarian** for the field [1] is the one who "
+        "makes selections in that subject, and **Ask Us** [2] will route it "
+        "if you are not sure whose subject it is.",
+        [{"n": 1, "url": _LIAISONS_URL,
+          "snippet": "Miami University Libraries — subject librarians"},
+         {"n": 2, "url": _ASKUS_URL,
+          "snippet": "Miami University Libraries — Ask Us"}],
+    )
+
 
 
 def _newspaper_answer(
@@ -3481,48 +3573,14 @@ def _newspaper_answer(
         return [{"n": 1, "url": url, "snippet": label}]
     # An ACQUISITION request names papers we already have as context; the one
     # being asked about is the one we do not. Answer the shape, not the nouns.
-    # Any paper signal at all, not just the generic word: the question that
-    # broke this names three papers and never says "newspaper".
-    if _NEWS_ACQUIRE_RE.search(m) and (
-            _NEWS_RE.search(m) or _NYT_RE.search(m)
-            or _WSJ_RE.search(m) or _OHIO_PAPER_RE.search(m)):
-        lead = (
-            "Whether the Libraries take out a new subscription is a "
-            "collection decision, and not one I can speak for -- I would be "
-            "guessing either way.\n\n"
-            "What I can tell you is where it stands today: the Libraries' "
-            "Newspapers guide lists the papers Miami provides and how to read "
-            "them [1]."
-        )
-        # Hamilton is the only campus with a published form. Named in the
-        # message, or the session's campus, either counts.
-        ham = bool(re.search(r"\b(hamilton|rentschler)\b", m, re.IGNORECASE))
-        if not ham and scope is not None:
-            ham = (getattr(scope, "campus", None) == "hamilton")
-        if ham:
-            return (
-                f"{lead}\n\n"
-                "To ask for it, Rentschler has a **Suggest a Purchase** form "
-                "[2] -- author, title, format and why you want it. Subject "
-                "liaisons read those and make the selection decision. "
-                "Faculty, staff and students can all recommend titles.",
-                [{"n": 1, "url": _NEWS_GUIDE_URL,
-                  "snippet": "Miami Libraries — Newspapers guide"},
-                 {"n": 2, "url": _HAM_PURCHASE_URL,
-                  "snippet": "Rentschler Library (Hamilton) — Suggest a "
-                             "Purchase"}],
-            )
-        return (
-            f"{lead}\n\n"
-            "If the title you want is not on it, that request goes to a "
-            "librarian -- your subject librarian for the field, or Ask Us "
-            "[2]. I don't have a request form to point you at for this "
-            "campus, so a person is the honest route.",
-            [{"n": 1, "url": _NEWS_GUIDE_URL,
-              "snippet": "Miami Libraries — Newspapers guide"},
-             {"n": 2, "url": _ASKUS_URL,
-              "snippet": "Miami University Libraries — Ask Us"}],
-        )
+    # An acquisition ask belongs to _purchase_suggestion_answer, which runs
+    # earlier and is not split by material type. YIELD rather than answer,
+    # so a reordering cannot bring back the bug this replaced: "will we also
+    # get a subscription to Inside Higher Ed" returned the New York Times
+    # guide, because _NYT_RE matched a paper the sentence named only as
+    # background.
+    if _PURCHASE_ASK_RE.search(m):
+        return None
     # Specific named papers -> most specific verified page.
     if _NYT_RE.search(m):
         return ("Miami provides New York Times access for affiliated users. "
