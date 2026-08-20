@@ -507,3 +507,44 @@ def test_a_clear_out_of_scope_above_the_floor_still_refuses():
                 ("human_handoff", math.acos(0.55))])
     c = clf.classify("something off topic but wordy enough to score")
     assert c.intent == "out_of_scope", c.candidates
+
+
+def test_a_chip_whose_every_option_is_a_place_to_look_names_nowhere():
+    """Operator rule, 2026-08-19, for the subject librarians: catalogue,
+    database and Primo questions are ROUTED, not answered. A clarification
+    chip is the one reply that fails that rule outright -- it hands the
+    question back without naming anywhere.
+
+    Two real questions, 2026-08-17:
+
+        "Does the university have a subscription to Slate Magazine?"
+            -> Options: newspapers, finding a book or article
+        "Sanborn fire maps Oxford Ohio"
+            -> Options: finding a book or article, meeting a librarian
+
+    Every option in both was a place to look.
+    """
+    import math
+    from src.router.intent_knn import MARGIN_LOW
+
+    a1, a2 = math.acos(0.68), math.acos(0.66)   # inside MARGIN_LOW
+    clf = _knn([("newspapers", a1), ("find_resource", a2)])
+    c = clf.classify("does the university have a subscription to slate")
+    assert c.margin < MARGIN_LOW, c.margin
+    assert not c.needs_clarification
+    # And it takes the MOST SPECIFIC destination, not a generic one.
+    assert c.intent == "newspapers"
+
+
+def test_a_chip_still_fires_when_the_options_are_different_kinds_of_thing():
+    """Five of the fourteen real chips survive this rule and should: an event
+    date is not a place to look, and neither is a building's location."""
+    import math
+
+    a1, a2 = math.acos(0.60), math.acos(0.59)
+    for pair in (("events_news", "hours"),
+                 ("location_directions", "find_resource"),
+                 ("staff_lookup", "find_resource")):
+        clf = _knn([(pair[0], a1), (pair[1], a2)])
+        c = clf.classify("something ambiguous")
+        assert c.needs_clarification, pair

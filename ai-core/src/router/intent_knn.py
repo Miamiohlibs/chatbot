@@ -129,6 +129,47 @@ open-world inputs. With the floor, the bot refuses cleanly instead
 of confidently mis-routing."""
 
 
+# INTENTS WHOSE ANSWER IS A DESTINATION, NOT A FACT.
+#
+# Operator's rule, restated 2026-08-19 on behalf of the subject librarians:
+# anything that would mean searching the catalogue, a database or Primo is
+# ROUTED, never answered. So for this set of intents the bot's job is to name
+# the right place to look -- and a clarification chip is the one response that
+# fails that job completely, because it hands the question back instead of
+# naming anywhere at all.
+#
+# Two real questions on 2026-08-17 got a chip and no destination:
+#
+#   "Does the university have a subscription to Slate Magazine?"
+#       -> Options: newspapers, finding a book or article
+#   "Sanborn fire maps Oxford Ohio"
+#       -> Options: finding a book or article, meeting a librarian
+#
+# In both, EVERY option was a place to look. Asking which one is asking the
+# patron to do the routing. Take the top intent instead; it is the most
+# specific destination available, and for Slate that is the Newspapers guide
+# rather than a generic catalogue pointer.
+#
+# Measured on 193 real questions: 9 of the 14 chips become a destination, and
+# every one of the nine lands somewhere usable. The other 5 mix a destination
+# with something else (events vs hours, staff vs find-a-book) and still ask.
+#
+# Gold cannot check this: the clarification path fires 0 times in 234 cases.
+# The evidence here is real traffic, and it is recorded so the next person
+# knows which it was.
+_DESTINATION_INTENTS = frozenset({
+    "find_resource",
+    "databases",
+    "newspapers",
+    "course_reserves",
+    "interlibrary_loan",
+    "remote_access",
+    "research_consultation",
+    "subject_librarian",
+    "digital_collections",
+})
+
+
 # --- Embedder seam --------------------------------------------------------
 
 
@@ -374,6 +415,14 @@ class IntentKNN:
             top_cap = _capability_signature(ranked[0][0])
             runner_cap = _capability_signature(ranked[1][0])
             if top_cap is not None and top_cap == runner_cap:
+                needs_clarification = False
+        # A chip whose every option is a PLACE TO LOOK names nowhere. See
+        # _DESTINATION_INTENTS: take the top one, which is the most specific
+        # destination on offer.
+        if needs_clarification:
+            shown = [i for i, _ in ranked if i != "out_of_scope"][:2]
+            if len(shown) >= 2 and all(
+                    i in _DESTINATION_INTENTS for i in shown):
                 needs_clarification = False
 
         return Classification(

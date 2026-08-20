@@ -3423,12 +3423,63 @@ _NEWS_RE = re.compile(r"\bnewspapers?\b", re.IGNORECASE)
 _NEWS_RESEARCH_RE = re.compile(r"\barticles?\b.{0,30}\b(about|on|regarding)\b", re.IGNORECASE)
 
 
+# "WILL WE ALSO GET A SUBSCRIPTION TO X?" IS NOT AN ACCESS QUESTION.
+#
+# A librarian pasted this on 2026-08-17:
+#
+#   "I appreciate that Miami has a subscription to the Chronicle of Higher Ed
+#    and the NYT. Since Inside Higher Ed has started charging, will we also
+#    get an online subscription to that for the university?"
+#
+# and got the New York Times guide, because _NYT_RE matched a paper the
+# sentence mentions only as BACKGROUND. The paper being asked about is Inside
+# Higher Ed, and the ask is whether the Libraries will BUY it -- a collection
+# development request, which no guide answers and which the bot must not
+# promise either way.
+#
+# So an acquisition ask skips the named-paper branches entirely. It still gets
+# a destination, per the operator's rule that this class of question is routed
+# rather than answered: the Newspapers guide for what Miami already provides,
+# and a librarian for the request itself.
+_NEWS_ACQUIRE_RE = re.compile(
+    r"\bwill\s+(we|you|miami|the\s+librar\w+|the\s+university)\b[^.?!]{0,40}"
+    r"\b(get|buy|purchase|subscribe|add|obtain)\b"
+    r"|\b(can|could|would)\s+(we|you|miami|the\s+librar\w+)\b[^.?!]{0,40}"
+    r"\b(get|buy|purchase|subscribe\s+to|add)\b[^.?!]{0,30}\bsubscription\b"
+    r"|\bsuggest\s+a\s+purchase\b|\brecommend\w*\b[^.?!]{0,30}\bpurchase\b"
+    r"|\bstarted\s+charging\b",
+    re.IGNORECASE,
+)
+
+
 def _newspaper_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
     """Guide newspaper-access questions to the correct LibGuide page (never
     answer the access steps directly). Returns (answer, citations) or None."""
     m = message or ""
     def cite(url, label):
         return [{"n": 1, "url": url, "snippet": label}]
+    # An ACQUISITION request names papers we already have as context; the one
+    # being asked about is the one we do not. Answer the shape, not the nouns.
+    # Any paper signal at all, not just the generic word: the question that
+    # broke this names three papers and never says "newspaper".
+    if _NEWS_ACQUIRE_RE.search(m) and (
+            _NEWS_RE.search(m) or _NYT_RE.search(m)
+            or _WSJ_RE.search(m) or _OHIO_PAPER_RE.search(m)):
+        return (
+            "Whether the Libraries take out a new subscription is a "
+            "collection decision, and not one I can speak for -- I would be "
+            "guessing either way.\n\n"
+            "What I can tell you is where it stands today: the Libraries' "
+            "Newspapers guide lists the papers Miami provides and how to read "
+            "them [1]. If the title you want is not on it, that request goes "
+            "to a librarian -- your subject librarian for the field, or Ask "
+            "Us [2] -- and they are the people who put it in front of whoever "
+            "decides.",
+            [{"n": 1, "url": _NEWS_GUIDE_URL,
+              "snippet": "Miami Libraries — Newspapers guide"},
+             {"n": 2, "url": _ASKUS_URL,
+              "snippet": "Miami University Libraries — Ask Us"}],
+        )
     # Specific named papers -> most specific verified page.
     if _NYT_RE.search(m):
         return ("Miami provides New York Times access for affiliated users. "
