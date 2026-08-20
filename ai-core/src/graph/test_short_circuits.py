@@ -4636,3 +4636,52 @@ def test_purchase_short_circuit_is_actually_dispatched():
     assert "_purchase_suggestion_answer" in called
     assert (src.index("_purchase_suggestion_answer(request.user_message")
             < src.index("_newspaper_answer(request.user_message"))
+
+
+def test_a_deterministic_answer_never_names_a_model_it_did_not_call():
+    """From a real review ticket, 2026-08-18:
+
+        model: gpt-5.6-luna   token total: 0   Tools used: none
+
+    for "does Rentschler have a MakerSpace" -- an answer produced entirely by
+    a short-circuit. Every one of these blocks carried `model_used=
+    model_basic` copied from its neighbour, so the ticket told the operator a
+    paid model had answered when nothing had run. Four paths in this file
+    already used the "(none -- ...)" convention; 27 did not.
+
+    Derived from the source rather than listing the sites, because the list
+    is what went stale: the next short-circuit will be written by copying an
+    existing one, and this fails if that copy names a model.
+    """
+    import ast
+    import re
+    from pathlib import Path
+
+    src = (Path(__file__).resolve().parent / "new_orchestrator.py").read_text(
+        encoding="utf-8")
+
+    offenders = []
+    for node in ast.walk(ast.parse(src)):
+        if not (isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "TurnResponse"):
+            continue
+        kw = {k.arg: k.value for k in node.keywords}
+        toks, model = kw.get("tokens"), kw.get("model_used")
+        if toks is None or model is None:
+            continue
+        # A zero-token response ran no LLM.
+        # ast.unparse renders dict keys with SINGLE quotes. Matching only
+        # double quotes made this test find nothing and pass for the wrong
+        # reason -- caught by counting what it actually inspected.
+        literal = ast.unparse(toks)
+        if not re.search(r"['\"]input['\"]:\s*0.*['\"]output['\"]:\s*0",
+                         literal, re.S):
+            continue
+        rendered = ast.unparse(model)
+        if "none" not in rendered.lower():
+            offenders.append((getattr(node, "lineno", "?"), rendered))
+
+    assert not offenders, (
+        "zero-token responses naming a model they did not call: "
+        + "; ".join(f"line {ln}: {m}" for ln, m in offenders))
