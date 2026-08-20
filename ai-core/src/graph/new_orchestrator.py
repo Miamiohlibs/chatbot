@@ -3439,7 +3439,23 @@ _OHIO_PAPER_RE = re.compile(
     r"oxford observer)\b", re.IGNORECASE)
 _NEWS_HIST_RE = re.compile(
     r"\b(historical|archiv|back issue|old issue|past issue|microfilm)\b", re.IGNORECASE)
-_NEWS_RE = re.compile(r"\bnewspapers?\b", re.IGNORECASE)
+# A MAGAZINE IS A PERIODICAL QUESTION TOO.
+#
+# "Does the university have a subscription to Slate Magazine?" was a real
+# question on 2026-08-17. The clarification bypass added on 2026-08-19 got
+# it routed to `newspapers` correctly -- and then this matcher declined,
+# because the sentence says "Magazine" and not "newspaper", so the turn
+# fell to the agent and came back "I don't have a reliable answer to that."
+# The chip was gone and so was the destination, which is the failure the
+# operator's rule exists to prevent.
+#
+# The guide itself describes its scope as "newspapers and related
+# subjects" and indexes databases of "journal, newspaper, and magazine
+# articles ... periodicals", so it is the right place to send a magazine
+# question -- with Primo named as well, because a specific title we hold
+# shows up there whether or not the guide lists it.
+_NEWS_RE = re.compile(r"\b(newspapers?|magazines?|periodicals?)\b",
+                      re.IGNORECASE)
 # topic-research ("newspaper articles about X") belongs to the research path.
 _NEWS_RESEARCH_RE = re.compile(r"\barticles?\b.{0,30}\b(about|on|regarding)\b", re.IGNORECASE)
 
@@ -3601,9 +3617,17 @@ def _newspaper_answer(
             return ("For historical or back-issue newspapers, see the Libraries' "
                     "Newspaper Archives guide — [1].",
                     cite(_NEWS_ARCHIVES_URL, "Miami Libraries — Newspaper Archives guide"))
-        return ("The Libraries' Newspapers guide lists the newspapers Miami "
-                "provides and how to read them — see [1].",
-                cite(_NEWS_GUIDE_URL, "Miami Libraries — Newspapers guide"))
+        return (
+            "The Libraries' Newspapers guide is where to check -- it covers "
+            "newspapers and related periodicals, and how to read each one "
+            "[1].\n\n"
+            "If the title you want is not on it, search **Primo** for the "
+            "title itself [2]: a magazine or journal we subscribe to shows up "
+            "there even when the guide does not name it.",
+            [{"n": 1, "url": _NEWS_GUIDE_URL,
+              "snippet": "Miami Libraries — Newspapers guide"},
+             {"n": 2, "url": _PRIMO_SEARCH_URL,
+              "snippet": "Primo — Miami University Libraries catalogue"}])
     return None
 
 

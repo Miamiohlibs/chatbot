@@ -4616,9 +4616,39 @@ def test_newspaper_router_yields_an_acquisition_ask():
                       ("do we have a wall street journal subscription as "
                        "faculty", "Wall Street Journal access"),
                       ("what newspapers does the library subscribe to",
-                       "Newspapers guide lists")):
+                       "Newspapers guide")):
         res = _newspaper_answer(q, ox)
         assert res is not None and expect in res[0], q
+
+
+def test_a_magazine_subscription_question_gets_a_destination():
+    """"Does the university have a subscription to Slate Magazine?" -- real,
+    2026-08-17.
+
+    The clarification bypass routed it to `newspapers` correctly and then this
+    matcher declined, because the sentence says "Magazine" and not
+    "newspaper". The turn fell to the agent and came back "I don't have a
+    reliable answer to that": the chip was gone and so was the destination,
+    which is the whole failure the operator's routing rule exists to prevent.
+    """
+    from src.graph.new_orchestrator import _newspaper_answer
+    from src.scope.resolver import Scope
+
+    ox = Scope(campus="oxford", library="king", source="default")
+    for q in ("Does the university have a subscription to Slate Magazine?",
+              "do we get any magazines",
+              "what periodicals does Miami subscribe to"):
+        res = _newspaper_answer(q, ox)
+        assert res is not None, q
+        urls = [c["url"] for c in res[1]]
+        # A place to look for the title, and the catalogue for the title
+        # itself -- the guide does not name every magazine.
+        assert any("libguides.lib.miamioh.edu/newspapers" in u for u in urls), q
+        assert any("primo.exlibrisgroup.com" in u for u in urls), q
+
+    # A magazine ARTICLE on a topic is research, not a periodical lookup.
+    assert _newspaper_answer(
+        "find magazine articles about the 2020 election", ox) is None
 
 
 def test_purchase_short_circuit_is_actually_dispatched():
