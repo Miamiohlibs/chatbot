@@ -982,6 +982,10 @@ def _run_turn(
             # its own answer and must run before the policy pointer.
             # "that page says nothing about Hamilton" -- a correction from
             # the patron, not a new topic, and it was being refused.
+            # Family history / rare materials -> SCUA. AFTER the specific
+            # Special Collections answers, which own hours, lockers and
+            # the reading room.
+            ("sc_referral", _special_collections_referral_answer),
             ("not_there_campus", _not_there_campus_answer),
             ("disturbance_report", _ff.disturbance_report_answer),
             ("facility_problem", _ff.facility_problem_answer),
@@ -3450,6 +3454,54 @@ def _cancel_reservation_answer(
 # so the answer names both roles rather than replacing one with the other.
 _ARCHIVIST_RE = re.compile(r"\barchivist\b", re.IGNORECASE)
 _ARCHIVES_STAFF_URL = "https://spec.lib.miamioh.edu/home/staff/"
+
+
+# GENEALOGY, LOCAL HISTORY AND RARE BOOKS BELONG TO SPECIAL COLLECTIONS.
+#
+# Operator's decision, 2026-08-20, alongside the subject-inference rule. A
+# real question on 2026-08-06 -- an alum asking after his father's cousin, who
+# drowned -- was refused as outside the bot's scope. Special Collections &
+# University Archives holds the Miami, Western College and Oxford College
+# archives plus local history, and the Libraries subscribe to Ancestry Library
+# Edition, so this is a HOLDINGS-BACKED route rather than a guess about which
+# person to send someone to. It still says it is a suggestion, because whether
+# any particular family appears in those records is not something I know.
+_SC_REFERRAL_NOT_RE = re.compile(
+    # These already have their own Special Collections answers, and this must
+    # not stand in front of them.
+    r"\b(hours|open|closed|locker|reading\s+room|appointment|drop[-\s]?in|"
+    r"where\s+is|located|parking)\b",
+    re.IGNORECASE,
+)
+
+
+def _special_collections_referral_answer(
+    message: str,
+) -> "Optional[tuple[str, list[dict]]]":
+    """A family-history or rare-materials question -> SCUA, flagged as a lead."""
+    m = message or ""
+    from src.router.subject_inference import looks_like_special_collections
+
+    term = looks_like_special_collections(m)
+    if not term:
+        return None
+    if _SC_REFERRAL_NOT_RE.search(m):
+        return None
+    return (
+        "That sounds like one for **Walter Havighurst Special Collections & "
+        "University Archives** -- they hold the Miami, Western College and "
+        "Oxford College archives along with local history and rare "
+        "materials, and they are the people who work with this kind of "
+        "request every week [1].\n\n"
+        f"Reach them at **{_spec.ARCHIVES_EMAIL}** or "
+        f"**{_spec.ARCHIVES_PHONE}**, third floor of King Library.\n\n"
+        "I am pointing you there from the subject of your question, not from "
+        "knowing what is in the collection -- whether the particular records "
+        "you want exist is exactly what they can tell you and I cannot.",
+        [{"n": 1, "url": _SPEC_APPOINTMENTS_URL,
+          "snippet": "Walter Havighurst Special Collections & University "
+                     "Archives"}],
+    )
 
 
 def _archives_contact_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
@@ -6907,6 +6959,22 @@ def _liaison_lookup_when_agent_skipped(
                 return None          # the agent did it; nothing to add
 
     subject = _subject_for_liaison_fallback(request.user_message)
+    # INFERRED FROM THE SUBJECT MATTER, when the patron named no subject.
+    #
+    # Operator's decision 2026-08-20: "Mozart Piano Sonata No. 13, K331 sheet
+    # music" was refused as out of scope, and a music question is precisely
+    # what a subject librarian is for. The vocabulary that may trigger this is
+    # reviewable data (src/router/data/subject_exclusive_terms.json), not code,
+    # and holds only words that cannot mean anything else -- never `business`,
+    # `art`, `design`, which is the everyday-word problem this walks around.
+    inferred_term = None
+    if not subject:
+        from src.router.subject_inference import infer_subject
+        guess = infer_subject(request.user_message)
+        if guess:
+            subject, inferred_term = guess
+            log.info("liaison fallback: inferred subject %r from %r",
+                     subject, inferred_term)
     if not subject:
         return None
 
@@ -6933,7 +7001,23 @@ def _liaison_lookup_when_agent_skipped(
 
     log.info("liaison fallback: agent skipped lookup_librarian, looked up %r",
              subject)
-    return _subject_liaison_short_circuit(_Outcome(), scope)
+    out = _subject_liaison_short_circuit(_Outcome(), scope)
+    if out is None or inferred_term is None:
+        return out
+    # ONLY THE INFERRED ONES CARRY THE CAVEAT. "Who is the chemistry
+    # librarian?" is a named subject matched against the live directory and
+    # has nothing to hedge; attaching the same disclaimer to both would
+    # devalue the certain answers until nobody reads either.
+    from src.router.subject_inference import INFERRED_CAVEAT, LIAISONS_URL
+
+    body, cites = out
+    n = len(cites) + 1
+    return (
+        body + INFERRED_CAVEAT.format(n=n),
+        list(cites) + [{"n": n, "url": LIAISONS_URL,
+                        "snippet": "Miami University Libraries — subject "
+                                   "librarians by subject area"}],
+    )
 
 
 def _subject_liaison_short_circuit(

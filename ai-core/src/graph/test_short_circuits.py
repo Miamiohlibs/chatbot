@@ -4976,3 +4976,106 @@ def test_telling_us_the_page_was_the_wrong_campus_is_not_out_of_scope():
     for q in ("where is Hamilton library", "I don't see the book I need",
               "what are the hours at Hamilton"):
         assert N(q) is None, q
+
+
+# --- volunteering a subject librarian, 2026-08-20 operator decision ---------
+
+
+def test_the_term_list_is_data_and_only_holds_exclusive_words():
+    """The list is reviewable data, not code, so a librarian can strike a word
+    without a code change. This test guards the ONE rule that makes the whole
+    thing safe: no word that doubles as ordinary English.
+
+    'business', 'art', 'design', 'health', 'management' are subject names AND
+    everyday words -- that is the unsolved problem this walks around, and a
+    future addition must not walk back into it.
+    """
+    import json
+    from pathlib import Path
+    from src.router import subject_inference as SI
+
+    raw = json.loads(Path(SI._DATA).read_text(encoding="utf-8"))
+    banned = {"business", "art", "arts", "design", "health", "management",
+              "science", "music", "history", "law", "media", "film",
+              "psychology", "education", "english", "nursing"}
+    offenders = []
+    for entry in raw["subjects"] + [raw["special_collections"]]:
+        for t in entry["terms"]:
+            if t.strip().lower() in banned:
+                offenders.append((entry.get("subject", "special_collections"), t))
+    assert not offenders, f"bare everyday words in the list: {offenders}"
+    # Every subject must carry a status so a rejection can be recorded
+    # rather than the term silently deleted.
+    for entry in raw["subjects"]:
+        assert entry.get("status") in ("active", "rejected"), entry.get("subject")
+
+
+def test_a_subject_is_inferred_only_from_unmistakable_vocabulary():
+    from src.router.subject_inference import infer_subject
+
+    for q, want in (
+            ("Mozart Piano Sonata No. 13, K331 sheet music", "Music"),
+            ("I need sheet music for a sonata", "Music"),
+            ("I need the closing stock price of Proctor and Gamble", "Business"),
+            ("Who can help me with bloomberg terminals", "Business"),
+            ("I'm looking for a screenplay", "Media, Journalism, and Film"),
+            ("where do I find the Federal Register",
+             "Government Information and Law"),
+            ("looking for playscripts", "Theater")):
+        got = infer_subject(q)
+        assert got is not None and got[0] == want, (q, got)
+
+    # The everyday words that share a subject name must never fire.
+    for q in ("I need help with my business", "do you have design books",
+              "where can I find books about totalitarianism",
+              "can I bring my cat to the library", "what are the hours",
+              "I need help with a poster", "who is the art librarian"):
+        assert infer_subject(q) is None, q
+
+
+def test_an_inferred_referral_says_it_is_a_guess_and_a_named_one_does_not():
+    """The caveat is what makes an inferred referral honest -- and putting it
+    on the CERTAIN answers too would devalue it until nobody read either."""
+    import inspect
+    from src.graph import new_orchestrator as N
+
+    src = inspect.getsource(N._liaison_fallback_answer) \
+        if hasattr(N, "_liaison_fallback_answer") else ""
+    if not src:                                  # name may differ; scan the file
+        from pathlib import Path
+        src = (Path(N.__file__)).read_text(encoding="utf-8")
+    # The caveat is applied only where inferred_term is set.
+    assert "if out is None or inferred_term is None:" in src
+    assert "INFERRED_CAVEAT" in src
+
+    from src.router.subject_inference import INFERRED_CAVEAT, LIAISONS_URL
+    assert "may be off" in INFERRED_CAVEAT or "it may be" in INFERRED_CAVEAT
+    assert "organization/liaisons" in LIAISONS_URL
+
+
+def test_family_history_goes_to_special_collections_as_a_lead_not_a_fact():
+    """A real question, 2026-08-06: an alum asking after his father's cousin
+    was refused as outside the bot's scope. SCUA holds the Miami, Western
+    College and Oxford College archives and local history, so this is a
+    holdings-backed route -- but whether a particular family is IN those
+    records is not something the bot knows, and the answer says so."""
+    from src.graph.new_orchestrator import (
+        _special_collections_referral_answer as S,
+    )
+
+    for q in ("A visiting alum asked about his father's cousin, genealogy",
+              "how do I trace my ancestors",
+              "Sanborn fire maps Oxford Ohio",
+              "I'm looking for a first edition"):
+        res = S(q)
+        assert res is not None, q
+        body = res[0]
+        assert "Archives@MiamiOH.edu" in body, q
+        assert "not from knowing what is in the collection" in body, q
+
+    # Special Collections' own answers keep their questions.
+    for q in ("what are special collections hours",
+              "are there lockers in special collections",
+              "where is special collections",
+              "what can I bring into the reading room"):
+        assert S(q) is None, q

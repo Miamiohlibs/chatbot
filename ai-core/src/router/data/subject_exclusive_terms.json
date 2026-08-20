@@ -1,0 +1,80 @@
+{
+  "_readme": [
+    "Domain-EXCLUSIVE vocabulary: words that can only plausibly mean one subject",
+    "in a library context. Used ONLY to volunteer a subject librarian for a",
+    "question that never names a subject -- 'Mozart Piano Sonata K331 sheet",
+    "music' -> Music. The subject string must match the Libraries' own liaisons",
+    "page exactly; the PERSON is then looked up live, never hardcoded, so this",
+    "file cannot go stale when staff change.",
+    "",
+    "THE HARD LINE, and the whole reason this file is reviewable data and not",
+    "code: never add a word that doubles as ordinary English. 'business',",
+    "'art', 'design', 'health', 'management' are banned by construction --",
+    "that is the unsolved everyday-word problem, and this list exists to walk",
+    "around it rather than into it.",
+    "",
+    "status: 'active' | 'rejected'. Rejected terms are kept with a reason",
+    "rather than deleted, so the record of what a librarian turned down",
+    "survives the next person who wants to add it back.",
+    "Reviewer: Kevin Messner, sent 2026-08-20."
+  ],
+  "subjects": [
+    { "subject": "Music", "status": "active",
+      "terms": ["sheet music", "musical score", "vocal score", "piano score",
+                "full score", "orchestral parts", "sonata", "concerto",
+                "symphony", "oratorio", "libretto", "opus number", "kochel",
+                "köchel", "hymnal", "songbook", "discography", "fake book"] },
+
+    { "subject": "History", "status": "active",
+      "terms": ["primary source document", "archival record", "oral history",
+                "microfilm of a newspaper", "manuscript collection"] },
+
+    { "subject": "Government Information and Law", "status": "active",
+      "terms": ["statute", "case law", "u.s. code", "usc title", "cfr",
+                "code of federal regulations", "federal register",
+                "court opinion", "legislative history", "docket number",
+                "public records request"] },
+
+    { "subject": "Chemistry and Biochemistry", "status": "active",
+      "terms": ["cas number", "scifinder", "reaxys", "nmr spectrum",
+                "ir spectrum", "mass spectrum", "crystal structure",
+                "spectral data"] },
+
+    { "subject": "Business", "status": "active",
+      "terms": ["ticker symbol", "closing stock price", "share price",
+                "stock price", "10-k", "10-q", "sec filing", "annual report of",
+                "market share data", "swot analysis", "bloomberg terminal",
+                "ibisworld", "mintel", "compustat", "crsp"] },
+
+    { "subject": "Geology", "status": "active",
+      "terms": ["geologic map", "stratigraphy", "core sample", "well log"] },
+
+    { "subject": "Geography", "status": "active",
+      "terms": ["topographic map", "aerial photograph", "plat map"] },
+
+    { "subject": "Theater", "status": "active",
+      "terms": ["playscript", "promptbook", "stage directions",
+                "acting edition"] },
+
+    { "subject": "Media, Journalism, and Film", "status": "active",
+      "terms": ["screenplay", "filmography", "shooting script"] },
+
+    { "subject": "Classics, Latin, and Greek", "status": "active",
+      "terms": ["loeb classical", "papyrus", "epigraphy", "codex"] },
+
+    { "subject": "Mathematics", "status": "active",
+      "terms": ["mathscinet", "zentralblatt"] },
+
+    { "subject": "Psychology", "status": "active",
+      "terms": ["psycinfo", "dsm-5", "psychological test", "measurement scale"] }
+  ],
+  "special_collections": {
+    "_note": "Not a subject liaison: these route to Special Collections & University Archives, which actually HOLDS local, university and family history. A holdings-backed route, not an inference about a person.",
+    "status": "active",
+    "terms": ["genealogy", "genealogical", "ancestor", "ancestry",
+              "family tree", "census record", "birth record", "death record",
+              "marriage record", "obituary", "gravestone", "headstone",
+              "sanborn", "fire insurance map", "university archives record",
+              "rare book", "first edition", "incunabula"]
+  }
+}
