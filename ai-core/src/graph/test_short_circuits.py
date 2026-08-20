@@ -4526,3 +4526,72 @@ def test_adobe_answer_leaves_pdf_trouble_alone():
               "how do I convert a file to pdf",
               "my acrobat won't open this file"):
         assert A(q) is None, q
+
+
+def test_purchase_suggestion_uses_only_the_campus_that_has_a_form():
+    """Operator, 2026-08-19: Hamilton's form is Hamilton's. Do not hand it to
+    every campus, and where no form was found, say to contact a librarian.
+
+    Searched before writing the answer: the corpus mentions a purchase
+    suggestion on one page out of 244 (Hamilton's), and nothing turned up for
+    Oxford or Middletown -- homepage nav, /use/services/faculty/ (a redirect
+    shell), the faculty LibGuide's links, four guessed paths (404), LibAnswers.
+    """
+    from src.graph.new_orchestrator import _newspaper_answer
+    from src.scope.resolver import Scope
+
+    ask = ("Since Inside Higher Ed has started charging, will we also get an "
+           "online subscription for the university newspaper collection?")
+
+    def urls(scope, q=ask):
+        res = _newspaper_answer(q, scope)
+        assert res is not None, (q, scope)
+        return [c["url"] for c in res[1]]
+
+    ham = urls(Scope(campus="hamilton", library="rentschler", source="test"))
+    assert any("ham.miamioh.edu" in u and "suggest-a-purchase" in u
+               for u in ham), ham
+
+    # Every other campus, and no campus at all, gets a person -- never
+    # Hamilton's form.
+    for scope in (Scope(campus="oxford", library="king", source="default"),
+                  Scope(campus="middletown", library="gardner_harvey",
+                        source="test"),
+                  None):
+        got = urls(scope)
+        assert not any("suggest-a-purchase" in u for u in got), (scope, got)
+        assert any("research-support/ask" in u for u in got), (scope, got)
+
+    # Naming the campus in the message counts too, without a scope.
+    named = urls(Scope(campus="oxford", library="king", source="default"),
+                 "will Rentschler subscribe to the Chronicle newspaper?")
+    assert any("suggest-a-purchase" in u for u in named), named
+
+
+def test_an_acquisition_ask_does_not_answer_with_a_paper_we_already_have():
+    """The librarian's question named the Chronicle and the NYT as background
+    and asked about Inside Higher Ed. It got the New York Times guide."""
+    from src.graph.new_orchestrator import _newspaper_answer
+    from src.scope.resolver import Scope
+
+    oxford = Scope(campus="oxford", library="king", source="default")
+    body, cites = _newspaper_answer(
+        "I appreciate that Miami has a subscription to the Chronicle of "
+        "Higher Ed and the NYT. Since Inside Higher Ed has started charging, "
+        "will we also get an online subscription to that for the university?",
+        oxford)
+    assert "New York Times access" not in body, body
+    assert not any("nyt" in c["url"].lower() for c in cites), cites
+    # It must not promise the acquisition either way.
+    low = body.lower()
+    assert "collection decision" in low
+
+    # The ordinary ACCESS questions are untouched.
+    for q, expect in (("How do I access the New York Times?",
+                       "New York Times access"),
+                      ("do we have a wall street journal subscription as "
+                       "faculty", "Wall Street Journal access"),
+                      ("what newspapers does the library subscribe to",
+                       "Newspapers guide lists")):
+        res = _newspaper_answer(q, oxford)
+        assert res is not None and expect in res[0], q

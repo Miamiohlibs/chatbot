@@ -817,7 +817,7 @@ def _run_turn(
     # --- 2.13. Newspapers -> correct LibGuide page (content-security: guide,
     # don't answer; every URL verified). ---
     if not booking_flow:
-        _news = _newspaper_answer(request.user_message)
+        _news = _newspaper_answer(request.user_message, scope)
         if _news is not None:
             _ans, _cites = _news
             latency_ms = int((time.monotonic() - turn_start) * 1000)
@@ -3441,8 +3441,27 @@ _NEWS_RESEARCH_RE = re.compile(r"\barticles?\b.{0,30}\b(about|on|regarding)\b", 
 # a destination, per the operator's rule that this class of question is routed
 # rather than answered: the Newspapers guide for what Miami already provides,
 # and a librarian for the request itself.
+# Hamilton publishes a Suggest a Purchase form; Oxford and Middletown do not.
+#
+# Searched 2026-08-19 before writing this: the 244-page corpus mentions a
+# purchase suggestion on exactly one page (Hamilton's mission-and-policies),
+# and the Oxford side has nothing -- not on the homepage nav, not on
+# /use/services/faculty/ (a redirect shell to the faculty LibGuide), not in
+# that guide's links, not at four guessed paths (all 404), not in LibAnswers.
+# Middletown likewise. So Hamilton gets its form and the other two get a
+# person, per the operator's rule that an unfound page is not a page to
+# invent.
+#
+# Not faculty-only despite the URL: Hamilton's own policy page says "Faculty,
+# staff, and students can recommend titles to be added at any time."
+_HAM_PURCHASE_URL = (
+    "https://www.ham.miamioh.edu/library/services/for-faculty/"
+    "suggest-a-purchase/"
+)
+
 _NEWS_ACQUIRE_RE = re.compile(
-    r"\bwill\s+(we|you|miami|the\s+librar\w+|the\s+university)\b[^.?!]{0,40}"
+    r"\bwill\s+(we|you|miami|the\s+librar\w+|the\s+university|rentschler|"
+    r"gardner[- ]?harvey|king)\b[^.?!]{0,40}"
     r"\b(get|buy|purchase|subscribe|add|obtain)\b"
     r"|\b(can|could|would)\s+(we|you|miami|the\s+librar\w+)\b[^.?!]{0,40}"
     r"\b(get|buy|purchase|subscribe\s+to|add)\b[^.?!]{0,30}\bsubscription\b"
@@ -3452,7 +3471,9 @@ _NEWS_ACQUIRE_RE = re.compile(
 )
 
 
-def _newspaper_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
+def _newspaper_answer(
+    message: str, scope: "Optional[Scope]" = None,
+) -> "Optional[tuple[str, list[dict]]]":
     """Guide newspaper-access questions to the correct LibGuide page (never
     answer the access steps directly). Returns (answer, citations) or None."""
     m = message or ""
@@ -3465,16 +3486,38 @@ def _newspaper_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
     if _NEWS_ACQUIRE_RE.search(m) and (
             _NEWS_RE.search(m) or _NYT_RE.search(m)
             or _WSJ_RE.search(m) or _OHIO_PAPER_RE.search(m)):
-        return (
+        lead = (
             "Whether the Libraries take out a new subscription is a "
             "collection decision, and not one I can speak for -- I would be "
             "guessing either way.\n\n"
             "What I can tell you is where it stands today: the Libraries' "
             "Newspapers guide lists the papers Miami provides and how to read "
-            "them [1]. If the title you want is not on it, that request goes "
-            "to a librarian -- your subject librarian for the field, or Ask "
-            "Us [2] -- and they are the people who put it in front of whoever "
-            "decides.",
+            "them [1]."
+        )
+        # Hamilton is the only campus with a published form. Named in the
+        # message, or the session's campus, either counts.
+        ham = bool(re.search(r"\b(hamilton|rentschler)\b", m, re.IGNORECASE))
+        if not ham and scope is not None:
+            ham = (getattr(scope, "campus", None) == "hamilton")
+        if ham:
+            return (
+                f"{lead}\n\n"
+                "To ask for it, Rentschler has a **Suggest a Purchase** form "
+                "[2] -- author, title, format and why you want it. Subject "
+                "liaisons read those and make the selection decision. "
+                "Faculty, staff and students can all recommend titles.",
+                [{"n": 1, "url": _NEWS_GUIDE_URL,
+                  "snippet": "Miami Libraries — Newspapers guide"},
+                 {"n": 2, "url": _HAM_PURCHASE_URL,
+                  "snippet": "Rentschler Library (Hamilton) — Suggest a "
+                             "Purchase"}],
+            )
+        return (
+            f"{lead}\n\n"
+            "If the title you want is not on it, that request goes to a "
+            "librarian -- your subject librarian for the field, or Ask Us "
+            "[2]. I don't have a request form to point you at for this "
+            "campus, so a person is the honest route.",
             [{"n": 1, "url": _NEWS_GUIDE_URL,
               "snippet": "Miami Libraries — Newspapers guide"},
              {"n": 2, "url": _ASKUS_URL,
