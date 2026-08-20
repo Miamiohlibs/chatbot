@@ -323,8 +323,14 @@ def build_review_view_router(deps: dict) -> Any:
                 out.append(f"<span class='tag {cls}' title='synthesizer "
                            f"confidence'>{_e(m['confidence'])}</span>")
             if m.get("model_used"):
-                out.append(f"<span class='tag all' title='model that "
-                           f"answered'>{_e(m['model_used'])}</span>")
+                # "(none -- <path>_short_circuit)" means no LLM ran at all,
+                # so the tooltip must not call it the model that answered.
+                _mu = str(m["model_used"])
+                _title = ("answered deterministically -- no model call"
+                          if _mu.startswith("(none")
+                          else "model that answered")
+                out.append(f"<span class='tag all' title='{_title}'>"
+                           f"{_e(_mu)}</span>")
             return "".join(out)
 
         msgs = "".join(
