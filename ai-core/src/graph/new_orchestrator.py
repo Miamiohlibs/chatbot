@@ -466,6 +466,58 @@ def _run_turn(
         )
         bind_request_context(intent="hours", margin=classification.margin)
 
+    # --- 2.0265. An unmistakable subject rescued from out_of_scope ---
+    # The same trap as 2.025 and 2.026, and this one was mine. The subject
+    # inference added on 2026-08-20 was wired into the LIAISON FALLBACK, which
+    # runs after the agent -- and step 2.5 refuses an `out_of_scope` intent
+    # long before that. So "Mozart Piano Sonata No. 13, K331 sheet music", the
+    # exact question the feature was built for, was still being told it was
+    # outside the bot's scope. The inference matched perfectly; the turn never
+    # reached it.
+    #
+    # Safe for the same reason the other two are: only out_of_scope is
+    # overridden, and only on vocabulary that cannot mean anything else in a
+    # library (src/router/data/subject_exclusive_terms.json). If the lookup
+    # then finds no liaison, the turn continues exactly as it would have.
+    if classification.intent == "out_of_scope" and not booking_flow:
+        from src.router.subject_inference import infer_subject as _infer_subj
+
+        _guess = _infer_subj(request.user_message)
+        if _guess:
+            log.info("2.0265: rescued out_of_scope -> subject_librarian "
+                     "(%s, matched %r)", _guess[0], _guess[1])
+            bind_request_context(intent="subject_librarian",
+                                 margin=classification.margin)
+
+            # ANSWER HERE rather than forcing the intent onward. Forcing it
+            # let the AGENT make the lookup, which returns through the plain
+            # subject-liaison formatter -- and the caveat, the whole reason an
+            # inferred referral is allowed at all, lives on the fallback path.
+            # Measured: "Mozart ... K331 sheet music" came back "Your subject
+            # librarian is Barry Zaslow" with nothing saying it was a guess.
+            class _NoAgentYet:
+                turns = []
+
+            _inf = _liaison_lookup_when_agent_skipped(
+                request, deps, scope, _NoAgentYet(),
+                force_inferred_term=_guess[1])
+            if _inf is not None:
+                _ans, _cites = _inf
+                latency_ms = int((time.monotonic() - turn_start) * 1000)
+                record_request(endpoint="/chat", status="inferred_liaison",
+                               latency_s=latency_ms / 1000)
+                return TurnResponse(
+                    answer=_ans, is_refusal=False, refusal_trigger=None,
+                    citations=_cites, confidence="medium",
+                    intent="subject_librarian", scope=scope.as_filter(),
+                    model_used="(none -- inferred_liaison_short_circuit)",
+                    tokens={"input": 0, "cached_input": 0, "output": 0},
+                    fired_corrections=[],
+                    agent_stopped_reason="inferred_liaison_short_circuit",
+                    latency_ms=latency_ms, cited_chunk_ids=[],
+                )
+            # No liaison found -> leave the turn exactly as it was.
+
     # --- 2.027. "Book King 103 tomorrow 6pm" override ---
     # Naming the ROOM instead of saying the word "room" broke booking entirely.
     # Live simulation 2026-07-30:
@@ -4875,7 +4927,11 @@ _FIND_HELP_ASK_RE = re.compile(
     r"their\b|much\b|that\b|this\b|will\b|would\b|could\b|cant\b)"
     r"[a-z]{4,}\s+help\b"
     r"|\bwhere\s+(can|do|would)\s+i\s+(find|get|look|search)\b"
-    r"|\bhow\s+(can|do)\s+i\s+(find|get|access|reach)\b"
+    # "how do I GET TO McBride Hall" is directions to a building, not a
+    # request for material -- it was answered with Primo and the databases
+    # list on 2026-08-20, and it is a gold out_of_scope case.
+    r"|\bhow\s+(can|do)\s+i\s+(find|access|reach)\b"
+    r"|\bhow\s+(can|do)\s+i\s+get\b(?!\s+to\b)"
     r"|\blooking\s+for\b|\bneed\s+to\s+find\b|\btrying\s+to\s+find\b"
     r"|\bcan\s+you\s+(find|get|direct|point)\b"
     r"|\b(direct|point|guide)\s+me\b",
@@ -7009,7 +7065,7 @@ def _subject_for_liaison_fallback(message: str) -> "Optional[str]":
 
 def _liaison_lookup_when_agent_skipped(
     request: "TurnRequest", deps: "OrchestratorDeps", scope: "Scope",
-    agent_outcome: "AgentOutcome",
+    agent_outcome: "AgentOutcome", force_inferred_term: "Optional[str]" = None,
 ) -> "Optional[tuple[str, list[dict]]]":
     """Do the liaison lookup ourselves when the agent did not.
 
@@ -7046,7 +7102,13 @@ def _liaison_lookup_when_agent_skipped(
     # reviewable data (src/router/data/subject_exclusive_terms.json), not code,
     # and holds only words that cannot mean anything else -- never `business`,
     # `art`, `design`, which is the everyday-word problem this walks around.
-    inferred_term = None
+    # The 2.0265 rescue passes its matched term in: the referral is
+    # inference-driven whichever way the subject then resolved. "Mozart ...
+    # K331 SHEET MUSIC" happens to contain the alias `music`, so the ordinary
+    # lookup answered it and the caveat was silently skipped -- but the only
+    # reason the turn got past the out_of_scope refusal at all was the
+    # inference, and a patron deserves to know that.
+    inferred_term = force_inferred_term
     if not subject:
         from src.router.subject_inference import infer_subject
         guess = infer_subject(request.user_message)

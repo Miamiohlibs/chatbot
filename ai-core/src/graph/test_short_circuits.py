@@ -5137,3 +5137,51 @@ def test_an_events_question_naming_a_campus_gets_that_campus_page():
               "what are the hours at Middletown",
               "book a room at gardner-harvey"):
         assert E(q) is None, q
+
+
+def test_an_inferred_subject_is_rescued_from_out_of_scope_and_says_so():
+    """THE SAME TRAP, AND THIS ONE WAS MINE.
+
+    The subject inference shipped wired into the liaison fallback, which runs
+    AFTER the agent -- and step 2.5 refuses an out_of_scope intent long before
+    that. So "Mozart Piano Sonata No. 13, K331 sheet music", the exact
+    question the feature was built for, was still told it was outside the
+    bot's scope. Sixth instance of written-but-never-reached in this codebase.
+
+    Then the first fix forced the intent onward, the AGENT made the lookup,
+    and the answer came back through the plain formatter with no caveat at
+    all: "Your subject librarian is Barry Zaslow", no hint it was a guess.
+    The rescue answers directly now, and passes its matched term in so the
+    caveat holds even when `find_subject_by_alias` also resolves the subject
+    -- "sheet MUSIC" contains the alias, and the only reason the turn got
+    past the refusal was the inference.
+    """
+    import ast
+    from pathlib import Path
+    from src.graph import new_orchestrator as N
+
+    src = Path(N.__file__).read_text(encoding="utf-8")
+    # The rescue exists, runs on out_of_scope, and answers rather than
+    # forwarding.
+    assert "2.0265" in src
+    assert "inferred_liaison_short_circuit" in src
+    assert "force_inferred_term=_guess[1]" in src
+    # And it is dispatched -- derived, not asserted from memory.
+    called = {
+        n.func.id for n in ast.walk(ast.parse(src))
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+    }
+    assert "_liaison_lookup_when_agent_skipped" in called
+
+
+def test_directions_to_a_building_are_not_a_request_for_material():
+    """"how do I get to McBride Hall" was answered with Primo and the
+    databases list. It is a gold out_of_scope case."""
+    from src.graph.new_orchestrator import _finding_help_answer as F
+
+    for q in ("how do I get to McBride Hall", "how do i get to the rec center"):
+        assert F(q) is None, q
+    # "how do I get <a thing>" is untouched.
+    for q in ("how do i get research help",
+              "how can I find books about totalitarianism"):
+        assert F(q) is not None, q
