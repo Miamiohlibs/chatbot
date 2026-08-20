@@ -978,6 +978,12 @@ def _run_turn(
             # BEFORE restrooms and the rest: "there is a toilet running on the
             # second floor" is a REPORT, and restroom_answer was replying with
             # where the restrooms are (live traffic 2026-08-17).
+            # A person being disruptive is not a broken fixture; it has
+            # its own answer and must run before the policy pointer.
+            # "that page says nothing about Hamilton" -- a correction from
+            # the patron, not a new topic, and it was being refused.
+            ("not_there_campus", _not_there_campus_answer),
+            ("disturbance_report", _ff.disturbance_report_answer),
             ("facility_problem", _ff.facility_problem_answer),
             # "Who can help with my computer?" -- Kevin Messner's 1/5. It was
             # answered with a subject librarian's name and email because the
@@ -2129,8 +2135,11 @@ _REGIONAL_MENTION_RE = re.compile(
 # xcc_printing_all_campuses, which the first version turned from correct
 # to wrong).
 _SPANS_CAMPUSES_RE = re.compile(
-    r"\b(any|all|each|every|both|which)\s+(library|libraries|campus|campuses|"
-    r"location|locations)\b"
+    # "all OF THE libraries" -- the words in between are why "do all of the
+    # libraries have study rooms I can reserve?" was answered for King alone
+    # (2026-08-20 review).
+    r"\b(any|all|each|every|both|which)\s+(of\s+)?(the\s+)?"
+    r"(library|libraries|campus|campuses|location|locations)\b"
     r"|\b(all|every|each|both)\s+(three\s+)?campuses\b"
     r"|\bcompare\b|\bdifference between\b|\bvs\.?\b|\bversus\b",
     re.IGNORECASE,
@@ -2530,7 +2539,8 @@ _CONDUCT_STRONG_RE = re.compile(
 # phrasing.
 _CONDUCT_WEAK_RE = re.compile(
     r"\b(food|eat|eating|snacks?|drinks?|beverages?|coffee|water bottle|water|"
-    r"pets?|dogs?|animals?|snakes?|skateboards?|scooters?|bikes?|bicycles?|"
+    r"pets?|dogs?|cats?|birds?|rabbits?|hamsters?|ferrets?|reptiles?|"
+    r"animals?|snakes?|skateboards?|scooters?|bikes?|bicycles?|"
     r"rollerblad\w*|skat\w*|sell|selling|sales|vendors?|solicit\w*|"
     r"flyers?|fliers?|posters?|leaflets?|handbills?|handouts?|tabling|"
     r"noise|talking|loud|amplified|music|quiet|"
@@ -2742,6 +2752,12 @@ _MAKERSPACE_WORD = (
 
 _MAKERSPACE_RE = re.compile(r"\b" + _MAKERSPACE_WORD + r"\b", re.IGNORECASE)
 # A staff / contact / who-do-I-talk-to signal.
+# `phone`, `number`, `call` were missing from the staff signal above, so
+# "what is the phone number for the maker space" never reached this answer.
+_MS_REACH_RE = re.compile(
+    r"\b(phone|telephone|number|call|extension|address|located|location|where)\b",
+    re.IGNORECASE,
+)
 _MS_STAFF_RE = re.compile(
     r"\b(librarian|staff|contact|email|e-mail|reach|manager|specialist|"
     r"coordinator|technologist|run by|in charge|"
@@ -2771,21 +2787,35 @@ def _makerspace_staff_answer(message: str) -> "Optional[tuple[str, list[dict]]]"
         return None
     if _MS_NOT_STAFF_RE.search(m):
         return None
-    if not _MS_STAFF_RE.search(m):
+    if not (_MS_STAFF_RE.search(m) or _MS_REACH_RE.search(m)):
         return None
+    # THE GENERAL ROUTE FIRST, NOT A ROSTER OF FIVE.
+    #
+    # Two real questions, 2026-08-20. "what is the phone number for the maker
+    # space" got King's switchboard, 513-529-4141, because `phone`/`number`
+    # were not staff-contact signals at all. "how do i contact the makerspace"
+    # got all five staff by name and email -- and the operator supplied the
+    # general route independently: Room 303, create@miamioh.edu,
+    # (513) 529-2871. That is what a patron wants, and volunteering a
+    # five-person roster is the thing the staff-privacy rule exists to stop.
+    #
+    # Sarah Nagle stays named because she is the one person a patron is sent
+    # to by name on the Libraries' own page, for coursework and instruction.
     answer = (
-        "The MakerSpace librarian is Sarah Nagle, Creation & Innovation "
-        "Services Librarian (pricesb@miamioh.edu). The rest of the MakerSpace "
-        "team: Lori Chapin, Manager of Innovative Spaces (pheanila@miamioh.edu); "
-        "Lindsey Masters, Creative Technologist (masterlr@miamioh.edu); "
-        "John Williams, MakerSpace Technology Specialist (williajc@miamioh.edu); "
-        "and Nathan Hall, MakerSpace Specialist (hallnj3@miamioh.edu) [1]."
+        f"The MakerSpace is on the **third floor of King Library, Room 303**. "
+        f"General questions go to **{_MS_GENERAL_EMAIL}** or "
+        f"**{_MS_GENERAL_PHONE}** [1].\n\n"
+        f"For coursework -- using maker equipment in an assignment, or "
+        f"bringing a class in -- the person to ask for is **Sarah Nagle**, "
+        f"Creation & Innovation Services Librarian, on {_MS_NAGLE_PHONE} [2]."
         + _VERIFIED_PAGE_SOURCE
     )
-    return answer, [{
-        "n": 1, "url": _MAKERSPACE_STAFF_URL,
-        "snippet": "Miami University Libraries — MakerSpace: Our Staff",
-    }]
+    return answer, [
+        {"n": 1, "url": _MAKERSPACE_PAGE_URL,
+         "snippet": "Miami University Libraries — MakerSpace"},
+        {"n": 2, "url": _MAKERSPACE_STAFF_URL,
+         "snippet": "Miami University Libraries — MakerSpace: Our Staff"},
+    ]
 
 
 # Scholarly communication / open access. Carla Myers is the Coordinator of
@@ -3452,7 +3482,14 @@ _NEWS_NYT_URL = "https://libguides.lib.miamioh.edu/newspapers/nyt"
 _NEWS_OHIO_URL = "https://libguides.lib.miamioh.edu/newspapers/ohio"
 _NEWS_ARCHIVES_URL = "https://libguides.lib.miamioh.edu/newspapers/Archives"
 _NYT_RE = re.compile(r"\b(new york times|n\.?y\.?t\.?|ny times)\b", re.IGNORECASE)
-_WSJ_RE = re.compile(r"\b(wall street journal|w\.?s\.?j\.?)\b", re.IGNORECASE)
+# "Wall street jornal" -- a real question on 2026-08-19 that got a
+# could-not-verify refusal while "WSJ" three words later worked. A patron
+# who misspells the masthead is still asking for the masthead.
+_WSJ_RE = re.compile(
+    r"\bwall\s*st(reet)?\.?\s*(journal|jornal|journel|jounal|journl)\b"
+    r"|\bw\.?s\.?j\.?\b",
+    re.IGNORECASE,
+)
 _OHIO_PAPER_RE = re.compile(
     r"\b(cincinnati enquirer|enquirer|dayton daily|columbus dispatch|"
     r"plain dealer|akron beacon|toledo blade|ohio newspaper|"
@@ -3600,6 +3637,60 @@ def _purchase_suggestion_answer(
           "snippet": "Miami University Libraries — Ask Us"}],
     )
 
+
+
+# "I DON'T SEE ANYTHING THERE ABOUT HAMILTON."
+#
+# A real follow-up, 2026-08-06, after the bot handed over an Oxford page for a
+# Hamilton question. It was refused as outside the bot's scope -- the worst
+# possible reply, because the patron had just told us the answer we gave was
+# wrong for their campus and we responded by disowning the topic.
+#
+# Bounded deliberately: it needs BOTH a not-there complaint AND a named
+# campus, so it cannot swallow ordinary questions. It does not try to work out
+# what the patron was originally asking; it hands them the campus's own site,
+# which is the thing the previous answer failed to do, and invites the
+# specific question.
+_NOT_THERE_RE = re.compile(
+    r"\b(don'?t|do\s+not|didn'?t|can'?t|cannot|couldn'?t)\s+see\b"
+    r"|\bnothing\s+(about|on|for|there)\b"
+    r"|\bno\s+(mention|info|information)\b"
+    r"|\bisn'?t\s+(there|anything|listed)\b"
+    r"|\bnot\s+(there|listed|mentioned)\b"
+    r"|\bdoesn'?t\s+(say|mention|cover|have)\b",
+    re.IGNORECASE,
+)
+_NOT_THERE_CAMPUS = (
+    ("hamilton", r"\b(hamilton|rentschler)\b",
+     "https://www.ham.miamioh.edu/library/",
+     "Rentschler Library (Hamilton)"),
+    ("middletown", r"\b(middletown|gardner[- ]?harvey)\b",
+     "https://www.mid.miamioh.edu/library/",
+     "Gardner-Harvey Library (Middletown)"),
+)
+
+
+def _not_there_campus_answer(
+    message: str,
+) -> "Optional[tuple[str, list[dict]]]":
+    """"That page says nothing about Hamilton" -> give Hamilton's own site."""
+    m = message or ""
+    if not _NOT_THERE_RE.search(m):
+        return None
+    if len(m.split()) > 25:
+        return None      # a long message is a new question, not a nudge
+    for _campus, pat, url, name in _NOT_THERE_CAMPUS:
+        if re.search(pat, m, re.IGNORECASE):
+            return (
+                f"You're right, and sorry -- the page I gave you is Oxford's. "
+                f"{name} runs its own site, and that is where its hours, "
+                f"services, borrowing and staff actually live [1].\n\n"
+                f"Tell me what you were after -- textbooks, hours, a room, "
+                f"who to contact -- and I'll give you the {name} answer "
+                f"specifically rather than the Oxford one.",
+                [{"n": 1, "url": url, "snippet": f"{name} — library site"}],
+            )
+    return None
 
 
 def _newspaper_answer(
@@ -3855,6 +3946,33 @@ def _room_reservation_answer(message: str) -> "Optional[tuple[str, list[dict]]]"
     # marked BOT-OK; gold: 'never substitute King rooms'). A follow-up
     # 'book it for me, tomorrow 2pm, <email>' has no room-noun, so it
     # falls past this regex to the agent's book_room flow.
+    # ALL THREE CAMPUSES, when the question asks about all three.
+    #
+    # "do all of the libraries have study rooms I can reserve?" was answered
+    # for King alone (2026-08-20 review). A question that spans campuses is
+    # not a question with an assumed campus, and answering it from the default
+    # suppresses the two the patron actually asked about.
+    if _SPANS_CAMPUSES_RE.search(m):
+        return (
+            "Yes -- all three campuses take room reservations, each through "
+            "its own page:\n\n"
+            "- **Oxford** -- King and Art & Architecture (and Armstrong "
+            "Student Center) on the Libraries' reservation system [1].\n"
+            "- **Hamilton** -- Rentschler's own booking page [2].\n"
+            "- **Middletown** -- Gardner-Harvey's own booking page [3].\n\n"
+            "Pick the room, date and time on the page for the campus you want. "
+            "I can complete a booking in chat for King; for the other two the "
+            "page is the way.",
+            cite([
+                (_ROOMS_KING_RESERVE_URL,
+                 "LibCal — Miami University Libraries room reservations"),
+                (_ROOMS_HAMILTON_RESERVE_URL,
+                 "LibCal — Rentschler Library (Hamilton) rooms"),
+                (_ROOMS_MIDDLETOWN_RESERVE_URL,
+                 "LibCal — Gardner-Harvey Library (Middletown) rooms"),
+            ]),
+        )
+
     # Before the campus branches: Armstrong is on the Oxford campus, so
     # nothing below would catch it and it would land on the King default.
     if _ROOM_ARMSTRONG_RE.search(m):
@@ -5742,6 +5860,17 @@ def _course_book_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
         return None
     hit = _COURSE_CODE_RE.search(m)
     if not hit:
+        return None
+    # "BOOK ME ROOM GRD 120" IS NOT A COURSE.
+    #
+    # Real question, 2026-08-06: "Book me room GRD 120 today from 1pm to 2pm"
+    # was answered with course reserves for "GRD 120". `book` is a VERB here
+    # and the room number has the same shape as a course code. Nothing else
+    # in the message looks like a textbook, so the booking words decide it.
+    if re.search(r"\b(book|reserve|reservation|schedule)\b[^.?!]{0,20}"
+                 r"\b(room|space|study\s+room)\b"
+                 r"|\broom\s+[A-Z]{2,4}\s*\d{2,3}\b"
+                 r"|\bbook\s+me\b", m, re.IGNORECASE):
         return None
     # Instructors placing materials keep their own answer below.
     if _RESERVES_SUBMIT_RE.search(m):

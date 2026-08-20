@@ -258,6 +258,17 @@ def computer_help_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
     m = message or ""
     if _NOT_IT_HELP_RE.search(m):
         return None
+    # A BORROWING QUESTION WITH A BROKEN DEVICE IN FRONT OF IT IS STILL A
+    # BORROWING QUESTION.
+    #
+    # Real question, 2026-08-06: "My laptop is broken. how long can I check
+    # one out" was answered entirely about where to take a broken computer,
+    # and never gave the laptop loan period -- which is the half the patron
+    # asked. The broken device is the REASON, not the request.
+    if re.search(r"\bhow\s+long\b|\bloan\s*period\b|\bcheck(ing)?\s*(one|"
+                 r"a\s+\w+)?\s*out\b|\bcheckout\b|\bborrow\b|\brent\b",
+                 m, re.IGNORECASE):
+        return None
     asks_for_help = (
         (_IT_NOUN_RE.search(m) and _IT_TROUBLE_RE.search(m))
         or _IT_LOGIN_TROUBLE_RE.search(m)
@@ -332,6 +343,47 @@ def facility_problem_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
         "the same day.\n\n"
         f"If it's easier to write it down, Ask Us reaches a librarian who can "
         f"pass it on [1] -- mention the building and floor.",
+        [_cite(1, ASK_US_URL, "Miami University Libraries — Ask Us")],
+    )
+
+
+# A PERSON BEING DISRUPTIVE IS NOT A BROKEN FIXTURE.
+#
+# "Someone is too loud in the library" -- a real report, 2026-08-17. It has no
+# problem word and no fixture noun, so facility_problem_answer never sees it,
+# and the agent has answered it three different ways across three runs: the
+# conduct policy, "you can reserve a study room", and -- on 2026-08-20 --
+# "report the disturbance to the Games Committee", lifted from a game-night
+# event page. None of those is what a patron in that moment needs.
+#
+# It is a REPORT, not a policy question. "Can I talk in the library?" keeps
+# going to the policy doc; _ASKING_NOT_REPORTING_RE separates the two.
+_DISTURBANCE_RE = re.compile(
+    r"\b(too\s+loud|so\s+loud|being\s+loud|really\s+loud|very\s+loud|"
+    r"noisy|making\s+(a\s+lot\s+of\s+)?noise|shouting|yelling|screaming|"
+    r"blasting|talking\s+loudly|on\s+speakerphone|playing\s+music\s+out\s+loud|"
+    r"disruptive|disturbing\s+(me|others|people)|bothering\s+(me|others)|"
+    r"harass\w*|won'?t\s+be\s+quiet)\b",
+    re.IGNORECASE,
+)
+
+
+def disturbance_report_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
+    """Someone is reporting a person, not a fixture. Point at staff."""
+    m = message or ""
+    if not _DISTURBANCE_RE.search(m):
+        return None
+    if _ASKING_NOT_REPORTING_RE.search(m.strip()):
+        return None      # "is the library noisy?" is a question, not a report
+    return (
+        "Sorry -- that is worth telling staff about, and they would rather "
+        "hear it than not.\n\n"
+        f"The quickest route is the service desk: **{KING_PHONE}**, or speak "
+        "to whoever is at the desk on your floor. Staff can go and deal with "
+        "it; I can't.\n\n"
+        "If you would rather move than wait, study rooms are bookable and the "
+        "quiet floors are quieter -- but do tell the desk either way, because "
+        "they cannot act on what they have not heard [1].",
         [_cite(1, ASK_US_URL, "Miami University Libraries — Ask Us")],
     )
 

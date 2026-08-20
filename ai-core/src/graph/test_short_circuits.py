@@ -143,7 +143,12 @@ def test_makerspace_staff_names_sarah_nagle():
         res = _makerspace_staff_answer(q)
         assert res is not None, q
         assert "sarah nagle" in res[0].lower(), q
-        assert "about-makerspace/staff" in res[1][0]["url"], q
+        # The staff page is cited, but no longer as [1]: the general route
+        # (Room 303, create@miamioh.edu, (513) 529-2871) leads now, because
+        # that is what a patron asking how to reach the MakerSpace wants, and
+        # a five-person roster is what the staff-privacy rule exists to stop.
+        assert any("about-makerspace/staff" in c["url"] for c in res[1]), q
+        assert "create@miamioh.edu" in res[0], q
 
 
 def test_makerspace_staff_does_not_hijack_usage():
@@ -4835,3 +4840,139 @@ def test_offering_to_book_in_chat_arms_the_booking_flow():
         {"role": "user", "content": "where is king"},
         {"role": "assistant", "content": "King Library is at 151 S. Campus Ave."},
     ])
+
+
+# --- the eight concrete failures from the 2026-08-20 review -----------------
+
+
+def test_a_cat_is_a_pet_like_any_other():
+    """"can I bring my cat to the library" was refused while the identical
+    question about a dog got the conduct policy. The weak-term list had pets,
+    dogs, animals and snakes, and no cat."""
+    from src.graph.new_orchestrator import _facilities_policy_answer as F
+
+    for q in ("can I bring my cat to the library",
+              "can I bring my dog to the library",
+              "am I allowed to bring my rabbit in"):
+        assert F(q) is not None, q
+    # A book ABOUT cats is not a conduct question.
+    assert F("do you have books about cats") is None
+
+
+def test_a_room_number_is_not_a_course_code():
+    """"Book me room GRD 120 today from 1pm to 2pm" was answered with course
+    reserves for "GRD 120". `book` is a verb there, and a room number has the
+    same shape as a course code."""
+    from src.graph.new_orchestrator import _course_book_answer as C
+
+    for q in ("Book me room GRD 120 today from 1pm to 2pm",
+              "can you book me room 120 at gardner-harvey on tuesday",
+              "I want to reserve room KNG 103 tomorrow"):
+        assert C(q) is None, q
+    for q in ("do you have the book for CHM141?",
+              "Do you have the book for BIO116?",
+              "I need a textbook for BUS 102"):
+        assert C(q) is not None, q
+
+
+def test_a_misspelled_masthead_is_still_the_masthead():
+    """"can I get Wall street jornal" got a could-not-verify refusal; "WSJ"
+    three messages later worked."""
+    from src.graph.new_orchestrator import _newspaper_answer as N
+    from src.scope.resolver import Scope
+
+    ox = Scope(campus="oxford", library="king", source="default")
+    for q in ("can I get Wall street jornal", "can I get Wall Street Journal",
+              "can I get WSJ", "wall st journal access",
+              "do you have the wallstreet journal"):
+        assert N(q, ox) is not None, q
+
+
+def test_makerspace_contact_is_the_general_route_not_a_roster():
+    """Two failures at once: "what is the phone number for the maker space"
+    got King's switchboard because phone/number were not contact signals, and
+    "how do i contact the makerspace" answered with five staff by name and
+    email. The operator supplied the general route independently."""
+    from src.graph.new_orchestrator import _makerspace_staff_answer as M
+
+    for q in ("what is the phone number for the maker space",
+              "how do i contact the makerspace",
+              "who is the makerspace librarian"):
+        res = M(q)
+        assert res is not None, q
+        body = res[0]
+        assert "create@miamioh.edu" in body, q
+        assert "(513) 529-2871" in body, q
+        assert "303" in body, q
+        # One named person, not the whole team.
+        assert "Lori Chapin" not in body and "Nathan Hall" not in body, q
+
+
+def test_all_three_campuses_answer_an_all_campus_room_question():
+    """"do all of the libraries have study rooms I can reserve?" was answered
+    for King alone -- _SPANS_CAMPUSES_RE did not allow "all OF THE libraries"."""
+    from src.graph.new_orchestrator import _room_reservation_answer as R
+
+    res = R("do all of the libraries have study rooms I can reserve?")
+    assert res is not None
+    body, cites = res
+    low = body.lower()
+    assert "oxford" in low and "hamilton" in low and "middletown" in low
+    urls = " ".join(c["url"] for c in cites)
+    assert "hamilton" in urls and "middletown" in urls
+    # A single-campus question keeps its own answer.
+    assert "Middletown" in R("How do I reserve a study room in middletown?")[0]
+
+
+def test_a_broken_laptop_does_not_swallow_the_loan_period_question():
+    """"My laptop is broken. how long can I check one out" was answered
+    entirely about where to take a broken computer. The broken device is the
+    reason, not the request."""
+    from src.graph.facility_facts import computer_help_answer as C
+
+    for q in ("My laptop is broken. how long can I check one out",
+              "my laptop broke can I borrow one",
+              "my computer died, how long can I rent a laptop"):
+        assert C(q) is None, q
+    for q in ("my laptop is broken", "who can help with my computer?",
+              "I can't log in to the library computer"):
+        assert C(q) is not None, q
+
+
+def test_a_disruptive_person_is_not_a_broken_fixture():
+    """"Someone is too loud in the library" has no problem word and no fixture
+    noun, so facility_problem_answer never saw it. Across three runs the agent
+    answered it with the conduct policy, with "reserve a study room", and with
+    "report it to the Games Committee" off an event page."""
+    from src.graph.facility_facts import disturbance_report_answer as D
+
+    for q in ("Someone is too loud in the library",
+              "people are being really loud on the second floor",
+              "there is someone shouting in the study area",
+              "someone is on speakerphone next to me"):
+        res = D(q)
+        assert res is not None, q
+        assert "529-4141" in res[0], q
+    # Questions about noise are policy questions, not reports.
+    for q in ("is the library noisy?", "can I talk in the library",
+              "where is a quiet place to study", "what is the noise policy"):
+        assert D(q) is None, q
+
+
+def test_telling_us_the_page_was_the_wrong_campus_is_not_out_of_scope():
+    """"I don't see anything there about Hamilton." was refused as outside the
+    bot's scope -- the patron had just told us our answer was wrong for their
+    campus and we disowned the topic."""
+    from src.graph.new_orchestrator import _not_there_campus_answer as N
+
+    for q in ("I don't see anything there about Hamilton.",
+              "that page doesn't mention Middletown",
+              "there's nothing about Rentschler on that page"):
+        res = N(q)
+        assert res is not None, q
+        assert any(d in res[1][0]["url"]
+                   for d in ("ham.miamioh.edu", "mid.miamioh.edu")), q
+    # Needs BOTH halves, so ordinary questions are untouched.
+    for q in ("where is Hamilton library", "I don't see the book I need",
+              "what are the hours at Hamilton"):
+        assert N(q) is None, q
