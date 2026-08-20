@@ -20,17 +20,55 @@ def _aug(day: int = 15) -> _dt.date:
 # --- the two purses ------------------------------------------------------
 
 
-def test_the_split_is_75_25():
-    assert B.MONTHLY_SERVING_USD == 75.00
-    assert B.MONTHLY_EVAL_USD == 25.00
-    assert B.MONTHLY_TOTAL_USD == 100.00
+# THESE ASSERTED THE IMPORT-TIME CONSTANTS AND SO DEPENDED ON COLLECTION
+# ORDER. `src/main.py` calls load_dotenv(override=True) at import; anything
+# that imports it earlier in a run brings BUDGET_LAUNCH_AT and
+# BUDGET_POSTLAUNCH_SERVING_USD into the process, the flip resolves to the
+# post-launch split, and these failed -- while the same file passed alone.
+#
+# Found 2026-08-20, and the split flipped on 2026-08-13, so the five tests had
+# been passing on import-order luck for a week. They test the FUNCTION at a
+# stated moment now, which is what split_for() was built for, and the
+# post-launch side is asserted rather than left to chance.
+_PRE = _dt.datetime(2026, 8, 1)          # before BUDGET_LAUNCH_AT
+_POST = _dt.datetime(2026, 8, 20)        # after it
+
+
+def test_the_prelaunch_split_is_75_25():
+    serving, evl = B._PRELAUNCH_SERVING_USD, B._PRELAUNCH_EVAL_USD
+    assert (serving, evl) == (75.00, 25.00)
+    assert serving + evl == 100.00
+
+
+def test_the_flip_takes_effect_at_launch_and_not_before():
+    """Only exercised when a launch moment is configured; with none set the
+    split never changes, which is the documented default."""
+    if B.LAUNCH_AT is None:
+        assert B.split_for(_PRE) == B.split_for(_POST)
+        return
+    before = B.split_for(_PRE if _PRE < B.LAUNCH_AT else B.LAUNCH_AT
+                         - _dt.timedelta(days=1))
+    after = B.split_for(B.LAUNCH_AT + _dt.timedelta(seconds=1))
+    assert before == (B._PRELAUNCH_SERVING_USD, B._PRELAUNCH_EVAL_USD)
+    # An unset post-launch figure leaves that purse alone, by design.
+    assert after[0] == (B._PRELAUNCH_SERVING_USD
+                        if B._POSTLAUNCH_SERVING_USD is None
+                        else B._POSTLAUNCH_SERVING_USD)
+    assert after[1] == (B._PRELAUNCH_EVAL_USD
+                        if B._POSTLAUNCH_EVAL_USD is None
+                        else B._POSTLAUNCH_EVAL_USD)
 
 
 def test_daily_line_divides_the_student_purse_by_the_real_month_length():
-    """Not a hardcoded 30: a $2.50 line in February would overspend the purse."""
-    assert B.daily_serving_line(_dt.date(2026, 8, 1)) == 75.0 / 31
-    assert B.daily_serving_line(_dt.date(2026, 2, 1)) == 75.0 / 28
-    assert B.daily_serving_line(_dt.date(2026, 4, 1)) == 75.0 / 30
+    """Not a hardcoded 30: a $2.50 line in February would overspend the purse.
+
+    Ratios, not absolutes, so the month arithmetic is what is under test and
+    not whichever side of launch the process happens to have loaded.
+    """
+    purse = B.MONTHLY_SERVING_USD
+    assert B.daily_serving_line(_dt.date(2026, 8, 1)) == purse / 31
+    assert B.daily_serving_line(_dt.date(2026, 2, 1)) == purse / 28
+    assert B.daily_serving_line(_dt.date(2026, 4, 1)) == purse / 30
 
 
 # --- the ladder ----------------------------------------------------------
