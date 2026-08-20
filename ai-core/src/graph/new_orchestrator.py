@@ -2258,15 +2258,38 @@ _ADMIN_ROLE_RE = re.compile(
 # standalone "hi" has no library signal so the kNN classifier sends it to
 # out_of_scope; greet deterministically instead and point at what the bot
 # can do.
+# A GREETING WITH A PLEASANTRY ATTACHED IS STILL A GREETING.
+#
+# This pattern is anchored ^...$, so it only ever matched a message that was
+# NOTHING but the greeting word. Six real turns on 2026-08-20 were told they
+# were outside the bot's scope:
+#
+#   "hi how are you"   "how are you today"   "how are you doing"
+#   "how ry today"     "how ry tody"         "hi how are you doing"
+#
+# The anchor is worth keeping -- it is what stops "how do I find a book" and
+# "how long can I keep a book" landing here -- so the tail is spelled out
+# instead of loosened. `how <verb>` where the verb is are/r/ry/is is a
+# pleasantry; `how do`, `how long`, `how many` are questions and still fall
+# through.
+_PLEASANTRY = (
+    r"how\s*(?:are|r|ry|is)\s*(?:you|u|ya|it)?\s*"
+    r"(?:doing|today|tody|going|goin)?"
+    r"|how'?s\s+it\s+going|what'?s\s+up"
+)
 _GREETING_RE = re.compile(
     # "good night" and "goodnight" sign OFF rather than open, but a student
     # typing one still deserves the friendly close instead of "that is
     # outside my scope" (live queue 2026-08-11).
-    r"^\s*(hi+|hey+|hello+|heya|yo|howdy|greetings|good\s+(morning|afternoon|"
-    r"evening|day|night)|goodnight|nite|sup|hiya|hello\s+there|"
-    r"hey\s+there)\s*[!.,?]*\s*$",
+    r"^\s*(?:hi+|hey+|hello+|heya|yo|howdy|greetings|good\s+(?:morning|"
+    r"afternoon|evening|day|night)|goodnight|nite|sup|hiya|hello\s+there|"
+    r"hey\s+there)\s*[!.,?]*\s*"
+    r"(?:(?:" + _PLEASANTRY + r")\s*[!.,?]*\s*)?$"
+    # The pleasantry on its own, with no greeting word in front of it.
+    r"|^\s*(?:" + _PLEASANTRY + r")\s*[!.,?]*\s*$",
     re.IGNORECASE,
 )
+
 _GREETING_TEXT = (
     "Hi! I'm the Miami University Libraries assistant. I can help with "
     "things like library hours, finding the subject librarian for a course "
@@ -4566,19 +4589,50 @@ _PEER_REVIEW_FIND_RE = re.compile(
 # Primo for books and articles, the A-Z list for a named database, and the
 # subject librarian when they are not sure. That is honest about the
 # uncertainty and still actionable, which a refusal was not.
+# "HELP" ON ITS OWN IS NOT A REQUEST TO FIND MATERIAL.
+#
+# 2026-08-20, scoring 206 real questions against fresh gold: this one answer
+# took 27 of them and got 11 wrong. Two holes did most of it.
+#
+#   the bare word `help` -- "who can help me with bloomberg terminals",
+#   "I need help with a DMP for a grant", "who should I contact for help at
+#   the Gardner-Harvey library". None of those wants Primo.
+#
+#   `book ... for` inside 20 characters -- "How long can I check a BOOK OUT
+#   FOR?" read as a topic search and came back with the catalogue instead of
+#   the loan period. Same shape as the hold-shelf misfire found on 2026-08-18;
+#   the connector has to be ADJACENT to the noun to mean "books ABOUT a
+#   topic".
+#
+# `help` now needs a finding word or a material word beside it, and the topic
+# connector must follow its noun directly. Simulated over all 206 first: 11
+# BAD freed, 2 WEAK freed, 9 GOOD kept, 0 newly taken.
 _FIND_HELP_TOPIC_RE = re.compile(
     r"\b(books?|ebooks?|materials?|resources?|sources?|articles?|journals?|"
-    r"literature|readings?|studies|research)\b[^.?!]{0,20}\b(on|about|for|"
-    r"regarding|covering|related\s+to)\b",
+    r"literature|readings?|studies|research)\b\s+"
+    r"\b(on|about|regarding|covering|related\s+to)\b",
     re.IGNORECASE,
 )
 _FIND_HELP_ASK_RE = re.compile(
-    r"\b(assistance|help|helping|direct\s+me|point\s+me|guide\s+me|"
-    r"where\s+(can|do|would)\s+i\s+(find|get|look|search)|"
-    r"how\s+(can|do)\s+i\s+(find|get|access|reach)|looking\s+for|"
-    r"need\s+to\s+find|trying\s+to\s+find|can\s+you\s+(find|get|direct|point))\b",
+    r"\b(assistance|help|helping)\b[^.?!]{0,25}\b(find|finding|locate|locating|"
+    r"search|searching|access|accessing|read|reading|books?|articles?|sources?|"
+    r"materials?|journals?|research|literature|readings?)\b"
+    # "<thing> help" -- "Zotero help", "citation help". A content word right
+    # in front of `help` names what the help is ABOUT. The excluded words are
+    # the ones that leave `help` meaning nothing on its own: "I NEED help
+    # with a DMP", "contact FOR help at Gardner-Harvey".
+    r"|\b(?!for\b|with\b|me\b|us\b|need\b|needs\b|needed\b|want\b|"
+    r"wants\b|wanted\b|get\b|gets\b|some\b|more\b|any\b|your\b|"
+    r"their\b|much\b|that\b|this\b|will\b|would\b|could\b|cant\b)"
+    r"[a-z]{4,}\s+help\b"
+    r"|\bwhere\s+(can|do|would)\s+i\s+(find|get|look|search)\b"
+    r"|\bhow\s+(can|do)\s+i\s+(find|get|access|reach)\b"
+    r"|\blooking\s+for\b|\bneed\s+to\s+find\b|\btrying\s+to\s+find\b"
+    r"|\bcan\s+you\s+(find|get|direct|point)\b"
+    r"|\b(direct|point|guide)\s+me\b",
     re.IGNORECASE,
 )
+
 # These have their own, better answers -- do not take their questions.
 _FIND_HELP_EXCLUDE_RE = re.compile(
     # PLURALS MATTER, and five were missing. Found via a thumbs-down from a
@@ -4595,6 +4649,16 @@ _FIND_HELP_EXCLUDE_RE = re.compile(
     # A course code means the course-reserves answer, which runs earlier in
     # the chain anyway -- belt and braces in case the order is ever changed.
     r"|\b[A-Z]{3,4}\s*-?\s*\d{3}\b"
+    # CATEGORIES WITH A BETTER ANSWER OF THEIR OWN. Each of these was taken by
+    # the menu on 2026-08-20 and each has a path that answers it properly:
+    # an events calendar, the employment page, the website-feedback handoff,
+    # the off-campus/proxy answer, and the regional campuses' own pages.
+    r"|\bevents?\b|\bnews\b|\bcalendar\b"
+    r"|\bjobs?\b|\bemployment\b|\bhiring\b|\bopenings?\b|\bposition\b"
+    r"|\b404\b|not\s+found|\bbroken\b|\berror\b|blank\s+screen"
+    r"|(isn'?t|not|stopped)\s+working|keeps?\s+saying"
+    r"|\bvpn\b|off[-\s]campus|\bproxy\b|ezproxy"
+    r"|\bhamilton\b|\brentschler\b|\bmiddletown\b|gardner[-\s]?harvey"
     # NAMING A SPECIFIC THING IS NOT "HELP ME FIND MATERIAL ON A TOPIC".
     #
     # The 2026-08-18 run showed this answer taking 26 gold cases and getting
@@ -7565,6 +7629,23 @@ _OTHER_DAY_RE = re.compile(
 )
 
 
+# AN EXPLICIT CALENDAR DATE IS NOT TODAY.
+#
+# Introduced with _today_hours_answer on 2026-08-18 and caught by the 206-
+# question review on 2026-08-20: "what are the hours for the middletown
+# library on September 12?" resolved the right LIBRARY and then answered with
+# TODAY's hours, never saying that the date was out of reach. _OTHER_DAY_RE
+# holds weekday names and _NOT_SIMPLE_DAY_RE holds terms and holidays; nothing
+# held a date.
+_EXPLICIT_DATE_RE = re.compile(
+    r"\b(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+\d{1,2}\b"
+    r"|\b\d{1,2}\s*/\s*\d{1,2}\b"
+    r"|\b\d{1,2}(st|nd|rd|th)\b"
+    r"|\b\d{4}-\d{1,2}-\d{1,2}\b",
+    re.IGNORECASE,
+)
+
+
 def _close_today_matches(message: str) -> bool:
     """Is this "when do you close?", about us, and about today?
 
@@ -7588,6 +7669,9 @@ def _close_today_matches(message: str) -> bool:
     if not _CLOSE_TODAY_RE.search(m):
         return False
     if _OTHER_DAY_RE.search(m):
+        return False
+    # A named date belongs to the dated path, not to today.
+    if _EXPLICIT_DATE_RE.search(m):
         return False
     # Guards the literal-"today" requirement was accidentally providing.
     # Without them this would answer "what time does the dining hall close" (a
@@ -7784,6 +7868,9 @@ def _today_hours_matches(message: str) -> bool:
         return False
     # A named day, a holiday, a whole term, or something that is not ours.
     if _OTHER_DAY_RE.search(m) or _NOT_SIMPLE_DAY_RE.search(m):
+        return False
+    # A named date belongs to the dated path, not to today.
+    if _EXPLICIT_DATE_RE.search(m):
         return False
     if _NON_LIBRARY_THING_RE.search(m):
         return False
@@ -8411,6 +8498,15 @@ _BOOKING_FLOW_MARKERS = (
     # v1 LibCalComprehensiveReservationTool missing-slot text:
     "To complete your room reservation",
     "I still need",
+    # THE INVITATION COUNTS AS OPENING THE FLOW.
+    #
+    # 2026-08-20, a real two-turn session: "can i reserve a study room" was
+    # answered with the LibCal page PLUS "Or I can book one for you right here
+    # in chat. Give me ..." -- and the next turn, "Thursday 8/13 at 1pm", was
+    # refused as outside the bot's scope. The invitation carried none of the
+    # markers above, so the flow was offered and never armed. "book a room for
+    # me" worked throughout, because that path emits "I still need".
+    "book one for you right here in chat",
 )
 """Byte-stable substrings of OUR booking-flow texts (delivered verbatim
 by the 4.5 short-circuit). If a recent assistant message contains one,

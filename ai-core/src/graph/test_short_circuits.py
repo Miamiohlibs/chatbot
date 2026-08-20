@@ -4715,3 +4715,123 @@ def test_a_deterministic_answer_never_names_a_model_it_did_not_call():
     assert not offenders, (
         "zero-token responses naming a model they did not call: "
         + "; ".join(f"line {ln}: {m}" for ln, m in offenders))
+
+
+# --- 2026-08-20: 206 real questions, scored against fresh gold ---------------
+
+
+def test_find_help_no_longer_hijacks_on_the_bare_word_help():
+    """This one answer took 27 of the 206 and got 11 wrong. The bare word
+    `help` and a loose `book ... for` did most of it.
+
+    Simulated over all 206 before changing: 11 BAD freed, 2 WEAK freed, 9 GOOD
+    kept, 0 newly taken.
+    """
+    from src.graph.new_orchestrator import _finding_help_answer as F
+
+    # `help` with no material or finding word beside it is somebody else's.
+    for q in ("Who can help me with bloomberg terminals",
+              "I need help with a DMP for a grant",
+              "who should i contact for help at the gardner-harvey library?",
+              "I need help with competitive intelligence research",
+              # "a BOOK OUT FOR" is not "books ABOUT a topic".
+              "How long can I check a book out for?",
+              # Each of these has a better path of its own.
+              "How can I find information on events at the Gardner-Harvey Library?",
+              "I'm an incoming junior looking for jobs around campus",
+              "When I go to the OneSearch page it keeps saying 404 not found",
+              "I am on MU VPN however I cannot access any articles on EBSCO",
+              "I'm trying to find a chapter but the search returns a blank screen"):
+        assert F(q) is None, q
+
+    # And the nine it gets right stay.
+    for q in ("how would I find a book related to the water cycle",
+              'some assistance with books on "vision statements".',
+              "I have a student who needs some help wioth accessing a specific "
+              "AP style manual",
+              "Can you direct me to GrantFoward?",
+              "I'm looking for a research article about cyclospora",
+              "where can I find books about totalitarianism?",
+              "i need a research article about air pullution",
+              "where should i start searching for articles on artificial "
+              "intelligence?"):
+        assert F(q) is not None, q
+
+
+def test_a_greeting_with_a_pleasantry_is_still_a_greeting():
+    """Six real turns were told they were outside the bot's scope because the
+    pattern is anchored ^...$ and they had four more words on the end."""
+    from src.graph.new_orchestrator import _greeting_answer as G
+
+    for q in ("hi how are you", "hi how are you doing", "how are you today",
+              "how are you doing", "how ry today", "how ry tody", "how r u",
+              "hello", "hi", "good night", "what's up", "how's it going"):
+        assert G(q), q
+    # `how do`, `how long`, `how many` are questions, not pleasantries.
+    for q in ("how do I find a book", "how long can I keep a book",
+              "how many books can I check out", "how do i renew a book",
+              "how is the library organized", "hi, where is the makerspace"):
+        assert not G(q), q
+
+
+def test_a_named_date_is_not_today():
+    """Introduced with _today_hours_answer on 2026-08-18: "what are the hours
+    for the middletown library on September 12?" resolved the right library and
+    answered with TODAY's hours. _OTHER_DAY_RE holds weekday names and
+    _NOT_SIMPLE_DAY_RE holds terms; nothing held a date."""
+    from src.graph.new_orchestrator import (
+        _close_today_matches, _today_hours_matches,
+    )
+
+    for q in ("what are the hours for the middletown library on September 12?",
+              "what are the hours on 9/12",
+              "when do you close on the 21st",
+              "are you open on Sept 7",
+              "what time do you close on 2026-09-07"):
+        assert not _today_hours_matches(q), q
+        assert not _close_today_matches(q), q
+    # No date named -> today, as before.
+    assert _today_hours_matches("what are King's hours")
+    assert _close_today_matches("when does the main library close")
+
+
+def test_wertz_answers_to_the_names_patrons_actually_use():
+    """Both of these resolved to NO library and so defaulted to King, giving
+    King's hours for an Art & Architecture question."""
+    from src.scope.resolver import resolve_scope
+
+    for q in ("what are the hours for the Architecture library",
+              "is the art arch library open on Labor Day?",
+              "what are Wertz hours",
+              "what time does the art library close",
+              "is the Art and Architecture library open on Labor Day weekend?"):
+        assert resolve_scope(q).library == "wertz", q
+
+
+def test_offering_to_book_in_chat_arms_the_booking_flow():
+    """A real two-turn session, 2026-08-20:
+
+        can i reserve a study room
+        -> "... Or I can book one for you right here in chat. Give me ..."
+        Thursday 8/13 at 1pm
+        -> "outside that scope"
+
+    The invitation carried none of the flow markers, so the flow was offered
+    and never armed. "book a room for me" worked all along, because that path
+    emits "I still need".
+    """
+    from src.graph.new_orchestrator import _booking_flow_active
+
+    invitation = (
+        "Yes -- you can reserve a study room at King Library through the "
+        "LibCal room reservation system.\n\nOr I can book one for you right "
+        "here in chat. Give me your first and last name...")
+    assert _booking_flow_active([
+        {"role": "user", "content": "can i reserve a study room"},
+        {"role": "assistant", "content": invitation},
+    ])
+    # An ordinary answer must not arm it.
+    assert not _booking_flow_active([
+        {"role": "user", "content": "where is king"},
+        {"role": "assistant", "content": "King Library is at 151 S. Campus Ave."},
+    ])

@@ -110,6 +110,16 @@ LIBRARY_ALIASES: dict[str, Library] = {
     "art library": "wertz",
     "wertz library": "wertz",
     "wertz": "wertz",
+    # Real phrasings that resolved to NOTHING and so defaulted to King, giving
+    # King's hours for an Art & Architecture question (2026-08-20 review,
+    # "what are the hours for the Architecture library" and "is the art arch
+    # library open on Labor Day?"). "architecture" carries the building on its
+    # own here -- there is no other architecture library.
+    "architecture library": "wertz",
+    "art architecture library": "wertz",
+    "art arch library": "wertz",
+    "art arch": "wertz",
+    "arch library": "wertz",
 
     # Special Collections (Oxford, housed in King)
     "special collections and university archives": "special",
