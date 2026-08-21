@@ -389,26 +389,18 @@ const App = () => {
                       '(Unavailable)'}
                 </Button>
                 
-                {/* Three states, not two. `known === false` means the
-                    status check has not succeeded yet -- during a backend
-                    restart, say -- and claiming "offline" there sent
-                    patrons to a ticket form while a librarian sat waiting.
-                    Offer both and say we could not check. */}
-                {!askUsStatus.known && !askUsStatus.loading ? (
-                  <>
-                    <Button variant="miamiOutline" onClick={() => setStep('humanLibrarian')}>
-                      Talk to a librarian
-                    </Button>
-                    <div className="text-center text-sm text-gray-700 py-1">
-                      <Clock className="inline-block w-4 h-4 mr-1" />
-                      <span>
-                        We could not check whether a librarian is on chat
-                        right now. Try the chat &mdash; if nobody is there,
-                        create a ticket.
-                      </span>
-                    </div>
-                  </>
-                ) : askUsStatus.isOpen ? (
+                {/* Three states, not two.
+                
+                    `known === false` means the status check has not
+                    succeeded -- during a backend restart, say. Claiming
+                    "offline" there sent patrons to a ticket form while a
+                    librarian sat at the desk.
+
+                    The button stays; only the STATUS LINE is hidden,
+                    because the line is the part that can be wrong. A
+                    patron does not need to hear about our restart, and
+                    LibChat shows its own presence once the panel opens. */}
+                {(askUsStatus.isOpen || !askUsStatus.known) ? (
                   <Button variant="miamiOutline" onClick={() => setStep('humanLibrarian')}>
                     Talk to a librarian
                   </Button>
