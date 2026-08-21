@@ -222,11 +222,28 @@ def render_librarian_hub(code: str) -> str:
         "emails you.</li>"
         "</ol></div>"
     )
+    # The testing link. Kept separate from the report card because it is a
+    # different job: reporting is about one bad answer, this is about
+    # keeping the usage numbers honest.
+    testing = (
+        "<h2>Trying the chatbot rather than using it?</h2>"
+        "<p class='sub'>Start from this link and we can tell your testing "
+        "apart from a student's question. Nothing about the chatbot "
+        "changes &mdash; same bot, same answers.</p>"
+        "<div class='card'><div class='q'>Open the chatbot in test mode"
+        "</div><div><small class='dim'>The marking lasts until you close "
+        "your browser. Without it, your testing counts as patron use and "
+        "makes the bot look busier than it is.</small></div>"
+        f"<div class='acts'>"
+        f"{ui.action('/librarian/staff-test', 'Open in test mode', primary=True)}"
+        f"{ui.action('/librarian/staff-test/off', 'Stop marking me', ghost=True)}"
+        "</div></div>"
+    )
     body = (
         "<h1>Smart Chatbot &mdash; staff hub</h1>"
         "<p class='lede'>Found the chatbot giving a wrong or outdated "
         "answer? Tell us here and the maintainer will fix it.</p>"
-        f"{report}{after}"
+        f"{report}{after}{testing}"
         "<p><small class='dim'>Bookmark this page &mdash; the links carry "
         "the access code.</small></p>"
     )

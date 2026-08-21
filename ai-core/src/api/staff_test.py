@@ -12,8 +12,15 @@ THE PROBLEM THIS SOLVES
     A guess that leans towards "patron" overstates real usage. That is the
     expensive direction to be wrong in: it is the number leadership reads.
 
+WHY IT LIVES UNDER /librarian/
+    nginx proxies a fixed list of prefixes to this app; a bare /staff-test
+    landed on the static site and 404'd, which is how the first version of
+    this shipped. /librarian/ is already proxied and is already where staff
+    go, so the link needs no infrastructure change and sits where the people
+    who use it are looking.
+
 HOW IT WORKS
-    Staff open /staff-test instead of the normal page. That sets a session
+    Staff open /librarian/staff-test instead of the normal page. That sets a session
     cookie and redirects to the ordinary widget -- same bot, same answers,
     nothing about the experience changes. Every conversation opened while
     the cookie is present is stored with origin="staff".
@@ -76,7 +83,7 @@ def build_staff_test_router():
 
     router = APIRouter(tags=["ops"])
 
-    @router.get("/staff-test")
+    @router.get("/librarian/staff-test")
     async def staff_test() -> Response:
         resp = RedirectResponse(WIDGET_URL, status_code=302)
         resp.set_cookie(
@@ -90,7 +97,7 @@ def build_staff_test_router():
         )
         return resp
 
-    @router.get("/staff-test/off")
+    @router.get("/librarian/staff-test/off")
     async def staff_test_off() -> Response:
         resp = HTMLResponse(
             "<!doctype html><meta charset='utf-8'>"
@@ -105,7 +112,7 @@ def build_staff_test_router():
         resp.delete_cookie(COOKIE, path="/")
         return resp
 
-    @router.get("/staff-test/status")
+    @router.get("/librarian/staff-test/status")
     async def staff_test_status(request: Request) -> dict:
         return {"staff_test": origin_from_cookie_header(
             request.headers.get("cookie")) == STAFF}
