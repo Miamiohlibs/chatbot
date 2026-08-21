@@ -194,12 +194,24 @@ _TEMPLATES: dict[RefusalTrigger, str] = {
         "chatbot directly -- please describe the problem through Ask "
         "Us so the right person can look at it."
     ),
+    # WORDED FOR THE QUESTION THAT NEVER ASKED (2026-08-21). This guard
+    # inspects the ANSWER, not the question: it fires whenever a draft
+    # contains two or more individual staff emails, however the draft got
+    # there. Live case R087 -- "where could I find records of past event
+    # contracts that Miami University has executed" -- retrieved the staff
+    # directory, the draft listed several people, and the patron was told
+    # "I don't share staff contact lists" about a question that asked for
+    # archives. That reads as an accusation and answers a question nobody
+    # asked. The copy now describes what the BOT declined to do, which is
+    # true in both cases: the roster dump it was built for, and the
+    # unrelated question whose draft wandered into the directory.
     RefusalTrigger.STAFF_PRIVACY: (
-        "I don't share staff contact lists. To reach a librarian now, "
-        "use the Ask Us chat -- a librarian on duty can help right "
-        "away: https://www.lib.miamioh.edu/research/research-support/ask/ "
-        "If you need a particular subject's librarian, tell me the "
-        "subject and I'll look up that one person."
+        "I couldn't finish that answer without listing a set of staff "
+        "contacts, and I don't volunteer those. A librarian on duty "
+        "through Ask Us can help right away: "
+        "https://www.lib.miamioh.edu/research/research-support/ask/ "
+        "If you want one particular subject's librarian, name the "
+        "subject and I'll look that person up."
     ),
 }
 
