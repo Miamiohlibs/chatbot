@@ -35,17 +35,29 @@ from this table.)
 The one lever that needs no developer. Added 2026-08-12; this runbook predated
 it.
 
-**Where.** `/admin/service` — the same admin token as the rest of the admin
-pages.
+**Where.** `/admin/service`.
+
+**It does NOT require a login.** Since 2026-08-21 every other admin page needs
+a Miami SSO session; this one deliberately does not, and does not need the
+admin token either. The reason is the whole point of a kill switch: the
+control that stops a misbehaving bot must not depend on the identity provider
+being up. If SSO guarded this page, an IdP outage would leave the bot
+answering patrons with nobody able to stop it.
 
 **What it takes.** Two things, both required: a Miami email that appears in
 `SERVICE_PAUSE_OPERATORS`, and the passphrase in `SERVICE_PAUSE_PASSWORD`.
-Both live in `.env`.
+Both live in `.env`, and neither needs any network call to check.
 
 Be clear about what that buys, because it is easy to overrate: **the email is
-typed, not proven.** Anyone holding the admin token and the passphrase can
-type any name on the list. What it gives is a deliberate action with a name
-attached in the log — not authentication.
+typed, not proven.** Anyone holding the passphrase can type any name on the
+list — and the passphrase is now the only thing standing here. What it gives
+is a deliberate action with a name attached in the log, not authentication.
+
+**Guessing is throttled.** Five wrong attempts from one address in ten minutes
+and that address gets 429s for the rest of the window. A correct attempt
+clears the counter, so mistyping your own passphrase twice under pressure
+costs nothing. Tune with `SERVICE_PAUSE_ATTEMPT_MAX` /
+`SERVICE_PAUSE_ATTEMPT_WINDOW_S` if five proves wrong in practice.
 
 **What patrons see.** The widget still loads. Instead of answers they get an
 out-of-service notice pointing at Ask Us, and the three main buttons show the

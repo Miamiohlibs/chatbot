@@ -455,6 +455,26 @@ from src.api.admin.killswitch_router import build_service_status_router  # noqa:
 
 app.include_router(build_service_status_router())
 
+# The kill switch itself, mounted STANDALONE (2026-08-21).
+#
+# It used to sit inside the admin block, sharing the token guard with every
+# other operator page. It is out here now because that block now means "has
+# a Miami SSO session", and the one control that must work while things are
+# broken cannot depend on the identity provider being reachable. An IdP
+# outage would otherwise leave the bot answering patrons with nobody able to
+# stop it.
+#
+# What guards it instead is self-contained and needs no network: an operator
+# email from SERVICE_PAUSE_OPERATORS plus SERVICE_PAUSE_PASSWORD, both
+# fail-closed when unset, plus a per-address throttle on failed attempts.
+from src.api.admin.killswitch_router import build_killswitch_router  # noqa: E402
+
+app.include_router(build_killswitch_router({}))
+logging.info(
+    "Kill switch mounted STANDALONE at /admin/service -- independent of "
+    "ADMIN_API_TOKEN and of SSO, guarded by operator email + passphrase."
+)
+
 
 def _smoketest_ask_v2_bot(question: str) -> dict:
     """Sync wrapper around the rebuilt orchestrator (run_turn) for
@@ -555,8 +575,6 @@ if _admin_token or _sso_cfg.enabled:
     app.include_router(build_review_view_router(_admin_deps))
     app.include_router(build_corrections_router(_admin_deps))
     app.include_router(build_cost_view_router(_admin_deps))
-    from src.api.admin.killswitch_router import build_killswitch_router
-    app.include_router(build_killswitch_router(_admin_deps))
     logging.info(
         "Op1/Op2/Op3 admin surfaces mounted (ADMIN_API_TOKEN set): "
         "/admin/review (HTML), /admin/reviews (JSON), "

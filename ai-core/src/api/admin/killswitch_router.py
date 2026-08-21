@@ -23,9 +23,27 @@ THE FLAG IS A FILE, ON PURPOSE
       * every worker sees the same state, which a per-process variable would
         not guarantee
 
-FAIL-CLOSED AUTH
-    Mounted only when `ADMIN_API_TOKEN` is set, and every route is behind the
-    same guard as the rest of /admin.
+DELIBERATELY NOT BEHIND SSO (2026-08-21)
+    Every other /admin surface now requires a Miami SSO session. This one
+    does not, and that is the point of it.
+
+    The lever that stops a misbehaving bot must not depend on the thing most
+    likely to be broken at the same time. An IdP outage, an expired
+    certificate, a mistyped uid, a release policy that stops sending the
+    attribute -- any one of those would, if this page sat behind SSO, leave
+    the bot answering patrons with nobody able to stop it. A shutdown
+    control that is unreachable during an incident is not a shutdown
+    control.
+
+    So it is mounted on its own, independent of `ADMIN_API_TOKEN`, of
+    `SSO_ENABLED`, and of the IdP being reachable at all. What protects it
+    is the second factor below, which is self-contained: an operator email
+    from a fixed list plus a shared passphrase, both read from .env, neither
+    requiring any network call.
+
+    The page being reachable is not the same as the switch being usable.
+    Without the email and the passphrase a visitor sees a form and a status
+    that `/health/service` already publishes to the world.
 
 SECOND FACTOR ON THE SWITCH ITSELF
     Operator ruling 2026-08-10: the token alone is too easy. Taking the bot
@@ -35,11 +53,17 @@ SECOND FACTOR ON THE SWITCH ITSELF
     `SERVICE_PAUSE_PASSWORD`. Both live in .env and never in this repo.
 
     Be clear about what that buys, because it is easy to overrate: the email
-    is TYPED, not proven. Anyone holding the admin token and the passphrase
-    can enter any name on the list. What it gives is a deliberate-action
-    speed bump, an accountability record of who says they did it, and a
-    restriction to a known set of people. Real identity needs SSO, which is
-    a separate piece of work.
+    is TYPED, not proven. Anyone holding the passphrase can enter any name
+    on the list -- and since 2026-08-21 the passphrase is the ONLY thing
+    standing here, because the admin guard was deliberately removed. What it
+    gives is a deliberate-action speed bump, an accountability record of who
+    says they did it, and a restriction to a known set of people.
+
+    That is a real trade, made with open eyes. Proven identity would mean
+    SSO, and SSO is precisely what this control must keep working without.
+    The compensating controls are the throttle above, the fact that the
+    passphrase is never echoed or hinted at, and that every attempt --
+    accepted or refused -- lands in the log with the address it came from.
 
     Unconfigured means NOBODY can switch the service from the web page. That
     is safe rather than reckless only because the flag is a file: an
@@ -56,7 +80,58 @@ import os
 from pathlib import Path
 from typing import Optional
 
+# Module level, NOT inside build_killswitch_router: `from __future__ import
+# annotations` makes every annotation a string, and FastAPI resolves those
+# against module globals. A Request imported inside the factory is invisible
+# there, so FastAPI treated `request: Request` as a request BODY and every
+# POST came back 422.
+try:  # pragma: no cover - FastAPI is always present in production
+    from fastapi import Request
+except ImportError:  # pragma: no cover
+    Request = object  # type: ignore[assignment,misc]
+
 logger = logging.getLogger(__name__)
+
+# Taking this page out from behind the admin guard (2026-08-21) removed the
+# layer that used to make guessing the passphrase impractical, so the
+# throttle has to be put back here rather than assumed. Five wrong answers
+# per address per ten minutes: generous for somebody fat-fingering their own
+# passphrase under pressure, useless for guessing one.
+#
+# Only FAILURES are counted. A correct credential pair costs nothing, so an
+# operator toggling the service during a real incident is never throttled.
+from src.api.rate_limit import SlidingWindowLimiter  # noqa: E402
+
+_ATTEMPT_MAX = int(os.getenv("SERVICE_PAUSE_ATTEMPT_MAX", "5") or 5)
+_ATTEMPT_WINDOW_S = int(os.getenv("SERVICE_PAUSE_ATTEMPT_WINDOW_S", "600") or 600)
+_attempts = SlidingWindowLimiter(_ATTEMPT_MAX, _ATTEMPT_WINDOW_S)
+
+
+def attempt_key(request) -> str:
+    """The address a failed attempt is counted against.
+
+    X-Real-IP, because nginx sets it with proxy_set_header and that REPLACES
+    whatever the client sent. X-Forwarded-For is NOT used: it was proven
+    forgeable through the real nginx path on 2026-08-12, and a throttle keyed
+    on a value the attacker chooses is not a throttle.
+    """
+    if request is None:
+        return "unknown"
+    real = (request.headers.get("x-real-ip") or "").strip()
+    if real:
+        return real
+    client = getattr(request, "client", None)
+    return getattr(client, "host", None) or "unknown"
+
+
+def note_failed_attempt(key: str) -> bool:
+    """Record a refusal. False once the address is over the limit."""
+    return _attempts.allow(key)
+
+
+def reset_attempts(key: str) -> None:
+    _attempts.reset(key)
+
 
 _FLAG_PATH = Path(
     os.getenv("SERVICE_PAUSE_FLAG",
@@ -210,11 +285,29 @@ def build_service_status_router():
 
 
 def build_killswitch_router(deps: dict):
-    """`deps` needs `guard` -- the same token dependency as /admin/review."""
+    """`deps` may carry a `guard`; without one the page stands alone.
+
+    Standing alone is the normal case since 2026-08-21 -- see the module
+    docstring. A guard is still accepted so the router can be mounted behind
+    something in a deployment that wants that, and so the existing tests can
+    prove the guarded shape still works.
+    """
     from fastapi import APIRouter, Depends, Form  # type: ignore
     from fastapi.responses import HTMLResponse, RedirectResponse  # type: ignore
 
-    guard = deps["guard"]
+    async def _no_guard() -> None:
+        """The switch protects itself with email + passphrase."""
+        return None
+
+    # Now that this page answers 200 to anyone, keep it out of search
+    # indexes. This host is already being crawled -- amazonbot and
+    # binaryedge both appear in the access log -- and a shutdown control
+    # showing up in search results invites exactly the traffic the throttle
+    # then has to absorb. Set in-app rather than in nginx so it travels with
+    # the route.
+    _NOINDEX = {"X-Robots-Tag": "noindex, nofollow, noarchive"}
+
+    guard = deps.get("guard") or _no_guard
     router = APIRouter(prefix="/admin", tags=["admin"])
 
     def _credentials(key: str, action: str, extra: str = "") -> str:
@@ -283,10 +376,10 @@ def build_killswitch_router(deps: dict):
 
     @router.get("/service", response_class=HTMLResponse)
     async def service_page(key: str = "", _u=Depends(guard)):
-        return HTMLResponse(_page(key))
+        return HTMLResponse(_page(key), headers=_NOINDEX)
 
     @router.post("/service/pause", response_class=HTMLResponse)
-    async def do_pause(key: str = "", email: str = Form(""),
+    async def do_pause(request: Request, key: str = "", email: str = Form(""),
                        password: str = Form(""), note: str = Form(""),
                        _u=Depends(guard)):
         why = check_operator(email, password)
@@ -294,24 +387,45 @@ def build_killswitch_router(deps: dict):
             # Never echo the passphrase, not even to say it was wrong.
             logger.warning("service pause REFUSED for %r: %s",
                            (email or "").strip().lower(), why)
-            return HTMLResponse(_page(key, why), status_code=403)
+            if not note_failed_attempt(attempt_key(request)):
+                logger.warning("service pause attempts THROTTLED for %s",
+                               attempt_key(request))
+                return HTMLResponse(_page(key, _THROTTLED), status_code=429,
+                                    headers=_NOINDEX)
+            return HTMLResponse(_page(key, why), status_code=403,
+                                headers=_NOINDEX)
+        reset_attempts(attempt_key(request))
         pause(who=(email or "").strip().lower(), note=note)
         return RedirectResponse(f"/admin/service?key={key}", status_code=303)
 
     @router.post("/service/resume", response_class=HTMLResponse)
-    async def do_resume(key: str = "", email: str = Form(""),
+    async def do_resume(request: Request, key: str = "", email: str = Form(""),
                         password: str = Form(""), _u=Depends(guard)):
         why = check_operator(email, password)
         if why:
             logger.warning("service resume REFUSED for %r: %s",
                            (email or "").strip().lower(), why)
-            return HTMLResponse(_page(key, why), status_code=403)
+            if not note_failed_attempt(attempt_key(request)):
+                logger.warning("service resume attempts THROTTLED for %s",
+                               attempt_key(request))
+                return HTMLResponse(_page(key, _THROTTLED), status_code=429,
+                                    headers=_NOINDEX)
+            return HTMLResponse(_page(key, why), status_code=403,
+                                headers=_NOINDEX)
+        reset_attempts(attempt_key(request))
         resume(who=(email or "").strip().lower())
         return RedirectResponse(f"/admin/service?key={key}", status_code=303)
 
     return router
 
 
-__all__ = ["ASK_US_URL", "PAUSED_MESSAGE", "build_killswitch_router",
+_THROTTLED = ("Too many failed attempts from this address. Wait a few "
+              "minutes and try again. If the bot must be stopped NOW and "
+              "you cannot get in, touch the file "
+              "ai-core/data/SERVICE_PAUSED on the server -- that is the "
+              "same switch, and it needs no web page at all.")
+
+__all__ = ["ASK_US_URL", "PAUSED_MESSAGE", "attempt_key",
+           "build_killswitch_router",
            "build_service_status_router", "is_paused", "pause", "pause_reason",
-           "paused_since", "resume"]
+           "note_failed_attempt", "paused_since", "reset_attempts", "resume"]
