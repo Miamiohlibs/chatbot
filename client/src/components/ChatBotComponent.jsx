@@ -16,7 +16,12 @@ import './ChatBotComponent.css';
 // read), but there is nothing useful to send: the server answers every turn
 // with a maintenance notice. So the composer is disabled and says why,
 // instead of accepting a question and returning a canned reply.
-const ChatBotComponent = ({ askUsStatus = { isOpen: false, hoursToday: null, nextOpen: null }, isPaused = false }) => {
+const ChatBotComponent = ({ askUsStatus = { isOpen: false, known: false, hoursToday: null, nextOpen: null }, isPaused = false }) => {
+  // "We have not been able to check" is not "the desk is closed". Rendering
+  // the first as the second told patrons librarian chat was offline during a
+  // backend restart, on a weekday afternoon. Where the difference matters,
+  // offer the librarian rather than asserting a closure we cannot support.
+  const chatMaybeOpen = askUsStatus.isOpen || askUsStatus.known === false;
   const { socketContextValues } = useContext(SocketContext);
   const { messageContextValues } = useContext(MessageContext);
   const chatRef = useRef();
@@ -143,12 +148,12 @@ const ChatBotComponent = ({ askUsStatus = { isOpen: false, hoursToday: null, nex
               {!socketContextValues.serviceHealthy
                 ? 'The chatbot service is experiencing technical difficulties. '
                 : 'Unable to connect to the chatbot service. '}
-              {askUsStatus.isOpen 
+              {chatMaybeOpen
                 ? 'Please talk to a librarian for immediate assistance.'
                 : 'Please submit a ticket and we\'ll get back to you.'}
             </AlertDescription>
           </div>
-          {askUsStatus.isOpen ? (
+          {chatMaybeOpen ? (
             <Button
               size="sm"
               variant="default"
@@ -169,7 +174,7 @@ const ChatBotComponent = ({ askUsStatus = { isOpen: false, hoursToday: null, nex
       )}
 
       {/* Librarian Widget - only shown during business hours */}
-      {widgetVisible && askUsStatus.isOpen && (
+      {widgetVisible && chatMaybeOpen && (
         <div className="mb-4 p-4 border border-blue-200 rounded-md bg-blue-50">
           <div className="flex justify-between items-center mb-2">
             <span className="font-bold text-blue-700">
@@ -189,7 +194,7 @@ const ChatBotComponent = ({ askUsStatus = { isOpen: false, hoursToday: null, nex
       )}
 
       {/* Ticket Form Widget - shown when librarian chat not available */}
-      {showTicketForm && !askUsStatus.isOpen && (
+      {showTicketForm && !chatMaybeOpen && (
         <div className="mb-4 p-4 border border-orange-200 rounded-md bg-orange-50">
           <div className="flex justify-between items-center mb-2">
             <span className="font-bold text-orange-700">
@@ -409,7 +414,9 @@ const ChatBotComponent = ({ askUsStatus = { isOpen: false, hoursToday: null, nex
           matters with a librarian.
           {askUsStatus.isOpen
             ? ' Chat is open now.'
-            : askUsStatus.nextOpen
+            : askUsStatus.known === false
+              ? ''
+              : askUsStatus.nextOpen
               ? ` Chat opens ${askUsStatus.nextOpen.when === 'later today'
                   ? '' : `${askUsStatus.nextOpen.when} `}at ${askUsStatus.nextOpen.time}.`
               : ' Submit a ticket and one will reply.'}

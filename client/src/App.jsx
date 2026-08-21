@@ -1,4 +1,4 @@
-import { useContext, useEffect, useState, useCallback } from 'react';
+import { useContext, useEffect, useRef, useState, useCallback } from 'react';
 import { ArrowLeft, Clock, Wrench, X } from 'lucide-react';
 import { toast } from 'sonner';
 import HumanLibrarianWidget from './components/HumanLibrarianWidget';
@@ -73,38 +73,73 @@ const App = () => {
   // See hooks/useServiceStatus.
   const { isPaused, askUsUrl } = useServiceStatus();
   
-  // Ask Us Chat Service availability state
-  const [askUsStatus, setAskUsStatus] = useState({
-    isOpen: false,
-    message: '',
-    hoursToday: null,
-    nextOpen: null,
-    loading: true
+  // Ask Us Chat Service availability.
+  //
+  // `known` is the whole point of this shape. Without it a failed fetch left
+  // isOpen at its initial false, and the widget told patrons "Librarian chat
+  // is offline" during a backend restart -- at 2pm on a weekday, with
+  // librarians sitting at the desk. Not knowing is not the same as knowing
+  // the answer is no, and only one of those is safe to render.
+  //
+  // The last good answer is cached in sessionStorage so a reload mid-restart
+  // keeps what we already learned instead of starting from ignorance again.
+  const ASKUS_CACHE_KEY = 'askus-status-v1';
+  const [askUsStatus, setAskUsStatus] = useState(() => {
+    const blank = { isOpen: false, known: false, message: '',
+                    hoursToday: null, nextOpen: null, loading: true };
+    try {
+      const raw = sessionStorage.getItem(ASKUS_CACHE_KEY);
+      if (!raw) return blank;
+      const cached = JSON.parse(raw);
+      // Hours change on the hour; anything older than that is not worth
+      // trusting over a fresh "we don't know".
+      if (Date.now() - (cached.at || 0) > 60 * 60 * 1000) return blank;
+      return { ...blank, ...cached.value, loading: true };
+    } catch {
+      return blank;
+    }
   });
+
+  const askUsRetries = useRef(0);
 
   // Fetch Ask Us Chat Service availability
   const checkAskUsAvailability = useCallback(async () => {
     try {
       const response = await fetch('/askus-hours/status');
-      if (response.ok) {
-        const data = await response.json();
-        setAskUsStatus({
-          isOpen: data.is_open,
-          message: data.message || '',
-          hoursToday: data.hours_today,
-          // When chat NEXT opens. Without it the closed state showed
-          // TODAY's hours ("available 9:00am - 6:00pm") at 10pm, and a
-          // student on a Friday evening could not tell a two-hour wait
-          // from a 62-hour one.
-          nextOpen: data.next_open || null,
-          loading: false
-        });
-      } else {
-        setAskUsStatus(prev => ({ ...prev, loading: false }));
-      }
+      if (!response.ok) throw new Error(`status ${response.status}`);
+      const data = await response.json();
+      const value = {
+        isOpen: data.is_open,
+        known: true,
+        message: data.message || '',
+        hoursToday: data.hours_today,
+        // When chat NEXT opens. Without it the closed state showed
+        // TODAY's hours ("available 9:00am - 6:00pm") at 10pm, and a
+        // student on a Friday evening could not tell a two-hour wait
+        // from a 62-hour one.
+        nextOpen: data.next_open || null,
+      };
+      askUsRetries.current = 0;
+      try {
+        sessionStorage.setItem(ASKUS_CACHE_KEY,
+          JSON.stringify({ at: Date.now(), value }));
+      } catch { /* private mode, or a full quota -- not worth failing over */ }
+      setAskUsStatus({ ...value, loading: false });
     } catch (error) {
       console.error('Failed to check Ask Us availability:', error);
+      // Keep whatever we already knew. Only the very first failure leaves
+      // us in the unknown state, and the UI renders that as unknown.
       setAskUsStatus(prev => ({ ...prev, loading: false }));
+
+      // A restart takes ~90s. Waiting the full five-minute poll to find
+      // out the desk is staffed is how a two-minute outage became an
+      // afternoon of "librarian chat is offline".
+      const n = askUsRetries.current;
+      if (n < 6) {
+        askUsRetries.current = n + 1;
+        setTimeout(() => { checkAskUsAvailability(); },
+                   Math.min(30000, 2000 * Math.pow(2, n)));
+      }
     }
   }, []);
 
@@ -151,7 +186,7 @@ const App = () => {
       isOpen &&
       step === 'services'
     ) {
-      if (askUsStatus.isOpen) {
+      if (askUsStatus.isOpen || !askUsStatus.known) {
         toast.warning('Service Unavailable', {
           description:
             'The Smart Chatbot is currently unavailable. Redirecting you to a librarian for assistance.',
@@ -182,7 +217,7 @@ const App = () => {
       setIsOpen(true);
     }
     
-    if (askUsStatus.isOpen) {
+    if (askUsStatus.isOpen || !askUsStatus.known) {
       setStep('humanLibrarian');
       toast.info('Connecting to Librarian', {
         description: 'Redirecting you to a librarian.',
@@ -333,7 +368,7 @@ const App = () => {
                           'The Smart Chatbot is currently unavailable. Please talk to a librarian during business hours or submit a ticket.',
                         duration: 5000,
                       });
-                      if (askUsStatus.isOpen) {
+                      if (askUsStatus.isOpen || !askUsStatus.known) {
                         setStep('humanLibrarian');
                       } else {
                         setStep('ticket');
@@ -354,8 +389,26 @@ const App = () => {
                       '(Unavailable)'}
                 </Button>
                 
-                {/* Show the librarian button only during business hours */}
-                {askUsStatus.isOpen ? (
+                {/* Three states, not two. `known === false` means the
+                    status check has not succeeded yet -- during a backend
+                    restart, say -- and claiming "offline" there sent
+                    patrons to a ticket form while a librarian sat waiting.
+                    Offer both and say we could not check. */}
+                {!askUsStatus.known && !askUsStatus.loading ? (
+                  <>
+                    <Button variant="miamiOutline" onClick={() => setStep('humanLibrarian')}>
+                      Talk to a librarian
+                    </Button>
+                    <div className="text-center text-sm text-gray-700 py-1">
+                      <Clock className="inline-block w-4 h-4 mr-1" />
+                      <span>
+                        We could not check whether a librarian is on chat
+                        right now. Try the chat &mdash; if nobody is there,
+                        create a ticket.
+                      </span>
+                    </div>
+                  </>
+                ) : askUsStatus.isOpen ? (
                   <Button variant="miamiOutline" onClick={() => setStep('humanLibrarian')}>
                     Talk to a librarian
                   </Button>
@@ -405,11 +458,11 @@ const App = () => {
                   </p>
                   <p className="text-gray-600 text-sm">
                     We're experiencing technical difficulties. 
-                    {askUsStatus.isOpen 
+                    {(askUsStatus.isOpen || !askUsStatus.known)
                       ? ' Let us connect you with a librarian.'
                       : ' Please submit a ticket and we\'ll get back to you.'}
                   </p>
-                  {askUsStatus.isOpen ? (
+                  {(askUsStatus.isOpen || !askUsStatus.known) ? (
                     <Button
                       variant="default"
                       onClick={() => setStep('humanLibrarian')}
@@ -436,9 +489,11 @@ const App = () => {
               size="sm"
               variant="miamiOutline"
               className="fixed bottom-10 right-20 mr-4 absolute right-0 bottom-0 mb-2"
-              onClick={() => askUsStatus.isOpen ? setStep('humanLibrarian') : setStep('ticket')}
+              onClick={() => (askUsStatus.isOpen || !askUsStatus.known)
+                ? setStep('humanLibrarian') : setStep('ticket')}
             >
-              {askUsStatus.isOpen ? 'Talk to a librarian' : 'Submit a ticket'}
+              {(askUsStatus.isOpen || !askUsStatus.known)
+                ? 'Talk to a librarian' : 'Submit a ticket'}
             </Button>
           )}
         </DialogContent>
