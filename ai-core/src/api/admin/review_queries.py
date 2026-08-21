@@ -445,6 +445,7 @@ __all__ = ["FILTERS", "attach_feedback", "conversation_detail",
 SOURCE_TAGS = (
     ("", "All"),
     ("patron", "Unlabelled"),
+    ("patron-confirmed", "Confirmed patron"),
     ("staff", "Staff test"),
     ("maybe-staff", "Possibly staff"),
     ("local", "Local test"),
@@ -556,8 +557,11 @@ async def list_conversations_on(db: Any, day: "str", *,
         convs = await db.conversation.find_many(
             where={"createdAt": {"gte": start, "lt": end}})
         origins = {c.id: getattr(c, "origin", None) for c in convs}
+        overrides = {c.id: (getattr(c, "sourceOverride", None),
+                            getattr(c, "sourceOverrideBy", None))
+                     for c in convs}
     except Exception:  # noqa: BLE001
-        origins = {}
+        origins, overrides = {}, {}
     try:
         fbs = await db.conversationfeedback.find_many()
         notes = {f.conversationId: (getattr(f, "userComment", "") or "")
@@ -568,6 +572,9 @@ async def list_conversations_on(db: Any, day: "str", *,
         v["has_dev_row"] = v["conversation_id"] in dev_ids
         v["origin"] = origins.get(v["conversation_id"])
         v["feedback_comment"] = notes.get(v["conversation_id"], "")
+        ov, ov_by = overrides.get(v["conversation_id"], (None, None))
+        v["source_override"] = ov
+        v["source_override_by"] = ov_by
 
     # Run-level signals first: they see what a single row cannot.
     mark_bursts(out)
@@ -1005,6 +1012,13 @@ def _known_staff_addresses() -> frozenset:
     return frozenset(out)
 
 
+MANUAL_LABELS = {
+    "local":  ("local test", "local"),
+    "staff":  ("staff test", "staff"),
+    "patron": ("patron", "patron-confirmed"),
+}
+
+
 def classify_source(conv: dict) -> dict:
     """{'label', 'why', 'tag'} for one conversation summary row.
 
@@ -1014,6 +1028,18 @@ def classify_source(conv: dict) -> dict:
     signal there is -- somebody came through the staff link on purpose --
     and it outranks any amount of clever inference from the transcript.
     """
+    # A person's verdict beats every rule here, including the recorded
+    # ones. They can know things the data cannot hold -- that the colleague
+    # at the next desk was the one testing, that a question came in by
+    # phone and was typed in on somebody's behalf.
+    manual = (conv.get("source_override") or "").strip().lower()
+    if manual in MANUAL_LABELS:
+        label, tag = MANUAL_LABELS[manual]
+        who = conv.get("source_override_by") or "an operator"
+        return {"label": label, "tag": tag, "manual": True,
+                "why": f"Set by hand ({who}). A person's verdict overrides "
+                       f"every rule on this page."}
+
     if conv.get("origin") == "staff":
         return {"label": "staff test", "tag": "staff",
                 "why": "Arrived through the staff-test link — recorded at "

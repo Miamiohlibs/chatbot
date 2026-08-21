@@ -66,6 +66,17 @@ model Conversation {
   /// inflates every claim about real usage, which is the mistake the beta
   /// report had to walk back three times.
   origin               String?
+  /// A person's verdict on where this conversation came from, overriding
+  /// every rule. "local" | "staff" | "patron", or null for "no verdict".
+  ///
+  /// Deliberately NOT stored in `origin`. That field records a fact -- the
+  /// visitor arrived through the staff link -- and this one records a
+  /// judgement. Collapsing them would lose the ability to say which is
+  /// which, and the whole point of this classification is that a recorded
+  /// fact and an inference are different kinds of thing.
+  sourceOverride       String?
+  sourceOverrideBy     String?
+  sourceOverrideAt     DateTime?
   toolUsed             String[]              @default([])
   conversationFeedback ConversationFeedback?
   messageList          Message[]

@@ -160,7 +160,14 @@ def build_conversations_router(deps: dict) -> Any:
                                         current="/admin/conversations", key=key))
 
         _SRC_CLASS = {"staff": "thumbs_up", "local": "refusal",
-                      "maybe-staff": "low_confidence"}
+                      "maybe-staff": "low_confidence",
+                      "patron-confirmed": "thumbs_up"}
+
+        def set_link(cid: str, value: str, text: str, title: str) -> str:
+            return (f"<a class='setsrc' title='{_e(title)}' "
+                    f"href='/admin/conversations/{_e(cid)}/source"
+                    f"?set={value}&day={_e(day)}{sq}"
+                    f"{('&key=' + _e(key)) if key else ''}'>{text}</a>")
 
         def source_cell(r: dict) -> str:
             """Its own column, not a flag.
@@ -171,13 +178,30 @@ def build_conversations_router(deps: dict) -> Any:
             columns.
             """
             src = r.get("source") or {}
+            cid = r["conversation_id"]
+
+            # Three one-click verdicts on every row. A rule that cannot be
+            # corrected by the person reading it is a rule they will stop
+            # trusting; these override everything, including the recorded
+            # facts, because the reader can know things the data cannot
+            # hold.
+            controls = (
+                "<span class='setsrcs'>"
+                + set_link(cid, "local", "S", "Mark as a script / local test")
+                + set_link(cid, "staff", "T", "Mark as staff testing")
+                + set_link(cid, "patron", "P", "Confirm this was a patron")
+                + (set_link(cid, "", "×", "Clear the manual verdict")
+                   if src.get("manual") else "")
+                + "</span>")
+
             if not src.get("label"):
-                return "<span class='dim'>&mdash;</span>"
+                return f"<span class='dim'>&mdash;</span> {controls}"
             cls = _SRC_CLASS.get(src.get("tag", ""), "low_confidence")
+            mark = " ✓" if src.get("manual") else ""
             return (f"<a class='tag {cls}' title='{_e(src.get('why', ''))}' "
                     f"href='/admin/conversations?day={_e(day)}"
                     f"&source={_e(src.get('tag', ''))}{kq}'>"
-                    f"{_e(src['label'])}</a>")
+                    f"{_e(src['label'])}{mark}</a> {controls}")
 
         def row(r: dict) -> str:
             flags = []
@@ -214,13 +238,22 @@ def build_conversations_router(deps: dict) -> Any:
             + (f" &middot; <b>{needs}</b> on this page worth a look" if needs else "")
             + " &middot; <span title='A label is only shown when something in "
               "the transcript supports it. No label means nothing does — the "
-              "system stores no identity, so “patron” is never asserted.'>"
+              "system stores no identity, so “patron” is never asserted. "
+              "S / T / P on any row set it by hand and override every rule; "
+              "a ✓ means somebody did.'>"
               "how sources are labelled</span></p>"
             + pager()
             # Scoped under .convs: an unscoped `td.num` or `tr.needs td`
             # lands after the shared stylesheet and restyles every table in
             # the console, including the one on the page you navigate to next.
             + f"<style>.convs tr.needs td{{background:#fffaf5}}"
+            f".convs .setsrcs{{white-space:nowrap;margin-left:.35rem}}"
+            f".convs .setsrc{{display:inline-block;width:1.15rem;"
+            f"text-align:center;font-size:.7rem;line-height:1.15rem;"
+            f"border:1px solid var(--line);border-radius:3px;color:var(--muted);"
+            f"text-decoration:none;margin-left:.1rem}}"
+            f".convs .setsrc:hover{{background:var(--miami);color:#fff;"
+            f"border-color:var(--miami)}}"
             f".convs td.num{{text-align:right;white-space:nowrap;"
             f"font-variant-numeric:tabular-nums}}</style>"
             f"<table><tr><th>Time</th><th>Source</th><th>First question</th>"
@@ -233,6 +266,48 @@ def build_conversations_router(deps: dict) -> Any:
         return HTMLResponse(ui.page("Conversations",
                                     f"<div class='convs'>{body}</div>",
                                     current="/admin/conversations", key=key))
+
+    @router.get("/admin/conversations/{conversation_id}/source",
+                response_class=HTMLResponse)
+    async def set_source(conversation_id: str, set: str = "", day: str = "",
+                         key: str = "", source: str = "",
+                         _g=Depends(guard)) -> Any:
+        """Record, or clear, a person's verdict on one conversation.
+
+        A GET from a link on the row it concerns. Reversible in one click,
+        so it needs no confirmation step; making somebody confirm a label
+        they can undo is how a correction stops being worth making.
+        """
+        from fastapi.responses import RedirectResponse
+
+        from src.api.admin.review_queries import MANUAL_LABELS
+
+        value = (set or "").strip().lower()
+        data: dict
+        if value in MANUAL_LABELS:
+            data = {"sourceOverride": value,
+                    "sourceOverrideBy": "operator",
+                    "sourceOverrideAt": dt.datetime.now(dt.timezone.utc)}
+        elif value == "":
+            data = {"sourceOverride": None, "sourceOverrideBy": None,
+                    "sourceOverrideAt": None}
+        else:
+            data = {}
+
+        if data:
+            try:
+                await db.conversation.update(
+                    where={"id": conversation_id}, data=data)
+            except Exception:  # noqa: BLE001 -- a failed label must not 500
+                import logging
+                logging.getLogger(__name__).warning(
+                    "could not set the source verdict on %s",
+                    conversation_id, exc_info=True)
+
+        back = (f"/admin/conversations?day={_e(day or today_local())}"
+                + (f"&source={_e(source)}" if source else "")
+                + (f"&key={_e(key)}" if key else ""))
+        return RedirectResponse(back, status_code=303)
 
     return router
 
