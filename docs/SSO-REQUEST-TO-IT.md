@@ -1,134 +1,70 @@
-# SSO setup request — Miami University Libraries Smart Chatbot
+# SSO setup request — Libraries Smart Chatbot
 
-Submit through TeamDynamix (System: **10357 — Shibboleth**). The body below
-answers the six items Miami IT asks for in *Set up vendor single sign-on
-(SSO) with Miami University / SAML* (KB 138639).
-
-**Send the metadata as a URL, not a file.** The published document carries a
-short `validUntil`, which a Shibboleth IdP refreshes automatically when it
-holds a URL and cannot refresh when it holds a copy.
+TeamDynamix, System **10357 — Shibboleth**. Send the metadata as a **URL**,
+not a file: it carries a short `validUntil` that a Shibboleth IdP refreshes
+on its own.
 
 ---
 
-## Ticket body
-
-**Subject:** SAML SSO setup for chatbot.lib.miamioh.edu (Libraries Smart
-Chatbot admin dashboard)
+**Subject:** SAML SSO setup for chatbot.lib.miamioh.edu
 
 Hello,
 
-We would like to protect the administrative dashboard of the University
-Libraries' Smart Chatbot with Miami single sign-on. The service is built and
-running; our SAML SP is live and waiting to be registered on your side.
+We would like Miami SSO in front of the admin dashboard of the Libraries'
+Smart Chatbot. Our SP is built and live; it needs registering on your side.
+The dashboard is used by five library staff and shows raw patron
+conversations — the public chat widget is separate, unauthenticated, and not
+affected by this request.
 
-**What the service is.** An internal dashboard used by a small number of
-library staff to review chatbot conversations, correct wrong answers, watch
-spend, and take the bot out of service. It is not patron-facing — the public
-chat widget is separate, unauthenticated, and is not affected by this
-request. The pages behind SSO display raw patron questions, which is why we
-want proven identity in front of them rather than the shared token we use
-today.
+Answering the six items in KB 138639:
 
-Here is what your knowledge-base article asks for.
+1. **Our metadata** — https://chatbot.lib.miamioh.edu/admin/sso/metadata
 
-**1. Our metadata**
+2. **Attributes** — `uid` (`urn:oid:0.9.2342.19200300.100.1.1`) only. If your
+   policy does not release bare `uid`, `eduPersonPrincipalName`
+   (`urn:oid:1.3.6.1.4.1.5923.1.1.1.6`) works instead — either one alone is
+   enough. We do not need mail, displayName, sn, givenName or department.
+   We cannot use the NameID for this, since transient is anonymous.
 
-https://chatbot.lib.miamioh.edu/admin/sso/metadata
+3. **NameID format** — `urn:oasis:names:tc:SAML:2.0:nameid-format:transient`,
+   your default.
 
-Served over TLS with a complete chain (leaf plus *InCommon RSA OV SSL CA 3*).
+4. **Login URL** — https://chatbot.lib.miamioh.edu/admin/
 
-**2. Desired attributes**
+5. **Attribute Requester** — same as our EntityID,
+   `https://chatbot.lib.miamioh.edu/admin/sso/metadata`
 
-We need exactly one, to identify the person:
+6. **SP-initiated**, as you recommend.
 
-| Attribute | OID | Why |
-|---|---|---|
-| `uid` | `urn:oid:0.9.2342.19200300.100.1.1` | Matched against our access list |
+Also: ACS is `https://chatbot.lib.miamioh.edu/admin/sso/acs` (HTTP-POST),
+AuthnRequests are signed, we require signed assertions, and we do not
+implement Single Logout. Volume is five accounts, a few sign-ins a week.
 
-If your release policy does not include bare `uid` for this service,
-`eduPersonPrincipalName` (`urn:oid:1.3.6.1.4.1.5923.1.1.1.6`) works equally
-well — we take the local part. Either one alone is sufficient. We do not
-need `mail`, `displayName`, `sn`, `givenName` or department, and would
-rather not receive them.
+Your article notes you can test on request — we would appreciate that. Our
+side is deployed, so any time suits.
 
-Note that we cannot use the NameID for this. Your default is transient,
-which is deliberately anonymous, so identification has to come from a
-released attribute.
-
-**3. Desired NameID format**
-
-`urn:oasis:names:tc:SAML:2.0:nameid-format:transient` — your documented
-default. We have no reason to ask for anything more identifying.
-
-**4. Login URL for the service**
-
-https://chatbot.lib.miamioh.edu/admin/
-
-Staff land there; anyone without a session is redirected into the SP-initiated
-flow at `/admin/sso/login`.
-
-**5. Attribute Requester URL/URN**
-
-Same as our EntityID — no separate value:
-
-`https://chatbot.lib.miamioh.edu/admin/sso/metadata`
-
-**6. SP-initiated or IdP-initiated**
-
-**SP-initiated**, as you recommend. We do not need an IdP-initiated flow.
-
-**Other details you may want**
-
-| | |
-|---|---|
-| ACS (Assertion Consumer Service) | `https://chatbot.lib.miamioh.edu/admin/sso/acs`, HTTP-POST |
-| Single Logout | Not implemented, and not advertised in our metadata |
-| AuthnRequests | Signed (our signing certificate is in the metadata) |
-| Assertions | We require them signed |
-| Expected volume | Very low — five accounts, a handful of sign-ins per week |
-
-**Testing.** Your article notes that test accounts are not provided but that
-you are happy to test on request. We would appreciate that. Our side is
-already deployed, so we can test whenever suits you.
-
-**Contact.** Meng Qu, Miami University Libraries — qum@miamioh.edu
-
-Thank you,
-Meng
+Meng Qu, Miami University Libraries — qum@miamioh.edu
 
 ---
 
-## Notes for us, not for the ticket
+## For us, not the ticket
 
-**Before sending**, confirm the metadata URL serves the current document:
+**Before sending**, confirm the deployed metadata is the corrected one:
 
 ```bash
 curl -s https://chatbot.lib.miamioh.edu/admin/sso/metadata | grep -c SingleLogoutService
 ```
 
-Must print `0`. An earlier draft advertised an SLS endpoint that did not
-exist; if this prints `1`, the fix has not been deployed yet and IT would be
-configuring a dead endpoint.
+Must print `0`. An earlier draft advertised an SLS endpoint that does not
+exist; `1` means the fix is not deployed and IT would configure a dead
+endpoint.
 
-**When IT confirms they are done**, our side is one variable:
+**When IT is done:** set `SSO_ENABLED=true` in `.env` and restart (~80s of
+502 while it warms up). Nothing else changes.
 
-```
-SSO_ENABLED=true      # in /opt/chatbot/.env, then restart
-```
+**After all five have signed in once:** set
+`SSO_ALLOW_TOKEN_FALLBACK=false`. Not before.
 
-Nothing else changes. Expect roughly 80 seconds of warm-up after the
-restart, during which the site returns 502.
-
-**Then, and only then**, turn off the shared token:
-
-```
-SSO_ALLOW_TOKEN_FALLBACK=false
-```
-
-Do that once all five accounts have signed in successfully at least once —
-not before. The kill switch at `/admin/service` is deliberately outside SSO
-and is unaffected either way.
-
-**The access list** is `SSO_ALLOWED_UIDS` in `.env`:
-`qum, bomholmm, maderir, irwinkr, yarnete`. Removing a uid takes effect on
-that person's next request.
+Access list is `SSO_ALLOWED_UIDS`: `qum, bomholmm, maderir, irwinkr,
+yarnete`. Removals take effect on that person's next request. The kill
+switch at `/admin/service` sits outside SSO and is unaffected throughout.
