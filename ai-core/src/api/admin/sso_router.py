@@ -21,6 +21,24 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+# Module level, NOT inside make_admin_guard. `from __future__ import
+# annotations` above makes every annotation a string, and FastAPI resolves a
+# dependency's annotations against its MODULE globals. A Request imported
+# inside the factory is invisible there, so FastAPI treated `request:
+# Request` as a request body and returned 422 for every guarded admin page.
+#
+# This shipped to production on 2026-08-21 and broke /admin/review,
+# /admin/cost, /admin/corrections/view and /admin/tickets/view. The unit
+# tests missed it because they call the guard directly with a stub, which
+# never exercises FastAPI's dependency resolution -- see
+# test_guard_through_a_real_app in test_sso.py, which does.
+try:  # pragma: no cover - FastAPI is always present in production
+    from fastapi import Request as _FastAPIRequest
+except ImportError:  # pragma: no cover
+    _FastAPIRequest = object  # type: ignore[assignment,misc]
+
+Request = _FastAPIRequest
+
 from src.api.admin.sso import (
     COOKIE_PATH,
     SESSION_COOKIE,
@@ -217,7 +235,7 @@ def make_admin_guard(*, cfg: SSOConfig, token: str = ""):
     startup, so switching the fallback off is a restart, not a redeploy, and
     switching it back on during an incident is the same.
     """
-    from fastapi import HTTPException, Request  # type: ignore
+    from fastapi import HTTPException  # type: ignore
 
     async def guard(request: Request) -> None:
         if cfg.enabled:

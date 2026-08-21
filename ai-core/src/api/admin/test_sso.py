@@ -325,3 +325,65 @@ async def test_with_sso_off_the_guard_is_the_old_token_check():
     assert await _run(g, _Req(query="key=tok")) is None
     e = await _run(g, _Req(query="key=wrong"))
     assert e is not None and e.status_code == 401
+
+
+# --- through a REAL app, not a stub ----------------------------------------
+#
+# Every guard test above calls `guard(fake_request)` directly. That proves
+# the logic and proves nothing about whether FastAPI can WIRE it, which is a
+# separate failure with the same symptom: a dashboard that returns 422 to
+# everyone. It shipped exactly that way on 2026-08-21, with all 49 unit
+# tests green, because `Request` was imported inside the factory and
+# `from __future__ import annotations` left FastAPI resolving the name
+# against module globals where it did not exist.
+#
+# These go through TestClient so the wiring is exercised too.
+
+
+def _app_with_guard(c, token="tok"):
+    from fastapi import Depends, FastAPI
+
+    from src.api.admin.sso_router import make_admin_guard
+
+    app = FastAPI()
+    g = make_admin_guard(cfg=c, token=token)
+
+    @app.get("/admin/thing")
+    async def thing(_u=Depends(g)):
+        return {"ok": True}
+
+    from starlette.testclient import TestClient
+    return TestClient(app, raise_server_exceptions=False)
+
+
+def test_a_guarded_route_is_wired_and_never_returns_422():
+    # 422 means FastAPI could not resolve the dependency's annotations and
+    # treated the Request as a request body. It is the signature of this bug.
+    client = _app_with_guard(cfg(allow_token_fallback=False))
+    r = client.get("/admin/thing", headers={"accept": "application/json"})
+    assert r.status_code != 422, "the guard is mis-wired: Request read as a body"
+    assert r.status_code == 401
+
+
+def test_the_token_opens_a_real_route():
+    client = _app_with_guard(cfg(allow_token_fallback=True))
+    r = client.get("/admin/thing?key=tok")
+    assert r.status_code == 200, r.text
+    assert r.json() == {"ok": True}
+
+
+def test_a_real_sso_session_opens_a_real_route():
+    from src.api.admin.sso import SESSION_COOKIE
+    c = cfg(allow_token_fallback=False)
+    client = _app_with_guard(c, token="")
+    client.cookies.set(SESSION_COOKIE, issue_session("qum", c))
+    r = client.get("/admin/thing")
+    assert r.status_code == 200, r.text
+
+
+def test_a_browser_is_redirected_by_a_real_route():
+    client = _app_with_guard(cfg(allow_token_fallback=False), token="")
+    r = client.get("/admin/thing", headers={"accept": "text/html"},
+                   follow_redirects=False)
+    assert r.status_code == 307
+    assert r.headers["location"].startswith("/admin/sso/login?next=")
