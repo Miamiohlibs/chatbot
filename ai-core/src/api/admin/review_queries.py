@@ -35,6 +35,15 @@ from typing import Any, Optional
 logger = logging.getLogger(__name__)
 
 LIBRARY_TZ = "America/New_York"
+
+# The bot went live to the public at 6:00pm Oxford time on 13 August 2026.
+# Everything before that instant is development and staff rehearsal, and
+# mixing it into the same lists makes "what happened during the beta" a
+# question nobody can answer from the screen -- 13 August alone carried 88
+# pre-launch conversations against 5 after.
+#
+# The data is untouched; only the operator views start here.
+BETA_START_LOCAL = "2026-08-13T18:00:00"
 """Kept as a literal rather than imported from config.budget: this module is
 read-only and deliberately dependency-light, and one string is cheaper than a
 coupling. If the libraries ever move, both change."""
@@ -481,6 +490,15 @@ async def list_conversations_on(db: Any, day: "str", *,
         end_local = start_local + _td(days=1)
         start = start_local.astimezone(timezone.utc)
         end = end_local.astimezone(timezone.utc)
+
+        # Clamp to the launch instant. On 13 August this trims the day to
+        # its last six hours; on every later day it changes nothing.
+        beta = datetime.fromisoformat(BETA_START_LOCAL).replace(
+            tzinfo=tz).astimezone(timezone.utc)
+        if end <= beta:
+            return {"rows": [], "total": 0, "offset": offset, "limit": limit,
+                    "source_counts": {}, "before_beta": True}
+        start = max(start, beta)
     except Exception:  # noqa: BLE001 -- a bad date must not 500 the page
         return {"rows": [], "total": 0, "offset": offset, "limit": limit,
                 "source_counts": {}}
@@ -562,7 +580,7 @@ async def list_conversations_on(db: Any, day: "str", *,
     # bounded lookup, not a scan.
     await mark_replays(db, [v for v in out if not v["source"]["label"]])
     for v in out:
-        if v.get("is_replay") and not v["source"]["label"]:
+        if (v.get("is_replay") or v.get("is_echo")) and not v["source"]["label"]:
             v["source"] = classify_source(v)
 
     # Counted BEFORE the filter and before paging: a badge on "Staff test"
@@ -783,6 +801,24 @@ SCRIPT_MEDIAN_GAP_S = 5.0
 # questions.
 REPLAY_MIN_CHARS = 40
 
+# A conversation that ORIGINATES nothing. Every question in it was already
+# asked, by somebody else, earlier -- so it contributed no new question to
+# the record, which is what a replay is and what a person almost never does.
+#
+# Weaker per-question than REPLAY_MIN_CHARS on purpose: the strength comes
+# from ALL of them being second-hand, not from any one being distinctive. A
+# floor still applies so a conversation consisting of "hi" is not condemned
+# for being unoriginal.
+#
+# Twenty, not fifteen. At fifteen the rule claimed a second person asking
+# "when do you close" (17 characters) -- two patrons wanting the same
+# ordinary thing, read as a machine. Twenty keeps the probe questions that
+# prompted this ("I need to digitize a piece of music", "what is LOLA and
+# how do I use it") and lets the short common ones go. Under-claiming is the
+# side to err on: a replay left unattributed costs a slightly high count,
+# and a patron called a script costs the count its meaning.
+ECHO_MIN_CHARS = 20
+
 
 def mark_bursts(rows: list) -> None:
     """Label runs of conversations opened too close together to be separate
@@ -838,6 +874,9 @@ async def mark_replays(db: Any, rows: list) -> None:
             if len(_repeat_key(q)) >= REPLAY_MIN_CHARS:
                 candidates.setdefault(q, []).append(r)
     if not candidates:
+        # Still worth the echo pass: it needs no distinctive question, only
+        # that none of them was asked first.
+        await _mark_echoes(db, rows)
         return
     try:
         earlier = await db.message.find_many(
@@ -859,6 +898,48 @@ async def mark_replays(db: Any, rows: list) -> None:
         for r in targets:
             if first_cid and first_cid != r["conversation_id"]:
                 r["is_replay"] = True
+
+    await _mark_echoes(db, rows)
+
+
+async def _mark_echoes(db: Any, rows: list) -> None:
+    """Flag conversations in which nothing was asked first."""
+    wanted: dict = {}
+    for r in rows:
+        if r.get("is_replay"):
+            continue
+        allq = [q for q in (r.get("questions") or []) if q]
+        # At least one question substantial enough to be worth tracing, and
+        # then EVERY question is checked -- a greeting does not excuse the
+        # rest, and it does not condemn them either.
+        if allq and any(len(_repeat_key(q)) >= ECHO_MIN_CHARS for q in allq):
+            for q in allq:
+                wanted.setdefault(q, []).append(r)
+    if not wanted:
+        return
+    try:
+        hits = await db.message.find_many(
+            where={"type": "user", "content": {"in": list(wanted)}},
+            order={"timestamp": "asc"}, take=3000)
+    except Exception:  # noqa: BLE001
+        return
+
+    first_of: dict = {}
+    for m in hits:
+        c = getattr(m, "content", "")
+        if c not in first_of:
+            first_of[c] = getattr(m, "conversationId", None)
+
+    originated: dict = {}
+    for text, targets in wanted.items():
+        for r in targets:
+            cid = r["conversation_id"]
+            originated.setdefault(cid, [False, r])
+            if first_of.get(text) == cid:
+                originated[cid][0] = True
+    for cid, (did, r) in originated.items():
+        if not did:
+            r["is_echo"] = True
 
 
 def _already_testing(conv: dict) -> bool:
@@ -996,6 +1077,13 @@ def classify_source(conv: dict) -> dict:
         return {"label": "staff test", "tag": "staff",
                 "why": "A library staff address or NetID appears in this "
                        "conversation. Who is not recorded here."}
+
+    if conv.get("is_echo"):
+        return {"label": "local test", "tag": "local",
+                "why": "Nothing in this conversation was asked first — every "
+                       "question in it had already been put to the bot by "
+                       "somebody else. A person originates at least one "
+                       "question; a replay originates none."}
 
     if conv.get("is_replay"):
         return {"label": "local test", "tag": "local",

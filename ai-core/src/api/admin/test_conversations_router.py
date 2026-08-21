@@ -600,3 +600,54 @@ async def test_a_short_common_question_repeating_is_not_a_replay():
               _msg("b", today, "user", "when do you close")])
     r = (await list_conversations_on(db, "2026-08-21"))["rows"][0]
     assert r["source"]["tag"] == "unlabelled"
+
+
+@pytest.mark.asyncio
+async def test_a_conversation_that_originates_nothing_is_a_replay():
+    """A person contributes at least one question nobody asked before.
+
+    Six conversations sat unattributed whose every question had already been
+    put to the bot by somebody else -- the developer's probe scripts, whose
+    whole job is to re-ask. The strength here is not any one question being
+    distinctive; it is all of them being second-hand.
+    """
+    y = dt.datetime(2026, 8, 20, 12, tzinfo=NY)
+    t = dt.datetime(2026, 8, 21, 12, tzinfo=NY)
+    db = _DB([
+        _msg("orig1", y, "user", "can i reserve a study room please"),
+        _msg("orig2", y, "user", "what time does the library close today"),
+        _msg("echo", t, "user", "can i reserve a study room please"),
+        _msg("echo", t + dt.timedelta(seconds=5), "user",
+             "what time does the library close today"),
+    ])
+    rows = {r["conversation_id"]: r
+            for r in (await list_conversations_on(db, "2026-08-21"))["rows"]}
+    assert rows["echo"]["source"]["tag"] == "local"
+    assert "asked first" in rows["echo"]["source"]["why"]
+
+
+@pytest.mark.asyncio
+async def test_originating_one_question_is_enough_to_stay_unattributed():
+    # A patron who opens with a question others have asked, then asks
+    # something new, is a patron.
+    y = dt.datetime(2026, 8, 20, 12, tzinfo=NY)
+    t = dt.datetime(2026, 8, 21, 12, tzinfo=NY)
+    db = _DB([
+        _msg("orig", y, "user", "what time does the library close today"),
+        _msg("person", t, "user", "what time does the library close today"),
+        _msg("person", t + dt.timedelta(minutes=1), "user",
+             "and is the third floor open for quiet study tonight"),
+    ])
+    rows = {r["conversation_id"]: r
+            for r in (await list_conversations_on(db, "2026-08-21"))["rows"]}
+    assert rows["person"]["source"]["tag"] == "unlabelled"
+
+
+@pytest.mark.asyncio
+async def test_a_conversation_of_only_greetings_is_not_condemned():
+    # "hi" repeats forever and says nothing about who typed it.
+    y = dt.datetime(2026, 8, 20, 12, tzinfo=NY)
+    t = dt.datetime(2026, 8, 21, 12, tzinfo=NY)
+    db = _DB([_msg("a", y, "user", "hi"), _msg("b", t, "user", "hi")])
+    rows = (await list_conversations_on(db, "2026-08-21"))["rows"]
+    assert all(r["source"]["tag"] == "unlabelled" for r in rows)

@@ -24,6 +24,7 @@ from typing import Any
 
 from src.api.admin import admin_ui as ui
 from src.api.admin.review_queries import (
+    BETA_START_LOCAL,
     LIBRARY_TZ,
     SOURCE_TAGS,
     conversation_days,
@@ -83,9 +84,10 @@ def build_conversations_router(deps: dict) -> Any:
         # No forward arrow past today: an empty page for tomorrow reads as a
         # data problem rather than as a calendar you walked off the end of.
         nav = (
-            f"<a class='tag' href='/admin/conversations?day={_e(prev_d)}{kq}'>"
-            f"&larr; {_e(prev_d)}</a> "
-            f"<b style='margin:0 .6rem'>{_e(day)}"
+            ("" if day <= BETA_START_LOCAL[:10] else
+               f"<a class='tag' href='/admin/conversations?day={_e(prev_d)}{kq}'>"
+               f"&larr; {_e(prev_d)}</a> ")
+            + f"<b style='margin:0 .6rem'>{_e(day)}"
             f"{' (today)' if is_today else ''}</b> "
             + ("" if next_d > today_local() else
                f"<a class='tag' href='/admin/conversations?day={_e(next_d)}{kq}'>"
@@ -144,9 +146,14 @@ def build_conversations_router(deps: dict) -> Any:
             )
 
         if not rows:
+            gone = ("The bot went live to the public at 6:00pm on 13 August. "
+                    "Days before that are development and staff rehearsal, "
+                    "and are not shown here."
+                    if res.get("before_beta") else
+                    f"Nobody asked anything on {_e(day)}.")
             body = (
                 f"<h1>Conversations</h1><div style='margin:.6rem 0'>{nav}</div>"
-                f"<p class='dim'>Nobody asked anything on {_e(day)}.</p>"
+                f"<p class='dim'>{gone}</p>"
                 f"<div style='margin-top:1rem'>{recent}</div>"
             )
             return HTMLResponse(ui.page("Conversations", body,
@@ -200,7 +207,10 @@ def build_conversations_router(deps: dict) -> Any:
             f"<h1>Conversations</h1>"
             f"<div style='margin:.6rem 0'>{nav}</div>"
             f"<div class='filter-bar'>{source_bar}</div>"
-            f"<p class='dim'>{total} conversation(s) on this day"
+            + (f"<p class='dim'>13 August is shown from 6:00pm, when the "
+               f"bot went live to the public.</p>"
+               if day == BETA_START_LOCAL[:10] else "")
+            + f"<p class='dim'>{total} conversation(s) on this day"
             + (f" &middot; <b>{needs}</b> on this page worth a look" if needs else "")
             + " &middot; <span title='A label is only shown when something in "
               "the transcript supports it. No label means nothing does — the "
