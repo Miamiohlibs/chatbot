@@ -129,3 +129,27 @@ Recorded because each one nearly produced a false report:
 - The five corrections that never fire — either fix their matching or retire
   them; a mechanism that has never worked is worse than none, because it
   looks like coverage.
+
+
+---
+
+## 5. Why the pre-commit check keeps blocking eval results
+
+Per-question eval output contains the bot's ANSWERS, and those answers quote
+subject-librarian names, emails and desk numbers. The data check sees contact
+details in bulk and blocks the commit. **Its caution is correct by default and
+you should not work around it.**
+
+What the details actually are, checked 2026-08-21: exactly the contacts the bot
+publishes to any student who asks who their subject librarian is — e.g.
+`boehmemv@miamioh.edu, (513) 529-1726` appears verbatim in today's answers.
+Work contact details the Libraries publish and the bot hands out by design. No
+passwords, no reader records, no student identifiers.
+
+So: not a leak, and also not something to keep adding to a public repository
+for no reason. Six eval files committed between July and August already carry
+them (4–30 occurrences each). Current runs are written to
+`/opt/chatbot-private-data/eval-runs/` and the shape is gitignored.
+
+If you need to commit an eval report, commit the summary, not the per-question
+answers.
