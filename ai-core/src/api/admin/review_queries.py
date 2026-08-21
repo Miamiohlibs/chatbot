@@ -785,14 +785,33 @@ def mark_bursts(rows: list) -> None:
             }
 
 
+def _already_testing(conv: dict) -> bool:
+    """True when something already attributes this conversation to testing."""
+    if conv.get("origin") == "staff" or conv.get("has_dev_row"):
+        return True
+    burst = conv.get("burst")
+    return bool(burst and burst.get("scripted"))
+
+
 def _repeat_key(text: str) -> str:
     import re as _re
     return _re.sub(r"[^a-z0-9]+", " ", (text or "").lower()).strip()
 
 
 def mark_repeats(rows: list) -> None:
-    """Flag the same question asked again in a different conversation."""
+    """Flag the same question asked again in a different conversation.
+
+    ONLY among conversations nothing has attributed yet. The developer
+    replayed 206 real patron questions through a script on 19-20 August, so
+    every genuine question now has a scripted twin -- and counting those
+    twins made the ORIGINAL look like somebody re-checking. One patron's
+    question about SWORD was relabelled "possibly staff" by the replay of
+    itself.
+
+    Testing must not be allowed to reclassify the traffic it was testing.
+    """
     seen: dict = {}
+    rows = [r for r in rows if not _already_testing(r)]
     for r in rows:
         for q in (r.get("questions") or []):
             k = _repeat_key(q)
@@ -805,6 +824,29 @@ def mark_repeats(rows: list) -> None:
         for r in group:
             r["repeated_question"] = max(r.get("repeated_question", 0),
                                          len(group))
+
+def _known_staff_addresses() -> frozenset:
+    """Addresses that belong to people who run this service.
+
+    Read from the settings that already list them -- the kill-switch
+    operators and the SSO allow-list -- rather than a new list nobody would
+    remember to update.
+    """
+    import os as _os
+    out = set()
+    for var in ("SERVICE_PAUSE_OPERATORS", "ALERT_EMAIL_TO",
+                "ALERT_EMAIL_TO_URGENT"):
+        for part in (_os.getenv(var, "") or "").replace(";", ",").split(","):
+            part = part.strip().lower()
+            if "@" in part:
+                out.add(part)
+    for uid in (_os.getenv("SSO_ALLOWED_UIDS", "") or "").replace(
+            ";", ",").split(","):
+        uid = uid.strip().lower()
+        if uid:
+            out.add(f"{uid}@miamioh.edu")
+    return frozenset(out)
+
 
 def classify_source(conv: dict) -> dict:
     """{'label', 'why', 'tag'} for one conversation summary row.
@@ -825,6 +867,18 @@ def classify_source(conv: dict) -> dict:
 
     qs = conv.get("questions") or []
     joined = " ".join(qs).lower()
+
+    # Somebody typed an operator's own address into the chat -- the booking
+    # flow asks for one. That is not an inference about how they typed; it
+    # is the address of a person who runs this service.
+    staff_addrs = _known_staff_addresses()
+    if staff_addrs:
+        low = joined.lower()
+        hit_addr = next((a for a in staff_addrs if a in low), "")
+        if hit_addr:
+            return {"label": "staff test", "tag": "staff",
+                    "why": f"An operator's own address ({hit_addr}) was "
+                           f"typed into this conversation."}
 
     said = next((p for p in _SELF_DECLARED
                  if any(p in (q or "").lower()[:60] for q in qs)), "")

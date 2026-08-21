@@ -449,3 +449,63 @@ async def test_the_dev_flag_still_wins_when_the_pace_is_human():
     rows = (await list_conversations_on(db, "2026-08-21"))["rows"]
     assert all(r["source"]["tag"] == "local" for r in rows)
     assert "no browser origin" in rows[0]["source"]["why"]
+
+
+# --- testing must not reclassify the traffic it was testing -----------------
+
+
+@pytest.mark.asyncio
+async def test_a_scripted_replay_does_not_relabel_the_question_it_replayed():
+    """The developer replayed 206 real questions on 19-20 August.
+
+    That gave every genuine question a scripted twin, and the repeat rule
+    then read the ORIGINAL as somebody re-checking. One patron's question
+    about SWORD was relabelled "possibly staff" by the replay of itself.
+    """
+    base = dt.datetime(2026, 8, 21, 9, tzinfo=NY)
+    db = _DB([
+        _msg("patron", base, "user", "can library affiliates borrow at SWORD"),
+        _msg("replay", base + dt.timedelta(hours=8), "user",
+             "can library affiliates borrow at SWORD"),
+    ], dev_convs=["replay"])
+    rows = {r["conversation_id"]: r
+            for r in (await list_conversations_on(db, "2026-08-21"))["rows"]}
+    assert rows["replay"]["source"]["tag"] == "local"
+    assert rows["patron"]["source"]["tag"] == "unlabelled", \
+        "the replay must not reach back and relabel what it replayed"
+
+
+@pytest.mark.asyncio
+async def test_two_unattributed_conversations_still_count_as_a_repeat():
+    # The rule still works where it should -- it is scoped, not disabled.
+    base = dt.datetime(2026, 8, 21, 9, tzinfo=NY)
+    db = _DB([
+        _msg("a", base, "user", "who is the education librarian"),
+        _msg("b", base + dt.timedelta(hours=2), "user",
+             "who is the education librarian"),
+    ])
+    rows = (await list_conversations_on(db, "2026-08-21"))["rows"]
+    assert all(r["source"]["tag"] == "maybe-staff" for r in rows)
+
+
+@pytest.mark.asyncio
+async def test_an_operator_address_typed_into_the_chat_is_staff(monkeypatch):
+    monkeypatch.setenv("SERVICE_PAUSE_OPERATORS", "qum@miamioh.edu")
+    noon = dt.datetime(2026, 8, 21, 12, tzinfo=NY)
+    db = _DB([_msg("bk", noon, "user", "book a room for me"),
+              _msg("bk", noon + dt.timedelta(seconds=30), "user",
+                   "qum@miamioh.edu")])
+    r = (await list_conversations_on(db, "2026-08-21"))["rows"][0]
+    assert r["source"]["tag"] == "staff"
+    assert "own address" in r["source"]["why"]
+
+
+@pytest.mark.asyncio
+async def test_a_patron_address_is_not_treated_as_staff(monkeypatch):
+    monkeypatch.setenv("SERVICE_PAUSE_OPERATORS", "qum@miamioh.edu")
+    noon = dt.datetime(2026, 8, 21, 12, tzinfo=NY)
+    db = _DB([_msg("bk", noon, "user", "book a room"),
+              _msg("bk", noon + dt.timedelta(seconds=30), "user",
+                   "student123@miamioh.edu")])
+    r = (await list_conversations_on(db, "2026-08-21"))["rows"][0]
+    assert r["source"]["tag"] == "unlabelled"
