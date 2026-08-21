@@ -1,11 +1,114 @@
 # Handover — Miami University Libraries Smart Chatbot
 
-**For:** Rachel (admin surfaces) · 小马哥 (oversight) · Ken (engineering)
-**Written:** 2026-08-21 · **Live since:** 2026-08-13 18:00 EDT
+**For:** Rachel · Ken · Mike (小马哥) · **Written:** 2026-08-21
 
-Every number in this document was read out of the running system or the
-database on 2026-08-21. Where something is unmeasured, unknown or broken, it
-says so. Nothing here is estimated unless the word "estimate" appears.
+The chatbot on the Libraries site answers hours, locations, borrowing, rooms,
+and who to ask. Three people end up holding a piece of it. **Sections A–C are
+that piece.** Everything from section 1 onward is reference for whoever is
+maintaining it and is not meeting material.
+
+---
+
+## A. Rachel — the machine stays up
+
+**You leave with** a place on the emergency email list, and the ability to
+switch the bot off.
+
+**Routine work: none.** A watchdog restarts the service every five minutes if
+it dies, and backups run nightly at 03:30. **If an email reaches you, the
+automatic recovery already failed.**
+
+**Your lever:** pause it. Patrons then see an out-of-service notice instead of
+answers. No wrong answers go out while it is paused, and it can wait until
+morning.
+
+**One warning:** the host has 4 GB of memory and the service holds about a
+quarter of it. Do not run heavy jobs there — a full test run has already been
+killed by the kernel for taking the rest.
+
+---
+
+## B. Ken — what the bot is allowed to know
+
+**You leave with the signature.** The bot's knowledge cannot change unless
+somebody signs for it, and since you and Meng built the website that content
+comes from, that somebody should be you.
+
+**How it works.** Website changes do *not* reach the bot automatically. A job
+prepares a **diff** — every page added, changed or removed — and stops. You
+read it, put your email in the approval file, and only then can it be applied.
+The signature is bound to that exact diff: edit the diff afterwards and the
+signature stops matching, deliberately.
+
+**What you are judging.** Not code. One question per change: *is this what the
+Libraries actually want to say?* That is a website question, not an AI question.
+
+**Also available to you:** the admin view — every conversation, what the bot
+answered, and which links it showed. Useful when somebody says "the bot told me
+the wrong thing".
+
+Procedure: `ai-core/scripts/etl/FIRST_RUN.md`.
+
+---
+
+## C. Mike — the ceiling
+
+**You leave with** a place on the emergency email list, for one reason: the
+month's allowance running out means students start being turned away.
+
+**Where it stands:** real student use costs about **$3 a month against a $45
+allowance**. It has never come close.
+
+**It does not fail straight to off.** As spend climbs the bot gets cheaper and
+terser in stages, and only refuses at the very top. You would be warned long
+before students noticed.
+
+**Your decision:** whether to raise or lower that ceiling. Nobody else should
+change it.
+
+---
+
+## D. What counts as an emergency
+
+Two situations. Both email Rachel and Mike immediately; everything else waits.
+
+| # | Situation | Who acts |
+|---|---|---|
+| 1 | The service, or something it depends on, is down **and did not recover on its own** | **Rachel** acts, Mike informed |
+| 2 | The month's allowance is spent — students are being turned away for budget reasons | **Mike** decides, Rachel informed |
+
+Neither pages anyone overnight. The bot's failure mode is a polite refusal
+pointing at Ask Us, so the worst case can wait for business hours.
+
+### Everything else comes to Meng
+
+A thumbs-down, a low rating, a refused prompt-injection attempt, a rate-limit
+trip — collected and sent as **one daily digest**, to Meng, not to Rachel or
+Mike. That is deliberate: thirty emails a day guarantees a filter rule and a
+colleague who has stopped reading, which is worse than not adding them,
+because then everyone believes it is being watched when it is not.
+
+| What happens | Who hears | When |
+|---|---|---|
+| Service or dependency down | Rachel, Mike, Meng | immediately |
+| Monthly allowance exhausted | Rachel, Mike, Meng | immediately |
+| Thumbs-down / low rating | Meng | daily digest |
+| Refused injection attempt | Meng | daily digest |
+| Rate limit tripped | Meng | daily digest |
+| Librarian reports a wrong answer | Meng; Ken can see it | admin queue |
+
+### To switch this on
+
+One line in `.env`, currently commented out with placeholder addresses:
+
+```
+# ALERT_EMAIL_TO_URGENT=<meng>, <rachel>, <mike>
+```
+
+Uncomment it with the three real addresses and restart. **Until that is done,
+every alert — urgent included — goes only to Meng.** The two urgent kinds are
+defined in `src/observability/incident_alerts.py` as `URGENT_KINDS`; adding a
+third is a deliberate act, not a config tweak.
 
 ---
 
@@ -85,46 +188,13 @@ month's spend is us testing it.
 
 ## 4. Who can do what
 
-### Rachel — admin surfaces, no code
+Sections A, B and C above. Not repeated here so the two cannot drift apart.
 
-| You can | Where |
-|---|---|
-| Read every conversation, with intent, scope, confidence, citations and which links were shown | `/admin/review` |
-| See which model answered — or that **no model did** | the model chip on each ticket |
-| Work the correction queue when a librarian reports a wrong answer | `/admin/tickets/view` |
-| See spend by day and by model | `/admin/cost` |
-| **Pause the bot** and bring it back | kill switch, below |
-
-All admin routes need `ADMIN_API_TOKEN`. **The token travels in the URL query
-string, so it is written to the web-server access log** — checked on
-2026-08-21: `key=` appears 203 times in the current log. It is not a secret
-once it has been used. Treat it as rotatable, and do not paste an admin URL
-into a ticket or an email.
-
-### Ken — engineering
-
-Everything Rachel can do, plus the code. Read in this order:
-
-1. `docs/programmer-guide/00-INDEX.md` — architecture
-2. `ai-core/src/graph/new_orchestrator.py` — the turn pipeline. Long, and
-   heavily commented: nearly every rule carries the date and the real question
-   that caused it. **Read the comments before changing a matcher.**
-3. `docs/OPEN-WORK.md` — what is still wrong and the traps in measuring it
-
-### 小马哥 — oversight
-
-The decisions that are yours, not the code's:
-
-- **Scope.** Whether the bot may ever answer holdings questions rather than
-  routing them. Today it may not, by the librarians' decision.
-- **Budget.** The ladder tightens the bot's behaviour as spend rises and can
-  stop it entirely. Current purses: serving $45/month, evaluation $75/month.
-- **The subject-referral vocabulary.** A list of terms that let the bot
-  volunteer a subject librarian. It is with Kevin Messner for review.
-- **Staff testing.** Testing traffic is now the majority of spend and it
-  pollutes the quality sample. It needs a convention.
-
----
+Everything all three share: the admin surfaces need `ADMIN_API_TOKEN`. **The
+token travels in the URL query string, so it is written to the web-server
+access log** — checked 2026-08-21, `key=` appears 203 times in the current log.
+It is not a secret once used. Treat it as rotatable, and do not paste an admin
+URL into a ticket or an email.
 
 ## 5. What you can change without a developer
 
