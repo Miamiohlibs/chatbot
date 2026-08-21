@@ -206,6 +206,9 @@ def render_librarian_hub(code: str) -> str:
     # Written flat and without an SLA on purpose: staff worry that a bad
     # bot answer becomes their follow-up work, and a promise we cannot
     # keep would confirm it. These four lines are all true today.
+    # Two lines, not four. The point of this block is to answer "does this
+    # become my problem?" -- everything past that was reassurance nobody
+    # asked for, and length reads as a process.
     after = (
         "<h2>What happens after you send it</h2>"
         "<p class='sub'>Reporting it is the whole job. Nothing comes back "
@@ -215,11 +218,6 @@ def render_librarian_hub(code: str) -> str:
         "send it.</li>"
         "<li>The maintainer fixes the source page, or overrides the "
         "answer directly.</li>"
-        "<li>An override takes effect on the very next message &mdash; "
-        "no deploy, no waiting for a release.</li>"
-        "<li>You are not assigned anything and you do not need to follow "
-        "up. If the fix needs something only you know, the maintainer "
-        "emails you.</li>"
         "</ol></div>"
     )
     # The testing link. Kept separate from the report card because it is a

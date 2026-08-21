@@ -136,10 +136,12 @@ def render_form(key: str, values: dict | None = None,
                 f"<input type='text' id='{name}' name='{name}' value='{val}'>")
     body = (
         "<h1>Report a wrong chatbot answer</h1>"
+        # No address here. Naming the maintainer invites staff to email
+        # instead of using the form, and an emailed report has no queue, no
+        # status, and nothing to work from later.
         "<p class='lede'>Spotted the Smart Chatbot giving a wrong or "
-        "outdated answer? Describe it below &mdash; the report goes straight "
-        "to the maintainer (<a href='mailto:qum@miamioh.edu'>qum@miamioh.edu"
-        "</a>).</p>"
+        "outdated answer? Describe it below and it goes straight to the "
+        "maintainer.</p>"
         f"{err_html}"
         "<div class='card'><form method='post'>"
         f"<input type='hidden' name='key' value='{ui.e(key)}'>"

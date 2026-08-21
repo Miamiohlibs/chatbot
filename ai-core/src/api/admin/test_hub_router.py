@@ -112,4 +112,7 @@ def test_staff_hub_drops_ask_us_and_says_what_reporting_costs_them():
     r = c.get("/librarian/?key=staffcode")
     assert "research-support/ask" not in r.text
     assert "What happens after you send it" in r.text
-    assert "do not need to follow" in r.text
+    # The four-step list was cut to two on 2026-08-21 -- length read as a
+    # process. The reassurance that matters moved to the line above it, and
+    # that is what this asserts: the wording changed, the promise did not.
+    assert "Nothing comes back to you" in r.text
