@@ -259,3 +259,4 @@ ai-core/data/raw/*.csv
 # reaching for --no-verify. Runs live in /opt/chatbot-private-data/eval-runs/.
 /ai-core/docs/eval/cat_run_*/
 /ai-core/docs/eval/cat_*.jsonl
+/docs/SSO.pdf
