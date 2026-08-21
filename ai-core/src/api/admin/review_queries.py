@@ -728,6 +728,20 @@ _THIRD_PARTY = (
 BURST_GAP_S = 90.0
 BURST_MIN = 4
 
+# A script opens conversations about a second and a half apart. A person
+# cannot: they have to read the answer, open a new window and type. Measured
+# on 21 August against three known runs --
+#
+#   scripted probe          median gap 1.5s   (min 1.0s)
+#   scripted probe, 17 Aug  median gap 1.7s   (min 1.3s)
+#   staff testing by hand   median gap 43.0s  (min 7.8s)
+#
+# -- so five seconds sits in open space between the two, and the separation
+# is physical rather than a guess about intent. Without it, a probe that
+# happens to send a browser header (as the developer's did) leaves no
+# ModelTokenUsage marker and gets read as a person.
+SCRIPT_MEDIAN_GAP_S = 5.0
+
 
 def mark_bursts(rows: list) -> None:
     """Label runs of conversations opened too close together to be separate
@@ -750,13 +764,24 @@ def mark_bursts(rows: list) -> None:
     for group in runs:
         if len(group) < BURST_MIN:
             continue
-        scripted = any(g.get("has_dev_row") for g in group)
         span = (group[-1]["first_ts"] - group[0]["first_ts"]).total_seconds()
+        gaps = sorted(
+            (b["first_ts"] - a["first_ts"]).total_seconds()
+            for a, b in zip(group, group[1:]))
+        median_gap = gaps[len(gaps) // 2] if gaps else None
+
+        # Either signal is enough. The dev flag is a recorded fact; the
+        # cadence is a physical impossibility. A run that has neither is
+        # somebody working quickly, which is a different thing.
+        by_flag = any(g.get("has_dev_row") for g in group)
+        by_pace = median_gap is not None and median_gap <= SCRIPT_MEDIAN_GAP_S
         for g in group:
             g["burst"] = {
                 "n": len(group),
                 "span_s": span,
-                "scripted": scripted,
+                "median_gap_s": median_gap,
+                "scripted": by_flag or by_pace,
+                "by_pace": by_pace and not by_flag,
             }
 
 
@@ -815,6 +840,12 @@ def classify_source(conv: dict) -> dict:
 
     burst = conv.get("burst")
     if burst:
+        if burst.get("by_pace"):
+            return {"label": "local test", "tag": "local",
+                    "why": f"One of {burst['n']} conversations opened a "
+                           f"median {burst['median_gap_s']:.1f}s apart. "
+                           f"Nobody reads an answer, opens a new window and "
+                           f"types that fast — this is a script."}
         if burst["scripted"]:
             return {"label": "local test", "tag": "local",
                     "why": f"One of {burst['n']} conversations opened within "

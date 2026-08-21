@@ -403,3 +403,49 @@ async def test_the_staff_link_still_outranks_every_inference():
     rows = {r["conversation_id"]: r for r in
             (await list_conversations_on(db, "2026-08-21"))["rows"]}
     assert rows["b0"]["source"]["tag"] == "staff"
+
+
+# --- a script and a person testing are not the same thing ------------------
+#
+# The dev flag only exists on turns that reached a language model, and a
+# probe that sends a browser header does not set it at all -- the
+# developer's did not, so twelve obviously scripted conversations came back
+# as "possibly staff". The cadence separates them, and the separation is
+# physical: measured on 21 August, scripts ran a median 1.5s apart and staff
+# testing by hand 43.0s, with the fastest human gap at 7.8s.
+
+
+@pytest.mark.asyncio
+async def test_a_run_at_machine_speed_is_a_script_even_with_no_dev_flag():
+    db = _DB(_burst(6, gap_s=2))          # 2s apart, no dev row anywhere
+    rows = (await list_conversations_on(db, "2026-08-21"))["rows"]
+    assert all(r["source"]["tag"] == "local" for r in rows)
+    assert "types that fast" in rows[0]["source"]["why"]
+
+
+@pytest.mark.asyncio
+async def test_a_person_testing_quickly_is_not_called_a_script():
+    # 25s apart is somebody reading each answer before trying the next.
+    # Calling that a script would write off real staff testing as machine
+    # traffic and understate what a human actually checked.
+    db = _DB(_burst(6, gap_s=25))
+    rows = (await list_conversations_on(db, "2026-08-21"))["rows"]
+    assert all(r["source"]["tag"] == "maybe-staff" for r in rows)
+
+
+@pytest.mark.asyncio
+async def test_the_threshold_sits_between_the_two_measured_populations():
+    from src.api.admin.review_queries import SCRIPT_MEDIAN_GAP_S
+    # Scripts measured at 1.5s and 1.7s; the fastest human gap seen was
+    # 7.8s. The threshold has to leave both sides room.
+    assert 2.0 < SCRIPT_MEDIAN_GAP_S < 7.0
+
+
+@pytest.mark.asyncio
+async def test_the_dev_flag_still_wins_when_the_pace_is_human():
+    # A slow script is still a script. The recorded flag does not stop
+    # being a fact because somebody put a sleep in the loop.
+    db = _DB(_burst(6, gap_s=30), dev_convs=["b2"])
+    rows = (await list_conversations_on(db, "2026-08-21"))["rows"]
+    assert all(r["source"]["tag"] == "local" for r in rows)
+    assert "no browser origin" in rows[0]["source"]["why"]
