@@ -433,9 +433,19 @@ __all__ = ["FILTERS", "attach_feedback", "conversation_detail",
            "dashboard_counts", "list_flagged", "mark_reviewed"]
 
 
+SOURCE_TAGS = (
+    ("", "All"),
+    ("patron", "Unlabelled"),
+    ("staff", "Staff test"),
+    ("maybe-staff", "Possibly staff"),
+    ("local", "Local test"),
+)
+
+
 async def list_conversations_on(db: Any, day: "str", *,
                                 limit: int = 50,
-                                offset: int = 0) -> dict:
+                                offset: int = 0,
+                                source: str = "") -> dict:
     """Every conversation that had a question on `day` (YYYY-MM-DD, Oxford time).
 
     WHY THIS EXISTS
@@ -472,7 +482,8 @@ async def list_conversations_on(db: Any, day: "str", *,
         start = start_local.astimezone(timezone.utc)
         end = end_local.astimezone(timezone.utc)
     except Exception:  # noqa: BLE001 -- a bad date must not 500 the page
-        return {"rows": [], "total": 0, "offset": offset, "limit": limit}
+        return {"rows": [], "total": 0, "offset": offset, "limit": limit,
+                "source_counts": {}}
 
     try:
         msgs = await db.message.find_many(
@@ -480,7 +491,8 @@ async def list_conversations_on(db: Any, day: "str", *,
             order={"timestamp": "asc"},
         )
     except Exception:  # noqa: BLE001
-        return {"rows": [], "total": 0, "offset": offset, "limit": limit}
+        return {"rows": [], "total": 0, "offset": offset, "limit": limit,
+                "source_counts": {}}
 
     by_conv: dict = {}
     for m in msgs:
@@ -522,8 +534,29 @@ async def list_conversations_on(db: Any, day: "str", *,
                    if "dev" in (getattr(u, "callSite", "") or "")}
     except Exception:  # noqa: BLE001
         dev_ids = set()
+    try:
+        convs = await db.conversation.find_many(
+            where={"createdAt": {"gte": start, "lt": end}})
+        origins = {c.id: getattr(c, "origin", None) for c in convs}
+    except Exception:  # noqa: BLE001
+        origins = {}
     for v in out:
         v["has_dev_row"] = v["conversation_id"] in dev_ids
+        v["origin"] = origins.get(v["conversation_id"])
+        v["source"] = classify_source(v)
+
+    # Counted BEFORE the filter and before paging: a badge on "Staff test"
+    # has to say how many staff tests there are that day, not how many are
+    # on the page you are looking at.
+    source_counts: dict = {"": len(out)}
+    for v in out:
+        t = v["source"]["tag"]
+        key = "patron" if t == "unlabelled" else t
+        source_counts[key] = source_counts.get(key, 0) + 1
+
+    if source:
+        want = "unlabelled" if source == "patron" else source
+        out = [v for v in out if v["source"]["tag"] == want]
 
     out.sort(key=lambda r: r["first_ts"] or datetime.min.replace(
         tzinfo=timezone.utc), reverse=True)
@@ -536,8 +569,8 @@ async def list_conversations_on(db: Any, day: "str", *,
         r["first_question"] = r["questions"][0]
         r["needs_look"] = bool(r["refusals"] or r["thumbs_down"]
                                or r["low_confidence"])
-        r["source"] = classify_source(r)
-    return {"rows": out, "total": total, "offset": offset, "limit": limit}
+    return {"rows": out, "total": total, "offset": offset, "limit": limit,
+            "source_counts": source_counts}
 
 
 async def conversation_days(db: Any, *, limit: int = 30) -> list[dict]:
@@ -654,20 +687,27 @@ _THIRD_PARTY = (
 
 
 def classify_source(conv: dict) -> dict:
-    """{'label': str, 'why': str} for one conversation summary row.
+    """{'label', 'why', 'tag'} for one conversation summary row.
 
-    `conv` needs: questions (list[str]), question_times (list[datetime]),
-    has_dev_row (bool).
+    `conv` needs: questions, question_times, has_dev_row, origin.
+
+    Order matters: recorded facts before readings. `origin` is the strongest
+    signal there is -- somebody came through the staff link on purpose --
+    and it outranks any amount of clever inference from the transcript.
     """
+    if conv.get("origin") == "staff":
+        return {"label": "staff test", "tag": "staff",
+                "why": "Arrived through the staff-test link — recorded at "
+                       "connection, not inferred."}
     if conv.get("has_dev_row"):
-        return {"label": "local test",
+        return {"label": "local test", "tag": "local",
                 "why": "Reached the server with no browser origin — a script."}
 
     qs = conv.get("questions") or []
     joined = " ".join(qs).lower()
     hit = next((p for p in _THIRD_PARTY if p in joined), "")
     if hit:
-        return {"label": "staff?",
+        return {"label": "staff?", "tag": "maybe-staff",
                 "why": f"Asks on somebody else's behalf (“{hit}”) — "
                        f"phrasing a patron does not use about themselves."}
 
@@ -677,8 +717,8 @@ def classify_source(conv: dict) -> dict:
                       for i in range(len(times) - 1))
         median = gaps[len(gaps) // 2]
         if median <= STAFF_MAX_MEDIAN_GAP_S:
-            return {"label": "staff?",
+            return {"label": "staff?", "tag": "maybe-staff",
                     "why": f"{len(qs)} questions, median {median:.0f}s apart — "
                            f"the pace of working through a list, not of "
                            f"someone with a problem."}
-    return {"label": "", "why": ""}
+    return {"label": "", "tag": "unlabelled", "why": ""}

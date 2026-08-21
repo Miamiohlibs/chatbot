@@ -25,6 +25,7 @@ from typing import Any
 from src.api.admin import admin_ui as ui
 from src.api.admin.review_queries import (
     LIBRARY_TZ,
+    SOURCE_TAGS,
     conversation_days,
     list_conversations_on,
 )
@@ -63,13 +64,17 @@ def build_conversations_router(deps: dict) -> Any:
 
     @router.get("/admin/conversations", response_class=HTMLResponse)
     async def conversations(day: str = "", key: str = "", page: int = 1,
-                            per: int = 50, _g=Depends(guard)) -> Any:
+                            per: int = 50, source: str = "",
+                            _g=Depends(guard)) -> Any:
         day = day or today_local()
         page = max(1, page)
         per = min(max(per, 10), 200)
+        source = source if source in {t for t, _ in SOURCE_TAGS} else ""
         kq = f"&key={_e(key)}" if key else ""
+        sq = f"&source={_e(source)}" if source else ""
         res = await list_conversations_on(db, day, limit=per,
-                                          offset=(page - 1) * per)
+                                          offset=(page - 1) * per,
+                                          source=source)
         rows, total = res["rows"], res["total"]
         days = await conversation_days(db)
 
@@ -90,6 +95,18 @@ def build_conversations_router(deps: dict) -> Any:
                f"today</a>")
         )
 
+        # Every source is a link: clicking one shows that group. The count
+        # is the whole day for that source, not the page.
+        counts = res.get("source_counts") or {}
+        source_bar = " ".join(
+            f"<a class='tag{' active' if t == source else ''}' "
+            f"href='/admin/conversations?day={_e(day)}{('&source=' + t) if t else ''}"
+            f"{kq}'>{_e(label)}"
+            + (f" <span class='dim'>{counts[t]}</span>" if counts.get(t) else "")
+            + "</a>"
+            for t, label in SOURCE_TAGS
+        )
+
         recent = " ".join(
             f"<a class='tag{' active' if d['day'] == day else ''}' "
             f"href='/admin/conversations?day={_e(d['day'])}{kq}'>"
@@ -104,7 +121,7 @@ def build_conversations_router(deps: dict) -> Any:
             from fastapi.responses import RedirectResponse
             return RedirectResponse(
                 f"/admin/conversations?day={_e(day)}&page={pages}"
-                f"&per={per}{kq}", status_code=303)
+                f"&per={per}{sq}{kq}", status_code=303)
 
         def pager() -> str:
             if pages <= 1:
@@ -115,7 +132,7 @@ def build_conversations_router(deps: dict) -> Any:
                 if disabled:
                     return f"<span class='tag dim'>{label}</span>"
                 return (f"<a class='tag' href='/admin/conversations?day={_e(day)}"
-                        f"&page={p}&per={per}{kq}'>{label}</a>")
+                        f"&page={p}&per={per}{sq}{kq}'>{label}</a>")
             return (
                 f"<div style='margin:.8rem 0'>"
                 f"{lnk(1, '&laquo; first', page == 1)} "
@@ -135,15 +152,28 @@ def build_conversations_router(deps: dict) -> Any:
             return HTMLResponse(ui.page("Conversations", body,
                                         current="/admin/conversations", key=key))
 
+        _SRC_CLASS = {"staff": "thumbs_up", "local": "refusal",
+                      "maybe-staff": "low_confidence"}
+
+        def source_cell(r: dict) -> str:
+            """Its own column, not a flag.
+
+            Mixing "who was this" into the same row of chips as "this answer
+            was refused" made the operator read two unrelated questions out
+            of one line. They are different questions and they get different
+            columns.
+            """
+            src = r.get("source") or {}
+            if not src.get("label"):
+                return "<span class='dim'>&mdash;</span>"
+            cls = _SRC_CLASS.get(src.get("tag", ""), "low_confidence")
+            return (f"<a class='tag {cls}' title='{_e(src.get('why', ''))}' "
+                    f"href='/admin/conversations?day={_e(day)}"
+                    f"&source={_e(src.get('tag', ''))}{kq}'>"
+                    f"{_e(src['label'])}</a>")
+
         def row(r: dict) -> str:
             flags = []
-            src = r.get("source") or {}
-            if src.get("label"):
-                cls = "refusal" if src["label"] == "local test" else "low_confidence"
-                # title= carries the reason, so a label nobody can explain
-                # never appears on this page.
-                flags.append(f"<span class='tag {cls}' title='{_e(src['why'])}'>"
-                             f"{_e(src['label'])}</span>")
             if r["refusals"]:
                 flags.append(f"<span class='tag refusal'>{r['refusals']} refused</span>")
             if r["thumbs_down"]:
@@ -159,6 +189,7 @@ def build_conversations_router(deps: dict) -> Any:
             return (
                 f"<tr{' class=needs' if r['needs_look'] else ''}>"
                 f"<td class='num'>{_e(r['opened_hm'])}</td>"
+                f"<td>{source_cell(r)}</td>"
                 f"<td><a href='{href}'>{_e(r['first_question'][:110])}</a>{more}</td>"
                 f"<td class='num'>{r['asked']}</td>"
                 f"<td>{' '.join(flags)}</td></tr>"
@@ -168,6 +199,7 @@ def build_conversations_router(deps: dict) -> Any:
         body = (
             f"<h1>Conversations</h1>"
             f"<div style='margin:.6rem 0'>{nav}</div>"
+            f"<div class='filter-bar'>{source_bar}</div>"
             f"<p class='dim'>{total} conversation(s) on this day"
             + (f" &middot; <b>{needs}</b> on this page worth a look" if needs else "")
             + " &middot; <span title='A label is only shown when something in "
@@ -181,7 +213,7 @@ def build_conversations_router(deps: dict) -> Any:
             + f"<style>.convs tr.needs td{{background:#fffaf5}}"
             f".convs td.num{{text-align:right;white-space:nowrap;"
             f"font-variant-numeric:tabular-nums}}</style>"
-            f"<table><tr><th>Time</th><th>First question</th>"
+            f"<table><tr><th>Time</th><th>Source</th><th>First question</th>"
             f"<th>Asked</th><th></th></tr>"
             + "".join(row(r) for r in rows) + "</table>"
             + pager()

@@ -54,15 +54,21 @@ async def ensure_connection():
     if not prisma.is_connected():
         await prisma.connect()
 
-async def create_conversation(tool_used: List[str] = None) -> str:
-    """Create a new conversation and return its ID."""
+async def create_conversation(tool_used: List[str] = None,
+                              origin: "str | None" = None) -> str:
+    """Create a new conversation and return its ID.
+
+    `origin` records how the visitor arrived -- "staff" when they came
+    through the staff-test link, None for ordinary traffic. Stored rather
+    than inferred because inferring it means reading the transcript and
+    guessing, and a guess towards "patron" overstates real usage.
+    """
     await ensure_connection()
     prisma = get_prisma_client()
-    conversation = await prisma.conversation.create(
-        data={
-            "toolUsed": tool_used or []
-        }
-    )
+    data: dict = {"toolUsed": tool_used or []}
+    if origin:
+        data["origin"] = origin
+    conversation = await prisma.conversation.create(data=data)
     return conversation.id
 
 async def add_message(

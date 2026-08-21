@@ -455,6 +455,13 @@ from src.api.admin.killswitch_router import build_service_status_router  # noqa:
 
 app.include_router(build_service_status_router())
 
+# The staff-test link: /staff-test marks this browser session as testing and
+# redirects to the ordinary widget. Public and unguarded -- it grants
+# nothing, it only records which door somebody came through.
+from src.api.staff_test import build_staff_test_router  # noqa: E402
+
+app.include_router(build_staff_test_router())
+
 # The kill switch itself, mounted STANDALONE (2026-08-21).
 #
 # It used to sit inside the admin block, sharing the token guard with every
@@ -788,9 +795,14 @@ async def _v2_connect(sid, environ):
     client_ips[sid] = ip
     dev = _looks_like_dev_client(environ or {})
     client_is_dev[sid] = dev
+    # Which door they came through. The handshake already carries the
+    # request headers, so this needs nothing from the frontend.
+    from src.api.staff_test import origin_from_cookie_header
+    origin = origin_from_cookie_header((environ or {}).get("HTTP_COOKIE"))
     logging.info(f"🔌 [v2] Client connected: {sid}"
-                 f"{' (development / no browser origin)' if dev else ''}")
-    conversation_id = await create_conversation()
+                 f"{' (development / no browser origin)' if dev else ''}"
+                 f"{' [staff test]' if origin else ''}")
+    conversation_id = await create_conversation(origin=origin)
     client_conversations[sid] = conversation_id
     await sio_v2.emit(
         "status",

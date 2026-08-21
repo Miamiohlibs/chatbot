@@ -20,17 +20,24 @@ def _msg(cid, ts, type_="user", content="q", **kw):
 
 
 class _DB:
-    def __init__(self, msgs, dev_convs=()):
+    def __init__(self, msgs, dev_convs=(), origins=None):
+        self._origins = origins or {}
         self.message = NS(find_many=self._find)
         # The dev flag lives here, not on Message: a turn that reached the
         # server with no browser origin is tagged v2_turn_dev.
         self.modeltokenusage = NS(find_many=self._usage)
+        # origin lives on Conversation, and is the strongest signal there
+        # is -- somebody came through the staff link on purpose.
+        self.conversation = NS(find_many=self._convs)
         self._msgs = msgs
         self._dev = set(dev_convs)
         self.seen_where = None
 
     async def _usage(self, where=None, **_):
         return [NS(conversationId=c, callSite="v2_turn_dev") for c in self._dev]
+
+    async def _convs(self, where=None, **_):
+        return [NS(id=c, origin=o) for c, o in getattr(self, "_origins", {}).items()]
 
     async def _find(self, where=None, order=None, take=None):
         self.seen_where = where
@@ -68,7 +75,7 @@ async def test_an_evening_conversation_lands_on_the_oxford_day_not_the_utc_one()
 
     db = _DB([_msg("c1", evening), _msg("c1", evening, "assistant", "a")])
     assert len((await list_conversations_on(db, "2026-08-21"))["rows"]) == 1
-    assert await list_conversations_on(db, "2026-08-22") == {"rows": [], "total": 0, "offset": 0, "limit": 50}
+    assert (await list_conversations_on(db, "2026-08-22"))["rows"] == []
 
 
 @pytest.mark.asyncio
@@ -127,6 +134,7 @@ async def test_a_database_failure_empties_the_page_rather_than_500ing():
         def __init__(self):
             self.message = NS(find_many=self._raise)
             self.modeltokenusage = NS(find_many=self._raise)
+            self.conversation = NS(find_many=self._raise)
 
         async def _raise(self, **_):
             raise RuntimeError("postgres is having a moment")
@@ -220,3 +228,71 @@ async def test_a_patient_multi_question_session_is_not_called_staff():
               for i in range(6)])
     r = (await list_conversations_on(db, "2026-08-21"))["rows"][0]
     assert r["source"]["label"] == ""
+
+
+# --- the staff-test link ---------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_arriving_through_the_staff_link_is_recorded_not_guessed():
+    noon = dt.datetime(2026, 8, 21, 12, tzinfo=NY)
+    db = _DB([_msg("c1", noon, "user", "when do you close")],
+             origins={"c1": "staff"})
+    r = (await list_conversations_on(db, "2026-08-21"))["rows"][0]
+    assert r["source"]["label"] == "staff test"
+    assert r["source"]["tag"] == "staff"
+    assert "not inferred" in r["source"]["why"]
+
+
+@pytest.mark.asyncio
+async def test_the_staff_link_outranks_every_transcript_guess():
+    # A recorded fact beats any amount of clever reading. If somebody came
+    # through the staff link AND types like a patron, they are still staff.
+    noon = dt.datetime(2026, 8, 21, 12, tzinfo=NY)
+    db = _DB([_msg("c1", noon, "user", "hi")], origins={"c1": "staff"})
+    assert (await list_conversations_on(db, "2026-08-21"))["rows"][0]["source"]["tag"] == "staff"
+
+
+# --- filtering by source ---------------------------------------------------
+
+
+def _mixed():
+    base = dt.datetime(2026, 8, 21, 12, tzinfo=NY)
+    msgs = ([_msg("staff1", base, "user", "hello")]
+            + [_msg("script1", base, "user", "hello")]
+            + [_msg("plain1", base, "user", "when do you close")]
+            + [_msg("plain2", base, "user", "do you loan software")])
+    return _DB(msgs, dev_convs=["script1"], origins={"staff1": "staff"})
+
+
+@pytest.mark.asyncio
+async def test_each_source_filter_returns_only_that_group():
+    db = _mixed()
+    for src, expect in (("staff", {"staff1"}), ("local", {"script1"}),
+                        ("patron", {"plain1", "plain2"})):
+        rows = (await list_conversations_on(db, "2026-08-21", source=src))["rows"]
+        assert {r["conversation_id"] for r in rows} == expect, src
+
+
+@pytest.mark.asyncio
+async def test_no_filter_returns_everything():
+    rows = (await list_conversations_on(_mixed(), "2026-08-21"))["rows"]
+    assert len(rows) == 4
+
+
+@pytest.mark.asyncio
+async def test_the_badge_counts_the_whole_day_not_the_page():
+    # A count that shrinks when you turn the page is worse than no count.
+    db = _mixed()
+    res = await list_conversations_on(db, "2026-08-21", limit=1)
+    assert len(res["rows"]) == 1
+    assert res["source_counts"][""] == 4
+    assert res["source_counts"]["staff"] == 1
+    assert res["source_counts"]["patron"] == 2
+
+
+@pytest.mark.asyncio
+async def test_a_filtered_total_is_the_filtered_count_not_the_day_count():
+    # Otherwise the pager offers pages the filter cannot fill.
+    res = await list_conversations_on(_mixed(), "2026-08-21", source="staff")
+    assert res["total"] == 1
