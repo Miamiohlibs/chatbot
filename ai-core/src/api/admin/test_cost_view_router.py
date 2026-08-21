@@ -144,17 +144,35 @@ async def test_windowed_rows_carry_the_priced_flag_too():
     assert flags == {"gpt-5.6-luna": True, "nope-9": False}
 
 
-def test_rate_card_marks_rows_we_have_never_used():
-    """Surfaces dead price rows worth pruning, per the no-unused-models rule."""
+def test_rate_card_shows_only_models_we_actually_call():
+    """Operator ruling 2026-08-21: the page lists what we spend on.
+
+    It used to print all ~21 priced models with a used/never column, which
+    buried the two rows this service runs on. The price table still covers
+    every model -- that is what catches an unpriced one -- but the PAGE is
+    now the short list.
+    """
     hist = [{"model": "gpt-5.6-luna"}, {"model": "o4-mini-2025-04-16"}]
-    card = {c["model"]: c["used"] for c in _rate_card(hist)}
-    assert card["gpt-5.6-luna"] is True
-    assert card["o4-mini"] is True  # matched via the snapshot's base model
-    assert card["gpt-4o-mini"] is False
+    names = {c["model"] for c in _rate_card(hist)}
+    assert "gpt-5.6-luna" in names
+    assert "o4-mini" in names          # matched via the snapshot's base model
+    assert "gpt-4o-mini" not in names  # priced, never called -- not shown
+    assert all(c["used"] or c["unlogged"] for c in _rate_card(hist))
+
+
+def test_the_hidden_rate_rows_are_counted_not_silently_dropped():
+    # Omitting rows is fine; omitting them invisibly is how a page starts
+    # lying about what it covers.
+    from scripts.cost_rollup import PRICE_PER_1M_TOKENS
+    from src.api.admin.cost_view_router import _hidden_rate_rows
+    hist = [{"model": "gpt-5.6-luna"}]
+    assert _hidden_rate_rows(hist) > 0
+    assert _hidden_rate_rows(hist) == len(PRICE_PER_1M_TOKENS) - len(_rate_card(hist))
 
 
 def test_rate_card_is_alphabetical_so_the_page_is_scannable():
-    names = [c["model"] for c in _rate_card([])]
+    names = [c["model"] for c in _rate_card([{"model": "gpt-5.6-terra"},
+                                             {"model": "gpt-5.6-luna"}])]
     assert names == sorted(names)
 
 
@@ -181,10 +199,11 @@ def test_rate_card_does_not_claim_embeddings_were_never_used():
     rate card can distinguish "we don't call this" from "we call this and
     don't record it".
     """
+    # Still listed even though nothing logs it -- it is called every turn,
+    # so leaving it off the short list would hide a real cost.
     card = {c["model"]: c for c in _rate_card([{"model": "gpt-5.6-luna"}])}
     emb = card["text-embedding-3-large"]
     assert emb["used"] is False      # genuinely absent from ModelTokenUsage
     assert emb["unlogged"] is True   # ...but we do call it, so don't say "never"
-    # A model we truly never touch gets neither flag.
-    assert card["gpt-4o-mini"]["used"] is False
-    assert card["gpt-4o-mini"]["unlogged"] is False
+    # A model we neither call nor log is simply not on the page any more.
+    assert "gpt-4o-mini" not in card

@@ -187,6 +187,10 @@ button{padding:.5rem 1.1rem;font:inherit;font-weight:600;cursor:pointer;
 # the bot out of service was to already know the URL. Added 2026-08-08.
 NAV = (
     ("/admin/", "Dashboard", None),
+    # Conversations sits second because "what did people ask today" is the
+    # question asked most often, and until 2026-08-21 the only way to answer
+    # it was Flagged -> the `all` preset -> scroll and read timestamps.
+    ("/admin/conversations", "Conversations", None),
     ("/admin/tickets/view", "Tickets", "tickets"),
     ("/admin/review", "Flagged", "flagged"),
     ("/admin/corrections/view", "Corrections", None),

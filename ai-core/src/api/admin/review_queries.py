@@ -421,3 +421,109 @@ async def conversation_detail(db: Any, conversation_id: str) -> Optional[dict]:
 
 __all__ = ["FILTERS", "attach_feedback", "conversation_detail",
            "dashboard_counts", "list_flagged", "mark_reviewed"]
+
+
+async def list_conversations_on(db: Any, day: "str", *,
+                                limit: int = 200) -> list[dict]:
+    """Every conversation that had a question on `day` (YYYY-MM-DD, Oxford time).
+
+    WHY THIS EXISTS
+        Until now the only way to see a day's traffic was /admin/review with
+        the `all` preset, which lists MESSAGES of every type, newest first,
+        across all time -- so "what did people ask today" meant scrolling a
+        mixed feed and eyeballing timestamps. This answers the question
+        directly.
+
+    OXFORD TIME, NOT UTC
+        The window is built in the library's timezone and converted, because
+        a day boundary at UTC midnight cuts Oxford's evening in half -- and
+        evening is when the building is busiest. `local_dt` carries the same
+        note for the cost dashboard, which had exactly this bug.
+
+    Conversations with no user message are skipped: the widget opens a
+    socket on page load, so most rows are somebody who never typed anything
+    and would otherwise drown the ones who did.
+    """
+    from datetime import date as _date
+    from datetime import timedelta as _td
+
+    try:
+        from zoneinfo import ZoneInfo
+
+        tz = ZoneInfo(LIBRARY_TZ)
+        y, m, d = (int(p) for p in str(day).split("-"))
+        start_local = datetime(y, m, d, tzinfo=tz)
+        end_local = start_local + _td(days=1)
+        start = start_local.astimezone(timezone.utc)
+        end = end_local.astimezone(timezone.utc)
+    except Exception:  # noqa: BLE001 -- a bad date must not 500 the page
+        return []
+
+    try:
+        msgs = await db.message.find_many(
+            where={"timestamp": {"gte": start, "lt": end}},
+            order={"timestamp": "asc"},
+        )
+    except Exception:  # noqa: BLE001
+        return []
+
+    by_conv: dict = {}
+    for m in msgs:
+        cid = getattr(m, "conversationId", None)
+        if not cid:
+            continue
+        slot = by_conv.setdefault(cid, {
+            "conversation_id": cid, "first_ts": None, "last_ts": None,
+            "questions": [], "turns": 0, "refusals": 0, "thumbs_down": 0,
+            "thumbs_up": 0, "low_confidence": 0,
+        })
+        ts = getattr(m, "timestamp", None)
+        if slot["first_ts"] is None:
+            slot["first_ts"] = ts
+        slot["last_ts"] = ts
+        if getattr(m, "type", "") == "user":
+            slot["questions"].append(getattr(m, "content", "") or "")
+        else:
+            slot["turns"] += 1
+            if getattr(m, "wasRefusal", False):
+                slot["refusals"] += 1
+            if getattr(m, "isPositiveRated", None) is False:
+                slot["thumbs_down"] += 1
+            elif getattr(m, "isPositiveRated", None) is True:
+                slot["thumbs_up"] += 1
+            if getattr(m, "confidence", "") == "low":
+                slot["low_confidence"] += 1
+
+    out = [v for v in by_conv.values() if v["questions"]]
+    out.sort(key=lambda r: r["first_ts"] or datetime.min.replace(
+        tzinfo=timezone.utc), reverse=True)
+    for r in out:
+        r["opened"] = local_ts(r["first_ts"])
+        r["opened_hm"] = (local_dt(r["first_ts"]) or datetime.now()).strftime("%H:%M")
+        r["asked"] = len(r["questions"])
+        r["first_question"] = r["questions"][0]
+        r["needs_look"] = bool(r["refusals"] or r["thumbs_down"]
+                               or r["low_confidence"])
+    return out[:limit]
+
+
+async def conversation_days(db: Any, *, limit: int = 30) -> list[dict]:
+    """Recent days that had at least one question, newest first.
+
+    Powers the date picker. Counting in Python rather than SQL because the
+    day boundary has to be Oxford's, and Postgres holds these in UTC.
+    """
+    try:
+        msgs = await db.message.find_many(
+            where={"type": "user"}, order={"timestamp": "desc"}, take=4000,
+        )
+    except Exception:  # noqa: BLE001
+        return []
+    tally: dict = {}
+    for m in msgs:
+        ld = local_dt(getattr(m, "timestamp", None))
+        if ld is None:
+            continue
+        tally[ld.date().isoformat()] = tally.get(ld.date().isoformat(), 0) + 1
+    return [{"day": d, "questions": n}
+            for d, n in sorted(tally.items(), reverse=True)][:limit]

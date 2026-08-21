@@ -76,13 +76,21 @@ _STYLE = (
 )
 
 
-def _page(title: str, body: str) -> str:
-    return (
-        f"<!doctype html><html><head><meta charset='utf-8'>"
-        f"<meta name='viewport' content='width=device-width,initial-scale=1'>"
-        f"<title>{_e(title)}</title><style>{_STYLE}</style></head>"
-        f"<body>{body}</body></html>"
-    )
+def _page(title: str, body: str, *, key: str = "") -> str:
+    """Render into the SHARED admin shell so this page has the same tab bar
+    as every other operator surface.
+
+    It used to render its own bare document. That left Cost as the one page
+    with no way out except the browser's back button -- the operator console
+    stopped looking like one console the moment you opened it. The private
+    stylesheet below is still applied on top, because the tables here are
+    numeric and want their own alignment rules; it no longer replaces the
+    shell.
+    """
+    from src.api.admin import admin_ui
+
+    return admin_ui.page(title, f"<style>{_STYLE}</style>{body}",
+                         current="/admin/cost", key=key)
 
 
 async def _aggregate(db: Any, days: int) -> dict:
@@ -222,6 +230,14 @@ def _rate_card(history: list[dict]) -> list[dict]:
     at a glance: a model with usage but no price (bills as $0), a price with no
     usage (dead row worth pruning), and a model whose usage we never log."""
     used = {normalise_model(h["model"]) for h in history}
+
+    # Only rows we actually call. The table used to print all of
+    # PRICE_PER_1M_TOKENS -- 48 models against the two this service runs on
+    # -- which buried the two numbers an operator came to read. The price
+    # table still covers every model, so an unpriced one is still caught;
+    # what changed is that the PAGE shows what we spend on, not what OpenAI
+    # sells. `_hidden_rate_rows` reports the count so the omission is
+    # visible rather than silent.
     return [
         {
             "model": name,
@@ -232,7 +248,15 @@ def _rate_card(history: list[dict]) -> list[dict]:
             "unlogged": name in _USED_BUT_UNLOGGED,
         }
         for name, r in sorted(PRICE_PER_1M_TOKENS.items())
+        if name in used or name in _USED_BUT_UNLOGGED
     ]
+
+
+def _hidden_rate_rows(history: list[dict]) -> int:
+    """How many priced models the rate card leaves out."""
+    used = {normalise_model(h["model"]) for h in history}
+    return sum(1 for n in PRICE_PER_1M_TOKENS
+               if n not in used and n not in _USED_BUT_UNLOGGED)
 
 
 def _cache_pct(d: dict) -> str:
@@ -271,7 +295,12 @@ def build_cost_view_router(deps: dict) -> Any:
         return JSONResponse(data)
 
     @router.get("/admin/cost", response_class=HTMLResponse)
-    async def cost_html(days: int = Query(7, ge=1, le=90), _g=Depends(guard)):
+    async def cost_html(days: int = Query(7, ge=1, le=90), key: str = "",
+                        _g=Depends(guard)):
+        # Carried onto every in-page link so the window switcher does not
+        # drop the caller's credentials. Empty when there is no key, which is
+        # the SSO case -- the cookie travels on its own.
+        _kq = f"&key={_e(key)}" if key else ""
         d = await _aggregate(db, days)
         history = await _model_history(db)
         t = d["total"]
@@ -345,14 +374,20 @@ def build_cost_view_router(deps: dict) -> Any:
         )
 
         body = (
-            f"<h1>Smart Chatbot — Cost</h1>"
-            f"{banner}"
+                        f"{banner}"
+            # The window switcher used to print a literal ellipsis where the
+            # key belongs -- `key=…` -- so every one of these links landed on
+            # a 401 and the page was stuck on its 7-day default. The key is
+            # carried through properly now, and omitted entirely when the
+            # caller arrived by session rather than by token.
             f"<div class='muted'>Live from ModelTokenUsage, priced with current "
-            f"per-model rates. Window: last {days} days "
-            f"(<a href='/admin/cost?days=1&key=…'>1d</a> · "
-            f"<a href='/admin/cost?days=30&key=…'>30d</a> · "
-            f"<a href='/admin/cost.json?days={days}&key=…'>JSON</a> — keep your "
-            f"&amp;key=).</div>"
+            f"per-model rates. Window: "
+            + " · ".join(
+                (f"<b>{n}d</b>" if n == days
+                 else f"<a href='/admin/cost?days={n}{_kq}'>{n}d</a>")
+                for n in (1, 7, 30, 90)
+            )
+            + f" · <a href='/admin/cost.json?days={days}{_kq}'>JSON</a></div>"
             f"<div style='margin-top:14px'>{cards}</div>"
             f"<h2>By day</h2><table><tr><th>Day</th><th>USD</th><th>Turns</th>"
             f"<th>Input tok</th><th>Output tok</th><th>Cache hit</th></tr>{day_rows}</table>"
@@ -376,6 +411,6 @@ def build_cost_view_router(deps: dict) -> Any:
             f"<table><tr><th>Model</th><th>Input</th><th>Cached input</th>"
             f"<th>Output</th><th>Ever used here</th></tr>{card_rows}</table>"
         )
-        return HTMLResponse(_page("Smart Chatbot — Cost", body))
+        return HTMLResponse(_page("Cost", body, key=key))
 
     return router

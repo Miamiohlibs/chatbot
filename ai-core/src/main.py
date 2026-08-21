@@ -573,6 +573,8 @@ if _admin_token or _sso_cfg.enabled:
 
     app.include_router(build_reviews_router(_admin_deps))
     app.include_router(build_review_view_router(_admin_deps))
+    from src.api.admin.conversations_router import build_conversations_router
+    app.include_router(build_conversations_router(_admin_deps))
     app.include_router(build_corrections_router(_admin_deps))
     app.include_router(build_cost_view_router(_admin_deps))
     logging.info(
