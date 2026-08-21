@@ -21,6 +21,7 @@ Companion docs you should know about:
 | `ai-core/scripts/etl/FIRST_RUN.md` | Running the ETL prepare→approve→apply flow. |
 | `docs/01-SYSTEM-OVERVIEW.md` | Current architecture, model tiers, data stores. |
 | `docs/05-DEPLOYMENT-GUIDE.md` | Deploy, schema sync, host-level pieces, rollback. |
+| `docs/HANDOVER.md` | Who holds which piece, and what counts as an emergency. |
 
 (2026-07-18 cleanup: the Metabase v0 interim was superseded by the real
 admin surfaces and archived to `ai-core/archived/admin-metabase-v0/`;
@@ -28,6 +29,61 @@ two previously-listed docs never existed on this host and were removed
 from this table.)
 
 ---
+
+## Taking the bot out of service (kill switch)
+
+The one lever that needs no developer. Added 2026-08-12; this runbook predated
+it.
+
+**Where.** `/admin/service` — the same admin token as the rest of the admin
+pages.
+
+**What it takes.** Two things, both required: a Miami email that appears in
+`SERVICE_PAUSE_OPERATORS`, and the passphrase in `SERVICE_PAUSE_PASSWORD`.
+Both live in `.env`.
+
+Be clear about what that buys, because it is easy to overrate: **the email is
+typed, not proven.** Anyone holding the admin token and the passphrase can
+type any name on the list. What it gives is a deliberate action with a name
+attached in the log — not authentication.
+
+**What patrons see.** The widget still loads. Instead of answers they get an
+out-of-service notice pointing at Ask Us, and the three main buttons show the
+same state — so nobody has to send a message to discover the bot is down.
+
+**Resuming** takes the same email and passphrase. Pausing and resuming are
+recorded with the name typed and the time.
+
+**If the admin page itself is unreachable**, an operator with a shell can do
+the same thing directly:
+
+```bash
+touch /opt/chatbot/ai-core/data/SERVICE_PAUSED     # pause
+rm    /opt/chatbot/ai-core/data/SERVICE_PAUSED     # resume
+```
+
+The flag is a file on disk, not a variable, so it survives a restart — a
+paused bot stays paused until somebody clears it.
+
+**Check the state at any time**, no token needed:
+
+```bash
+curl -s localhost:8081/health/service
+```
+
+## What a review ticket now shows
+
+Added 2026-08-18/20; also newer than the rest of this runbook.
+
+- **Every link the patron was shown**, listed and clickable, and whether they
+  actually clicked it.
+- **Which model answered — or that none did.** A value like
+  `(none -- close_today_short_circuit)` means the answer came from code, not
+  from a language model, and is reproducible. Until 2026-08-20 these tickets
+  named a paid model on every answer, including the ~70 that never call one.
+- Intent, resolved campus/building, confidence, and the refusal trigger when
+  the bot declined.
+
 
 ## 1. New HTTP surfaces
 

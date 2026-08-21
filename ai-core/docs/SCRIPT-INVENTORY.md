@@ -9,7 +9,7 @@ test runner -- not by guessing from the filename.
 nothing for cron jobs (they are named in crontab), for hand-run CLI tools, or
 for pytest files -- so 'unreferenced' would have condemned `switch_corpus.py`,
 which promotes a new corpus and was used on 2026-08-18. One file was archived:
-`smoke_test_website_evidence.py`, which imports a module that no longer exists
+`smoke_test_website_evidence.py` (now `ai-core/archived/smoke_test_website_evidence.py.dead`), which imports a module that no longer exists
 and therefore cannot run.
 
 ## Scheduled (cron) -- these run whether anyone is watching

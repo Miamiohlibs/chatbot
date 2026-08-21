@@ -300,7 +300,11 @@ Need more help? [Chat with a librarian](...)
 
 **Core Logic**:
 - `src/tools/enhanced_subject_search.py` - Search logic with course codes and fuzzy matching
-- `src/agents/enhanced_subject_librarian_agent.py` - Agent with campus support
+- ~~`src/agents/enhanced_subject_librarian_agent.py`~~ — **retired with the v2
+  rebuild** and now at `ai-core/archived/legacy_v31/agents/`. There is no
+  separate agent for this any more: the lookup is a tool
+  (`lookup_librarian`) and the answer is formatted deterministically in the
+  orchestrator. See **Integration** below.
 
 **Sync Scripts**:
 - `scripts/sync_myguide_subjects.py` - Sync subjects and course codes
@@ -308,9 +312,24 @@ Need more help? [Chat with a librarian](...)
 - `scripts/sync_staff_directory.py` - Sync librarian contacts
 - `scripts/sync_all_library_data.py` - Full sync orchestrator
 
-**Integration**:
-- `src/graph/orchestrator.py` - Pre-check patterns and agent execution
-- `src/graph/function_calling.py` - Function calling tool wrapper
+**Integration** (corrected 2026-08-21 — the two files previously listed here,
+`src/graph/orchestrator.py` and `src/graph/function_calling.py`, were retired
+with the v2 rebuild; `function_calling.py` is in `ai-core/archived/`):
+
+- `src/graph/new_orchestrator.py` — the live turn pipeline. Three places touch
+  subject librarians:
+  - `_subject_named_with_librarian()` — routes "who is the X librarian" even
+    when the classifier does not
+  - `_subject_liaison_short_circuit()` — formats the answer deterministically
+    (one named person, campus label, co-liaison handling)
+  - `_liaison_lookup_when_agent_skipped()` — does the lookup itself when the
+    agent failed to, so a referral no longer depends on the model choosing to
+    call the tool
+- `src/tools_v2/registry.py` — registers the `lookup_librarian` tool
+- `src/router/subject_inference.py` + `src/router/data/subject_exclusive_terms.json`
+  — added 2026-08-20: volunteers a subject librarian when the question never
+  names a subject but its vocabulary can only mean one ("sheet music" → Music).
+  Answers carry a note saying the match was inferred.
 
 ### Configuration
 
