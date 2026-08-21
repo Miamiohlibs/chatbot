@@ -32,8 +32,25 @@ from __future__ import annotations
 import logging
 from typing import Any, Optional
 
+# Module level, NOT inside the factory. `from __future__ import annotations`
+# above turns annotations into strings, and FastAPI resolves a handler's
+# annotations against MODULE globals -- a Request imported inside the
+# factory is invisible there and the parameter is read as a request body,
+# which is a 422 on every POST. That shipped twice on 2026-08-21; this is
+# the third place it would have.
+try:  # pragma: no cover - FastAPI is always present in production
+    from fastapi import Request
+    from fastapi.responses import RedirectResponse
+except ImportError:  # pragma: no cover
+    Request = object  # type: ignore[assignment,misc]
+    RedirectResponse = None  # type: ignore[assignment]
+
 from src.api.admin import admin_ui as ui
-from src.api.admin.review_queries import local_ts
+from src.api.admin.review_queries import (
+    conversation_detail,
+    find_asks_like,
+    local_ts,
+)
 
 try:
     from starlette.requests import Request  # type: ignore
@@ -185,6 +202,40 @@ def normalize_status(status: object) -> str:
     return s if s in VALID_STATUSES else "open"
 
 
+def _q(text: str) -> str:
+    """URL-encode a short status message for the redirect back."""
+    from urllib.parse import quote
+    return quote(str(text)[:200], safe="")
+
+
+def _default_expiry():
+    from src.api.admin.corrections_router import default_expiry
+    return default_expiry()
+
+
+def _bust_serving_cache() -> None:
+    try:
+        from src.api.admin.corrections_router import (
+            _bust_serving_cache as _bust,
+        )
+        _bust()
+    except Exception:  # noqa: BLE001 -- never 500 the admin page over this
+        logger.debug("could not bust the serving cache", exc_info=True)
+
+
+def _pin_pattern(question: str) -> str:
+    """A starting regex for "questions like this one".
+
+    Deliberately literal: the whole question, escaped, case-insensitive. An
+    operator who wants it broader can widen it in the box -- that is a
+    deliberate edit they can see. Guessing at a loose pattern on their
+    behalf would silently pin an answer to questions nobody checked.
+    """
+    import re as _re
+    q = " ".join((question or "").split())[:200]
+    return f"(?i){_re.escape(q)}" if q else ""
+
+
 def _ticket_actions(tid: str, status: str, kq: str) -> str:
     """The transitions available FROM `status`, as labelled buttons."""
     base = f"/admin/tickets/{tid}/status?{kq}"
@@ -231,7 +282,11 @@ def render_admin_list(tickets: list[dict], key: str,
             + (f"<dt>Source</dt><dd><a href='{ui.e(src)}'>{ui.e(src)}</a></dd>"
                if src else "")
             + f"</dl>"
-            f"<div class='acts'>{_ticket_actions(tid, status, kq)}"
+            f"<div class='acts'>"
+            # The ticket's own page first: everything the follow-up needs is
+            # there, so the operator stops leaving and coming back.
+            f"{ui.action(f'/admin/tickets/{tid}{kq_amp}', 'Open ticket', primary=True)}"
+            f"{_ticket_actions(tid, status, kq)}"
             f"{ui.action(fix_href, 'Fix content →')}</div>"
             f"</div>"
         )
@@ -331,6 +386,193 @@ def build_ticket_router(deps: dict):
              for r in rows],
             key, counts=counts, show_done=show_done,
         ))
+
+    @router.get("/admin/tickets/{ticket_id}", response_class=HTMLResponse,
+                dependencies=[Depends(admin_guard)])
+    async def ticket_detail(ticket_id: str, key: str = "",
+                            msg: str = "") -> Any:
+        """One ticket, plus everything the follow-up needs.
+
+        The list view could only hand you the ticket and a link to the
+        corrections tool. Deciding whether a report was real meant leaving
+        for the conversation log, coming back, leaving again for the
+        corrections form and re-typing what you had just read. This page
+        carries the transcript, how often the same thing was asked, and a
+        correction form already filled in from the ticket.
+        """
+        kq = f"key={ui.e(key)}" if key else ""
+        kq_amp = f"?{kq}" if kq else ""
+        back = f"/admin/tickets/view{kq_amp}"
+        try:
+            t = await db.correctionticket.find_unique(where={"id": ticket_id})
+        except Exception:  # noqa: BLE001
+            t = None
+        if t is None:
+            return HTMLResponse(ui.page("Ticket", (
+                f"<h1>Ticket not found</h1>"
+                f"<p class='dim'>No ticket with id <code>{ui.e(ticket_id)}</code>.</p>"
+                f"{ui.action(back, '← back to the queue', ghost=True)}"),
+                current="/admin/tickets/view", key=key), status_code=404)
+
+        question = getattr(t, "question", "") or ""
+        status = normalize_status(getattr(t, "status", "open"))
+        src = str(getattr(t, "sourceUrl", "") or "").strip()
+
+        # --- what else this question did ---
+        asks = await find_asks_like(db, question)
+        if asks:
+            rows = "".join(
+                f"<tr><td class='dim' style='white-space:nowrap'>{ui.e(a['when'])}</td>"
+                f"<td><a href='/admin/review/{ui.e(a['conversation_id'])}{kq_amp}'>"
+                f"{ui.e(a['content'][:110])}</a></td>"
+                f"<td class='dim'>{int(a['overlap'] * 100)}%</td></tr>"
+                for a in asks
+            )
+            asks_html = (
+                f"<h2>Asked {len(asks)} time(s) like this</h2>"
+                f"<p class='dim'>Loose text match, newest first — a lead for "
+                f"how often this bites, not a measurement. The percentage is "
+                f"how much of the ticket's wording each one shares.</p>"
+                f"<table><tr><th>When</th><th>What they typed</th>"
+                f"<th>Match</th></tr>{rows}</table>"
+            )
+        else:
+            asks_html = (
+                "<h2>Asked how often?</h2><p class='dim'>No other conversation "
+                "matches this wording. Either it happened once, or the "
+                "librarian paraphrased what the patron typed.</p>"
+            )
+
+        # --- the transcript, if the exact question is in one ---
+        convo_html = ""
+        exact = next((a for a in asks if a["overlap"] >= 0.99), None)
+        if exact and exact["conversation_id"]:
+            d = await conversation_detail(db, exact["conversation_id"])
+            if d:
+                turns = "".join(
+                    f"<div class='turn {ui.e(m.get('type', ''))}'>"
+                    f"<b>{'Patron' if m.get('type') == 'user' else 'Chatbot'}</b>"
+                    f"<div>{ui.e((m.get('content') or '')[:900])}</div></div>"
+                    for m in (d.get("messages") or [])
+                )
+                convo_html = (
+                    f"<h2>The conversation it came from</h2>"
+                    f"<div class='transcript'>{turns}</div>"
+                    f"{ui.action(f'/admin/review/' + ui.e(exact['conversation_id']) + kq_amp, 'Full detail →', ghost=True)}"
+                )
+
+        # --- correction form, prefilled ---
+        note = (f"<div class='ok' role='status' style='margin:.75rem 0'>{ui.e(msg)}</div>"
+                if msg else "")
+        pattern = _pin_pattern(question)
+        form = (
+            f"<h2>Write the correction</h2>"
+            f"<p class='dim'>Pins an answer to questions matching the pattern. "
+            f"Takes effect on the next turn — no deploy. Expires in 180 days "
+            f"so nobody inherits a rule nobody remembers.</p>"
+            f"<form method='post' action='/admin/tickets/{ui.e(ticket_id)}/correct{kq_amp}'>"
+            f"<label for='c-pat'>Fires on questions matching</label>"
+            f"<input id='c-pat' name='query_pattern' value='{ui.e(pattern)}' "
+            f"style='width:100%;font-family:ui-monospace,monospace'>"
+            f"<label for='c-rep'>Answer to give</label>"
+            f"<textarea id='c-rep' name='replacement' rows='5' "
+            f"style='width:100%'>{ui.e(getattr(t, 'expectedAnswer', '') or '')}</textarea>"
+            f"<label for='c-by'>Your email (recorded on the rule)</label>"
+            f"<input id='c-by' name='created_by' type='email' required "
+            f"placeholder='you@miamioh.edu' style='max-width:24rem'>"
+            f"<div class='acts' style='margin-top:.8rem'>"
+            f"<button type='submit'>Create the correction</button></div>"
+            f"</form>"
+        )
+
+        body = (
+            f"{ui.action(back, '← back to the queue', ghost=True)}"
+            f"<h1>Correction ticket</h1>{note}"
+            f"<div class='card'>"
+            f"<div class='meta'>{ui.pill(status)}"
+            f"<span>{ui.e(local_ts(getattr(t, 'createdAt', None)))}</span>"
+            f"<span>{ui.e(getattr(t, 'librarianName', ''))} "
+            f"&lt;{ui.e(getattr(t, 'librarianEmail', ''))}&gt;</span></div>"
+            f"<div class='q'>{ui.e(question)}</div>"
+            f"<dl><dt>Bot said</dt><dd>{ui.e(getattr(t, 'botAnswer', ''))}</dd>"
+            f"<dt>Should say</dt><dd>{ui.e(getattr(t, 'expectedAnswer', ''))}</dd>"
+            + (f"<dt>Source</dt><dd><a href='{ui.e(src)}'>{ui.e(src)}</a></dd>"
+               if src else "")
+            + f"</dl>"
+            f"<div class='acts'>{_ticket_actions(ticket_id, status, kq)}</div>"
+            f"</div>"
+            f"<style>.transcript{{border:1px solid #e3e3e3;border-radius:8px;"
+            f"padding:.4rem .8rem;margin:.6rem 0}}"
+            f".turn{{padding:.5rem 0;border-bottom:1px solid #f0f0f0}}"
+            f".turn:last-child{{border-bottom:0}}"
+            f".turn.user b{{color:#8E1224}}.turn b{{display:block;"
+            f"font-size:.72rem;letter-spacing:.05em;text-transform:uppercase}}"
+            f"label{{display:block;margin:.7rem 0 .2rem;font-weight:600;"
+            f"font-size:.85rem}}</style>"
+            f"{convo_html}{asks_html}{form}"
+        )
+        return HTMLResponse(ui.page("Ticket", body,
+                                    current="/admin/tickets/view", key=key))
+
+    @router.post("/admin/tickets/{ticket_id}/correct",
+                 response_class=HTMLResponse,
+                 dependencies=[Depends(admin_guard)])
+    async def ticket_correct(ticket_id: str, request: Request,
+                             key: str = "") -> Any:
+        """Create the correction from the ticket page, then come back to it.
+
+        Posting here rather than to /admin/corrections keeps the operator on
+        the ticket: the point of the page is that finishing a report does not
+        require going somewhere else and retyping it.
+        """
+        form = await request.form()
+        kq_amp = f"?key={ui.e(key)}" if key else ""
+        back = f"/admin/tickets/{ui.e(ticket_id)}{kq_amp}"
+
+        created_by = str(form.get("created_by") or "").strip()
+        replacement = str(form.get("replacement") or "").strip()
+        pattern = str(form.get("query_pattern") or "").strip()
+        problem = (
+            "Enter your email — a correction with no author cannot be reviewed."
+            if not created_by else
+            "Enter the answer the bot should give." if not replacement else
+            "The pattern is empty, so this rule would fire on nothing."
+            if not pattern else ""
+        )
+        if not problem:
+            try:
+                import re as _re
+                _re.compile(pattern)
+            except _re.error as e:
+                problem = f"That pattern is not a valid regular expression: {e}"
+        if problem:
+            sep = "&" if key else "?"
+            return RedirectResponse(f"{back}{sep}msg={_q(problem)}",
+                                    status_code=303)
+
+        try:
+            await db.manualcorrection.create(data={
+                "scope": "global", "target": "*", "action": "pin",
+                "replacement": replacement, "queryPattern": pattern,
+                "reason": f"correction ticket {ticket_id}",
+                "createdBy": created_by,
+                "expiresAt": _default_expiry(),
+            })
+        except Exception as e:  # noqa: BLE001
+            logger.error("could not create correction from ticket %s: %s",
+                         ticket_id, e)
+            sep = "&" if key else "?"
+            return RedirectResponse(
+                f"{back}{sep}msg={_q('Could not save the correction — the log has why.')}",
+                status_code=303)
+
+        _bust_serving_cache()
+        logger.info("correction created from ticket %s by %s", ticket_id,
+                    created_by)
+        sep = "&" if key else "?"
+        return RedirectResponse(
+            f"{back}{sep}msg={_q('Correction saved. It applies on the next turn.')}",
+            status_code=303)
 
     @router.get("/admin/tickets/{ticket_id}/status",
                 response_class=HTMLResponse,

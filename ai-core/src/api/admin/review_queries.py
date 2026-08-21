@@ -527,3 +527,65 @@ async def conversation_days(db: Any, *, limit: int = 30) -> list[dict]:
         tally[ld.date().isoformat()] = tally.get(ld.date().isoformat(), 0) + 1
     return [{"day": d, "questions": n}
             for d, n in sorted(tally.items(), reverse=True)][:limit]
+
+
+def _norm_q(text: str) -> str:
+    """Loose key for 'is this the same question'."""
+    import re as _re
+    return _re.sub(r"[^a-z0-9 ]+", " ", (text or "").lower())
+
+
+async def find_asks_like(db: Any, question: str, *, limit: int = 25) -> list[dict]:
+    """Times this question -- or a close paraphrase -- was actually asked.
+
+    A correction ticket records what a librarian saw once. It says nothing
+    about whether one patron hit it or forty did, and that is the difference
+    between "worth a note" and "fix this today". Until now finding out meant
+    leaving the ticket and searching by hand.
+
+    Matching is deliberately loose and deliberately dumb: exact text first,
+    then a contains-search on the longest few words. It is a lead, not a
+    measurement -- the page says so.
+    """
+    q = (question or "").strip()
+    if len(q) < 6:
+        return []
+
+    seen: dict = {}
+
+    async def _collect(where: dict) -> None:
+        try:
+            rows = await db.message.find_many(
+                where=where, order={"timestamp": "desc"}, take=200)
+        except Exception:  # noqa: BLE001 -- a lead is never worth a 500
+            return
+        for m in rows:
+            mid = getattr(m, "id", None)
+            if mid in seen:
+                continue
+            seen[mid] = {
+                "conversation_id": getattr(m, "conversationId", ""),
+                "content": getattr(m, "content", "") or "",
+                "when": local_ts(getattr(m, "timestamp", None)),
+                "ts": getattr(m, "timestamp", None),
+            }
+
+    await _collect({"type": "user", "content": q})
+
+    # The longest words carry the meaning; stopwords match everything.
+    words = sorted(
+        (w for w in _norm_q(q).split() if len(w) > 4),
+        key=len, reverse=True)[:3]
+    for w in words:
+        await _collect({"type": "user",
+                        "content": {"contains": w, "mode": "insensitive"}})
+
+    out = list(seen.values())
+    # Anything sharing a long word is a candidate; rank the ones that share
+    # more of the question higher, so the exact repeats float to the top.
+    qset = set(_norm_q(q).split())
+    for r in out:
+        rset = set(_norm_q(r["content"]).split())
+        r["overlap"] = len(qset & rset) / max(1, len(qset))
+    out.sort(key=lambda r: (-r["overlap"], r["ts"] is None), reverse=False)
+    return out[:limit]

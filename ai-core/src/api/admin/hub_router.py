@@ -98,6 +98,18 @@ def render_admin_hub(admin_key: str, librarian_code: str,
         f"{total_todo} item{'s' if total_todo != 1 else ''} waiting on you."
     )
 
+    # 0. What actually happened. Reading the day's traffic is the most
+    #    frequent thing an operator does and used to be the hardest: it
+    #    meant Flagged -> the `all` preset -> scrolling a mixed feed.
+    reading = _section(
+        "What people asked",
+        "Start here to see the day, not just the problems.",
+        _card("Conversations by day",
+              "Every conversation for one day, newest first, with the "
+              "turns worth opening marked. Oxford time.",
+              ui.action(f"/admin/conversations{k}", "Today", primary=True)),
+    )
+
     # 1. The path a wrong answer travels: someone reports it -> you read
     #    the turn -> you change what the bot says. Same order on screen.
     wrong = _section(
@@ -161,7 +173,7 @@ def render_admin_hub(admin_key: str, librarian_code: str,
     body = (
         f"{banner}<h1>Dashboard</h1><p class='lede'>{ui.e(headline)}</p>"
         f"<div class='stats'>{stats}</div>"
-        f"{wrong}{running}{staff}"
+        f"{reading}{wrong}{running}{staff}"
         f"<p><small class='dim'>Bookmark this page — every link carries "
         f"your key.</small></p>"
     )
