@@ -260,3 +260,10 @@ ai-core/data/raw/*.csv
 /ai-core/docs/eval/cat_run_*/
 /ai-core/docs/eval/cat_*.jsonl
 /docs/SSO.pdf
+
+# SAML SP keypair (added 2026-08-21). The directory is root-owned 750 today,
+# which hides it from git by accident rather than by rule -- one chmod would
+# undo that. This line is the rule.
+ai-core/secrets/
+*.key
+*.pem

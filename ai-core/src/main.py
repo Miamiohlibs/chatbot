@@ -505,16 +505,44 @@ app.include_router(build_metrics_router())
 # mounted ONLY when ADMIN_API_TOKEN is set, so a misconfigured deploy
 # can never expose raw conversation logs (user input + PII). The
 # token gates both the JSON API and the HTML pages (header or ?key=).
+#
+# Since 2026-08-21 the guard is Miami SSO (SAML/Shibboleth) when SSO_ENABLED
+# is on, with the shared token still accepted while
+# SSO_ALLOW_TOKEN_FALLBACK is true. The fallback exists because the kill
+# switch lives behind this same guard: if the IdP were the only way in, an
+# IdP outage would mean nobody could stop the bot. See src/api/admin/sso.py.
 _admin_token = os.getenv("ADMIN_API_TOKEN", "").strip()
-if _admin_token:
+from src.api.admin.sso import load_config as _load_sso_config  # noqa: E402
+
+_sso_cfg = _load_sso_config()
+if _sso_cfg.enabled:
+    _sso_problems = _sso_cfg.problems()
+    if _sso_problems:
+        logging.error(
+            "SSO_ENABLED is on but the config is incomplete -- sign-in will "
+            "fail until these are fixed: %s", "; ".join(_sso_problems),
+        )
+    else:
+        logging.info(
+            "Miami SSO enabled for /admin (%d uid(s) allowed, token fallback "
+            "%s).", len(_sso_cfg.allowed_uids),
+            "ON" if _sso_cfg.allow_token_fallback else "OFF",
+        )
+
+if _admin_token or _sso_cfg.enabled:
     from src.api.admin.reviews_router import build_reviews_router
-    from src.api.admin.review_view_router import (
-        build_review_view_router,
-        make_token_guard,
-    )
+    from src.api.admin.review_view_router import build_review_view_router
+    from src.api.admin.sso_router import build_sso_router, make_admin_guard
     from src.database.prisma_client import get_prisma_client
 
-    _guard = make_token_guard(_admin_token)
+    _guard = make_admin_guard(cfg=_sso_cfg, token=_admin_token)
+    # Mounted as soon as a base URL exists, not only once SSO is switched
+    # on: /admin/sso/metadata is what Miami IT needs in order to configure
+    # their side, and they need it BEFORE the switch can be flipped. The
+    # guard still ignores SSO until SSO_ENABLED is true, so mounting this
+    # early changes nothing about who can read the dashboard.
+    if _sso_cfg.base_url:
+        app.include_router(build_sso_router(_sso_cfg))
     _admin_deps = {
         "db": get_prisma_client(),
         "require_librarian": _guard,  # reviews_router's auth dep
@@ -567,8 +595,8 @@ if _admin_token:
         )
 else:
     logging.info(
-        "Op1 review surface NOT mounted -- ADMIN_API_TOKEN unset "
-        "(fail-closed; conversation logs stay private)."
+        "Op1 review surface NOT mounted -- neither ADMIN_API_TOKEN nor "
+        "SSO_ENABLED is set (fail-closed; conversation logs stay private)."
     )
 
 
