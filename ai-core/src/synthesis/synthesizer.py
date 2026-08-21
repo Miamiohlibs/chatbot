@@ -43,7 +43,7 @@ from src.synthesis.post_processor import (
     SynthesizerOutput,
     process_synthesizer_output,
 )
-from src.synthesis.refusal_templates import RefusalContext
+from src.synthesis.refusal_templates import RefusalContext, RefusalTrigger
 
 
 # --- Shapes ----------------------------------------------------------------
@@ -454,6 +454,63 @@ def synthesize(
         # email-faithfulness check verifies against the same evidence.
         evidence=correction_outcome.chunks,
     )
+
+    # 5. A LOW SELF-REPORT IS ONE SAMPLE, SO MAKE IT VOTE TWICE.
+    #
+    # `confidence: low` is a field the synthesizer LLM fills in, and the LLM
+    # is not deterministic -- the same question, the same evidence and the
+    # same code produce "medium" most times and "low" occasionally. When it
+    # says low we refuse, so that coin flip is user-visible: the patron gets
+    # "I don't have a reliable answer to that" for a question the bot answers
+    # perfectly well the next time it is asked.
+    #
+    # MEASURED before this was written, over every model_self_flagged refusal
+    # since the beta opened (2026-08-13): 24 refusals across 16 distinct
+    # questions, and all 16 of those questions were answered normally at some
+    # other point. Not one was a case where the flag saved the patron from a
+    # bad answer. The honest caveat is that only REPEATED questions can be
+    # checked this way, so the measurement can show the flag firing wrongly
+    # and can never show it firing rightly -- which is why this makes the
+    # gate vote twice rather than deleting it.
+    #
+    # One retry, never more. Two independent low reports is a signal; one is
+    # noise. Cost is a second synthesis call on ~1.6% of turns.
+    #
+    # The literal REFUSAL token is deliberately NOT retried: emitting it is a
+    # decision the model made about the content, not a confidence field it
+    # filled in, and re-rolling a decision is a different thing from
+    # re-sampling a measurement.
+    if (
+        pp_result.is_refusal
+        and pp_result.refusal is not None
+        and pp_result.refusal.trigger is RefusalTrigger.MODEL_SELF_FLAGGED
+        and parsed.confidence == "low"
+        and "REFUSAL" not in parsed.answer
+    ):
+        retry_raw, retry_usage = call(
+            prefix_id=prefix_id,
+            dynamic_suffix=dynamic_suffix,
+            model=model,
+        )
+        retry_parsed = parse_synthesizer_response(
+            retry_raw, correction_outcome.chunks
+        )
+        retry_pp = process_synthesizer_output(
+            retry_parsed,
+            scope_campus=request.scope_campus,
+            url_allowlist=request.url_allowlist,
+            evidence=correction_outcome.chunks,
+        )
+        # Both calls are billed whichever way this lands.
+        for field in ("input_tokens", "cached_input_tokens", "output_tokens"):
+            usage[field] = int(usage.get(field, 0)) + int(
+                retry_usage.get(field, 0)
+            )
+        # Keep the second draft only if it stands up. A retry that fails too
+        # leaves the original refusal in place, so the patron never sees copy
+        # that changed for a reason we did not verify.
+        if not retry_pp.is_refusal:
+            pp_result = retry_pp
 
     return SynthesisResult(
         post_processor=pp_result,

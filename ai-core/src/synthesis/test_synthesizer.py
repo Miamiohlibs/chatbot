@@ -398,3 +398,131 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+# --- The low-confidence retry ----------------------------------------------
+#
+# `confidence: low` is a field the LLM fills in, and the LLM is not
+# deterministic. Measured over the beta (2026-08-13 onward): 24 refusals on
+# 16 distinct questions, every one of which was answered normally at some
+# other point. These tests pin the shape of the fix -- one retry, and only
+# for the confidence field.
+
+
+def _req(**over):
+    from src.synthesis.corrections import EvidenceChunk
+    from src.synthesis.synthesizer import SynthesisRequest
+
+    base = dict(
+        question="I have a question about ill",
+        evidence=[EvidenceChunk(
+            chunk_id="c1",
+            text="Interlibrary Loan lets Miami students request items we do not own.",
+            source_url="https://www.lib.miamioh.edu/use/borrow/ill/",
+            # Campus metadata is required or the scope check refuses first,
+            # and the retry would never be the thing under test.
+            campus="oxford",
+        )],
+        scope_campus="oxford",
+        scope_library=None,
+        corrections=[],
+        url_allowlist={"https://www.lib.miamioh.edu/use/borrow/ill/"},
+    )
+    base.update(over)
+    return SynthesisRequest(**base)
+
+
+def _draft(confidence, answer="Interlibrary Loan lets you request items [1]."):
+    return {
+        "answer": answer,
+        "confidence": confidence,
+        "citations": [{
+            "n": 1,
+            "url": "https://www.lib.miamioh.edu/use/borrow/ill/",
+            "snippet": "Interlibrary Loan",
+        }],
+    }
+
+
+def _scripted(*drafts):
+    """An LLM that returns each draft in turn and counts its calls."""
+    calls = []
+
+    def llm(*, prefix_id, dynamic_suffix, model):
+        i = len(calls)
+        calls.append(model)
+        return drafts[min(i, len(drafts) - 1)], {
+            "input_tokens": 100, "cached_input_tokens": 10, "output_tokens": 20,
+        }
+
+    llm.calls = calls
+    return llm
+
+
+def test_a_low_confidence_draft_is_resampled_once_and_the_good_one_wins():
+    from src.synthesis.synthesizer import synthesize
+
+    llm = _scripted(_draft("low"), _draft("high"))
+    result = synthesize(_req(), llm=llm)
+
+    assert len(llm.calls) == 2, "the low report must be sampled a second time"
+    assert not result.post_processor.is_refusal, (
+        "the second draft stood up, so the patron gets the answer"
+    )
+    # Both calls are billed, or the budget ladder under-counts.
+    assert result.input_tokens == 200
+    assert result.output_tokens == 40
+    assert result.cached_input_tokens == 20
+
+
+def test_two_low_reports_still_refuse_and_never_go_to_a_third():
+    """One low report is noise; two is a signal. The guard is kept, not
+    deleted -- and a retry loop that keeps rolling would be worse than the
+    coin flip it replaced."""
+    from src.synthesis.refusal_templates import RefusalTrigger
+    from src.synthesis.synthesizer import synthesize
+
+    llm = _scripted(_draft("low"), _draft("low"), _draft("high"))
+    result = synthesize(_req(), llm=llm)
+
+    assert len(llm.calls) == 2, "one retry, never more"
+    assert result.post_processor.is_refusal
+    assert (result.post_processor.refusal.trigger
+            is RefusalTrigger.MODEL_SELF_FLAGGED)
+
+
+def test_the_literal_refusal_token_is_not_resampled():
+    """Emitting REFUSAL is a decision the model made about the content, not a
+    confidence field it filled in. Re-rolling a decision is a different thing
+    from re-sampling a measurement."""
+    from src.synthesis.synthesizer import synthesize
+
+    llm = _scripted(_draft("high", answer="REFUSAL"), _draft("high"))
+    result = synthesize(_req(), llm=llm)
+
+    assert len(llm.calls) == 1, "an explicit refusal is taken at its word"
+    assert result.post_processor.is_refusal
+
+
+def test_a_refusal_for_any_other_reason_is_not_resampled():
+    """The retry is scoped to the coin flip that was measured. A bad citation
+    is deterministic -- rolling again would just burn a call."""
+    from src.synthesis.synthesizer import synthesize
+
+    bad = _draft("high", answer="See the page [7].")  # [7] has no citation
+    llm = _scripted(bad, _draft("high"))
+    result = synthesize(_req(), llm=llm)
+
+    assert len(llm.calls) == 1
+    assert result.post_processor.is_refusal
+
+
+def test_a_confident_draft_never_costs_a_second_call():
+    from src.synthesis.synthesizer import synthesize
+
+    llm = _scripted(_draft("high"))
+    result = synthesize(_req(), llm=llm)
+
+    assert len(llm.calls) == 1
+    assert not result.post_processor.is_refusal
+    assert result.input_tokens == 100
