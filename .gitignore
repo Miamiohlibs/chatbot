@@ -252,3 +252,10 @@ ai-core/data/raw/*.csv
 **/tran_raw*.xlsx
 # Live transcripts now live OUTSIDE the working tree, at
 # /opt/chatbot-private-data/libchat-transcripts/ (chmod 700).
+
+# Per-category eval runs. The JSONL holds bot ANSWERS, which quote librarian
+# names, emails and desk numbers -- and this repository is public. The
+# pre-commit data check blocks them; keeping them out of the tree stops anyone
+# reaching for --no-verify. Runs live in /opt/chatbot-private-data/eval-runs/.
+/ai-core/docs/eval/cat_run_*/
+/ai-core/docs/eval/cat_*.jsonl

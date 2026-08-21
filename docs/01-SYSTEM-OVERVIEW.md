@@ -46,7 +46,11 @@ Every turn logs conversation, tokens (`ModelTokenUsage`, callSite
 |---|---|---|---|
 | reasoning | `LLM_MODEL_REASONING` | gpt-5.6-terra | agent loop, escalation |
 | basic | `LLM_MODEL_BASIC` | gpt-5.6-luna | synthesizer, triage |
-| cheap | `LLM_MODEL_CHEAP` | gpt-5.4-nano | eval judge, extraction |
+| cheap | `LLM_MODEL_CHEAP` | gpt-5.6-luna | eval judge, extraction |
+
+The cheap tier was gpt-5.4-nano until a repricing made Luna cheaper than
+nano outright — see the note in `src/config/models.py`. Checked against the
+running configuration 2026-08-21; all three resolve as shown.
 | embedding | `LLM_MODEL_EMBEDDING` | text-embedding-3-large | kNN classifier, retrieval |
 
 ## Data stores
