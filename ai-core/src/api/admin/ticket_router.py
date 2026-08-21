@@ -601,17 +601,21 @@ def build_ticket_router(deps: dict):
             + f"</dl>"
             f"<div class='acts'>{_ticket_actions(ticket_id, status, kq)}</div>"
             f"</div>"
-            f"<style>.transcript{{border:1px solid #e3e3e3;border-radius:8px;"
-            f"padding:.4rem .8rem;margin:.6rem 0}}"
-            f".turn{{padding:.5rem 0;border-bottom:1px solid #f0f0f0}}"
-            f".turn:last-child{{border-bottom:0}}"
-            f".turn.user b{{color:#8E1224}}.turn b{{display:block;"
-            f"font-size:.72rem;letter-spacing:.05em;text-transform:uppercase}}"
-            f"label{{display:block;margin:.7rem 0 .2rem;font-weight:600;"
-            f"font-size:.85rem}}</style>"
+            # All scoped under .tkt. `label{...}` unscoped would restyle
+            # every form label in the console -- the corrections form, the
+            # kill switch -- from a page that has nothing to do with them.
+            f"<style>.tkt .transcript{{border:1px solid #e3e3e3;"
+            f"border-radius:8px;padding:.4rem .8rem;margin:.6rem 0}}"
+            f".tkt .turn{{padding:.5rem 0;border-bottom:1px solid #f0f0f0}}"
+            f".tkt .turn:last-child{{border-bottom:0}}"
+            f".tkt .turn.user b{{color:#8E1224}}"
+            f".tkt .turn b{{display:block;font-size:.72rem;"
+            f"letter-spacing:.05em;text-transform:uppercase}}"
+            f".tkt label{{display:block;margin:.7rem 0 .2rem;"
+            f"font-weight:600;font-size:.85rem}}</style>"
             f"{convo_html}{asks_html}{form}"
         )
-        return HTMLResponse(ui.page("Ticket", body,
+        return HTMLResponse(ui.page("Ticket", f"<div class='tkt'>{body}</div>",
                                     current="/admin/tickets/view", key=key))
 
     @router.post("/admin/tickets/{ticket_id}/correct",

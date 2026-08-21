@@ -175,9 +175,12 @@ def build_conversations_router(deps: dict) -> Any:
               "system stores no identity, so “patron” is never asserted.'>"
               "how sources are labelled</span></p>"
             + pager()
-            + f"<style>tr.needs td{{background:#fffaf5}}"
-            f"td.num{{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}}"
-            f"</style>"
+            # Scoped under .convs: an unscoped `td.num` or `tr.needs td`
+            # lands after the shared stylesheet and restyles every table in
+            # the console, including the one on the page you navigate to next.
+            + f"<style>.convs tr.needs td{{background:#fffaf5}}"
+            f".convs td.num{{text-align:right;white-space:nowrap;"
+            f"font-variant-numeric:tabular-nums}}</style>"
             f"<table><tr><th>Time</th><th>First question</th>"
             f"<th>Asked</th><th></th></tr>"
             + "".join(row(r) for r in rows) + "</table>"
@@ -185,7 +188,8 @@ def build_conversations_router(deps: dict) -> Any:
             + f"<h2 style='font-size:.95rem;margin-top:1.4rem'>Other days</h2>"
             f"<div>{recent}</div>"
         )
-        return HTMLResponse(ui.page("Conversations", body,
+        return HTMLResponse(ui.page("Conversations",
+                                    f"<div class='convs'>{body}</div>",
                                     current="/admin/conversations", key=key))
 
     return router

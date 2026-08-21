@@ -167,3 +167,69 @@ def test_the_detector_would_have_caught_the_bug_it_was_written_for():
     assert keyless_admin_links(f"<a href='/admin/review?key={KEY}'>x</a>") == []
     # SSO endpoints are exempt -- they are how you get a session.
     assert keyless_admin_links("<a href='/admin/sso/login'>in</a>") == []
+
+
+# --- one console, not seven applications -----------------------------------
+
+
+def _page_styles(html: str) -> list[str]:
+    import re
+    return re.findall(r"<style>(.*?)</style>", html, re.S)
+
+
+def unscoped_element_selectors(css: str) -> list[str]:
+    """Bare element selectors -- body, h1, table -- in a page-level style.
+
+    A page injecting these lands AFTER the shared stylesheet and wins on
+    equal specificity, so it restyles the shell around it. The Cost page did
+    exactly that: body{margin:24px} pushed the top menu in, and its own
+    `.card` collided with the shell's ticket card, which is why it looked
+    like a different application.
+
+    Parsed by rule block rather than by regex-over-the-whole-string: the
+    first version anchored on whitespace and read the `td` inside
+    `.cost td` as its own selector, which would have failed every correctly
+    scoped page forever.
+    """
+    out = []
+    for block in css.split("}"):
+        if "{" not in block:
+            continue
+        selectors = block.rsplit("{", 1)[0]
+        if selectors.lstrip().startswith("@"):
+            continue                      # @media, @font-face and friends
+        for sel in selectors.split(","):
+            sel = sel.strip()
+            if not sel:
+                continue
+            first = sel.split()[0].split(">")[0].strip()
+            # Scoped if it starts with a class, id, or attribute.
+            if first[:1].isalpha() and not first.startswith(("@", ":")):
+                out.append(sel)
+    return out
+
+
+@pytest.mark.parametrize("path", PAGES)
+def test_no_page_restyles_the_shell_around_it(client, path):
+    r = client.get(f"{path}?key={KEY}")
+    assert r.status_code == 200
+    styles = _page_styles(r.text)
+    # The first <style> is the shell's own and may say what it likes.
+    for css in styles[1:]:
+        bad = unscoped_element_selectors(css)
+        assert not bad, (
+            f"{path} injects unscoped selector(s) {bad} — these override the "
+            f"shared shell. Scope them under a page class instead."
+        )
+
+
+def test_the_detector_flags_the_shape_that_caused_the_bug():
+    assert unscoped_element_selectors("body{margin:24px}") == ["body"]
+    assert unscoped_element_selectors("h1{font-size:20px}") == ["h1"]
+    assert unscoped_element_selectors("td,th{text-align:right}") == ["td", "th"]
+    # A descendant of a scoped root is scoped -- the first parser read the
+    # `td` here as its own selector and would have cried wolf on every page.
+    assert unscoped_element_selectors(".cost table td{padding:0}") == []
+    # Scoped versions are fine.
+    assert unscoped_element_selectors(".cost td,.cost th{text-align:right}") == []
+    assert unscoped_element_selectors(".cost .big{font-size:2rem}") == []

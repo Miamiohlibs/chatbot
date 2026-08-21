@@ -60,19 +60,23 @@ def _e(v: Any) -> str:
 
 
 _STYLE = (
-    "body{font:14px/1.5 system-ui,sans-serif;margin:24px;color:#111}"
-    "h1{font-size:20px}h2{font-size:15px;margin-top:24px;color:#444}"
-    "table{border-collapse:collapse;width:100%;margin-top:8px}"
-    "td,th{border:1px solid #ddd;padding:6px 10px;text-align:right}"
-    "th:first-child,td:first-child{text-align:left}"
-    "th{background:#f4f4f4}"
-    ".big{font-size:28px;font-weight:700}.muted{color:#777;font-size:12px}"
-    ".card{display:inline-block;border:1px solid #e3e3e3;border-radius:8px;"
-    "padding:12px 18px;margin:6px 14px 6px 0;min-width:140px}"
-    ".warn{color:#a11;font-weight:700}"
-    ".alert{border:1px solid #e0b4b4;background:#fdf6f6;border-radius:8px;"
-    "padding:10px 14px;margin:12px 0;font-size:13px}"
-    "code{background:#f4f4f4;padding:1px 4px;border-radius:3px}"
+    # SCOPED to .cost, and stripped of everything the shared shell already
+    # owns. This block used to redefine body/h1/h2/table/th and ship a
+    # `.card` that collided with the shell's ticket card -- injected after
+    # the shell's stylesheet, so it won on equal specificity and restyled
+    # the top menu. The Cost page looked like a different application.
+    #
+    # What is left is the part the shell has no opinion on: numbers.
+    ".cost table{font-variant-numeric:tabular-nums}"
+    ".cost td,.cost th{text-align:right}"
+    ".cost th:first-child,.cost td:first-child{text-align:left}"
+    ".cost .big{font-size:1.7rem;font-weight:700;line-height:1.1;"
+    "font-variant-numeric:tabular-nums}"
+    ".cost .muted{color:var(--muted);font-size:.78rem}"
+    ".cost .warn{color:var(--miami);font-weight:600}"
+    ".cost .alert{border:1px solid #e0b4b4;background:#fdf6f6;"
+    "border-radius:8px;padding:.7rem 1rem;margin:.8rem 0;font-size:.85rem}"
+    ".cost code{background:#f4f4f4;padding:1px 4px;border-radius:3px}"
 )
 
 
@@ -89,7 +93,8 @@ def _page(title: str, body: str, *, key: str = "") -> str:
     """
     from src.api.admin import admin_ui
 
-    return admin_ui.page(title, f"<style>{_STYLE}</style>{body}",
+    return admin_ui.page(title,
+                         f"<style>{_STYLE}</style><div class='cost'>{body}</div>",
                          current="/admin/cost", key=key)
 
 
@@ -305,13 +310,13 @@ def build_cost_view_router(deps: dict) -> Any:
         history = await _model_history(db)
         t = d["total"]
         cards = (
-            f"<div class='card'><div class='muted'>Spend (last {days}d)</div>"
+            f"<div class='stat calm'><div class='muted'>Spend (last {days}d)</div>"
             f"<div class='big'>${t['usd']:.2f}</div></div>"
-            f"<div class='card'><div class='muted'>Conversations turns</div>"
+            f"<div class='stat calm'><div class='muted'>Conversations turns</div>"
             f"<div class='big'>{t['n']:,}</div></div>"
-            f"<div class='card'><div class='muted'>Total tokens</div>"
+            f"<div class='stat calm'><div class='muted'>Total tokens</div>"
             f"<div class='big'>{(t['in'] + t['out']):,}</div></div>"
-            f"<div class='card'><div class='muted'>Input cache hit</div>"
+            f"<div class='stat calm'><div class='muted'>Input cache hit</div>"
             f"<div class='big'>{_cache_pct(t)}</div></div>"
         )
         day_rows = "".join(
@@ -388,7 +393,7 @@ def build_cost_view_router(deps: dict) -> Any:
                 for n in (1, 7, 30, 90)
             )
             + f" · <a href='/admin/cost.json?days={days}{_kq}'>JSON</a></div>"
-            f"<div style='margin-top:14px'>{cards}</div>"
+            f"<div class='stats'>{cards}</div>"
             f"<h2>By day</h2><table><tr><th>Day</th><th>USD</th><th>Turns</th>"
             f"<th>Input tok</th><th>Output tok</th><th>Cache hit</th></tr>{day_rows}</table>"
             f"<h2>By day · model · call site</h2><table><tr><th>Day</th><th>Model</th>"
