@@ -540,15 +540,30 @@ async def list_conversations_on(db: Any, day: "str", *,
         origins = {c.id: getattr(c, "origin", None) for c in convs}
     except Exception:  # noqa: BLE001
         origins = {}
+    try:
+        fbs = await db.conversationfeedback.find_many()
+        notes = {f.conversationId: (getattr(f, "userComment", "") or "")
+                 for f in fbs}
+    except Exception:  # noqa: BLE001
+        notes = {}
     for v in out:
         v["has_dev_row"] = v["conversation_id"] in dev_ids
         v["origin"] = origins.get(v["conversation_id"])
+        v["feedback_comment"] = notes.get(v["conversation_id"], "")
 
     # Run-level signals first: they see what a single row cannot.
     mark_bursts(out)
     mark_repeats(out)
     for v in out:
         v["source"] = classify_source(v)
+
+    # Then the one signal that needs to look outside this day at all. Only
+    # for rows nothing has claimed, and only their own question text -- a
+    # bounded lookup, not a scan.
+    await mark_replays(db, [v for v in out if not v["source"]["label"]])
+    for v in out:
+        if v.get("is_replay") and not v["source"]["label"]:
+            v["source"] = classify_source(v)
 
     # Counted BEFORE the filter and before paging: a badge on "Staff test"
     # has to say how many staff tests there are that day, not how many are
@@ -694,6 +709,18 @@ _SELF_DECLARED = (
     "testing the bot", "test message", "ignore this test",
 )
 
+# The same admission, made in the star-rating comment instead of the chat.
+# Every comment left on this service so far was one of these: "this is just
+# Kevin checking that the bot is up and running!", "demo", and "Students
+# might not understand the word 'Reserve'" -- a check, a demo, and an
+# evaluator talking about students in the third person. Not one was a
+# patron describing their own experience.
+_FEEDBACK_TESTING = (
+    "checking that the bot", "just checking", "demo", "demoing",
+    "this is a test", "testing", "trial run", "students might",
+    "students may not", "a student would", "students would",
+)
+
 
 # Phrasing a patron does not use about themselves.
 _THIRD_PARTY = (
@@ -742,6 +769,20 @@ BURST_MIN = 4
 # ModelTokenUsage marker and gets read as a person.
 SCRIPT_MEDIAN_GAP_S = 5.0
 
+# A verbatim repeat of a long, distinctive question asked on an earlier day
+# is a replay, not a coincidence. The developer replayed 206 real questions
+# on 19-20 August, and those replays landed in twos and threes -- below the
+# burst threshold -- on days after the originals, so neither the burst rule
+# nor the same-day repeat rule could see them.
+#
+# Length is what separates a replay from two people asking the same thing.
+# "when do you close" recurs all day and means nothing; forty characters of
+# identical text does not happen twice by accident. Measured across the
+# whole history: at 12 characters 1,627 conversations look like repeats, at
+# 40 it is 609, and the ones it stops claiming are exactly the short common
+# questions.
+REPLAY_MIN_CHARS = 40
+
 
 def mark_bursts(rows: list) -> None:
     """Label runs of conversations opened too close together to be separate
@@ -783,6 +824,41 @@ def mark_bursts(rows: list) -> None:
                 "scripted": by_flag or by_pace,
                 "by_pace": by_pace and not by_flag,
             }
+
+
+async def mark_replays(db: Any, rows: list) -> None:
+    """Flag rows whose question was asked verbatim, earlier, by somebody else.
+
+    One query for the whole page, keyed on the question text the page
+    already holds.
+    """
+    candidates = {}
+    for r in rows:
+        for q in (r.get("questions") or []):
+            if len(_repeat_key(q)) >= REPLAY_MIN_CHARS:
+                candidates.setdefault(q, []).append(r)
+    if not candidates:
+        return
+    try:
+        earlier = await db.message.find_many(
+            where={"type": "user", "content": {"in": list(candidates)}},
+            order={"timestamp": "asc"}, take=2000)
+    except Exception:  # noqa: BLE001
+        return
+
+    seen_first: dict = {}
+    for m in earlier:
+        content = getattr(m, "content", "")
+        cid = getattr(m, "conversationId", None)
+        ts = getattr(m, "timestamp", None)
+        if content not in seen_first:
+            seen_first[content] = (cid, ts)
+
+    for text, targets in candidates.items():
+        first_cid, first_ts = seen_first.get(text, (None, None))
+        for r in targets:
+            if first_cid and first_cid != r["conversation_id"]:
+                r["is_replay"] = True
 
 
 def _already_testing(conv: dict) -> bool:
@@ -868,6 +944,15 @@ def classify_source(conv: dict) -> dict:
     qs = conv.get("questions") or []
     joined = " ".join(qs).lower()
 
+    note = (conv.get("feedback_comment") or "").strip().lower()
+    if note:
+        told = next((p for p in _FEEDBACK_TESTING if p in note), "")
+        if told:
+            return {"label": "staff test", "tag": "staff",
+                    "why": f"The rating comment on this conversation says so "
+                           f"(“{told}”) — a check or a demo, not a patron "
+                           f"describing their own visit."}
+
     said = next((p for p in _SELF_DECLARED
                  if any(p in (q or "").lower()[:60] for q in qs)), "")
     if said:
@@ -911,6 +996,13 @@ def classify_source(conv: dict) -> dict:
         return {"label": "staff test", "tag": "staff",
                 "why": "A library staff address or NetID appears in this "
                        "conversation. Who is not recorded here."}
+
+    if conv.get("is_replay"):
+        return {"label": "local test", "tag": "local",
+                "why": "This question was already asked, word for word, in an "
+                       "earlier conversation. Forty characters of identical "
+                       "text is a replay, not two people phrasing something "
+                       "the same way."}
 
     if conv.get("repeated_question", 0) >= 2:
         return {"label": "staff?", "tag": "maybe-staff",

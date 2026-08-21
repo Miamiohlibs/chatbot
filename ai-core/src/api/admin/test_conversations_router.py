@@ -20,8 +20,9 @@ def _msg(cid, ts, type_="user", content="q", **kw):
 
 
 class _DB:
-    def __init__(self, msgs, dev_convs=(), origins=None):
+    def __init__(self, msgs, dev_convs=(), origins=None, feedback=None):
         self._origins = origins or {}
+        self._feedback = feedback or {}
         self.message = NS(find_many=self._find)
         # The dev flag lives here, not on Message: a turn that reached the
         # server with no browser origin is tagged v2_turn_dev.
@@ -29,12 +30,17 @@ class _DB:
         # origin lives on Conversation, and is the strongest signal there
         # is -- somebody came through the staff link on purpose.
         self.conversation = NS(find_many=self._convs)
+        self.conversationfeedback = NS(find_many=self._fb)
         self._msgs = msgs
         self._dev = set(dev_convs)
         self.seen_where = None
 
     async def _usage(self, where=None, **_):
         return [NS(conversationId=c, callSite="v2_turn_dev") for c in self._dev]
+
+    async def _fb(self, **_):
+        return [NS(conversationId=c, userComment=t)
+                for c, t in self._feedback.items()]
 
     async def _convs(self, where=None, **_):
         return [NS(id=c, origin=o) for c, o in getattr(self, "_origins", {}).items()]
@@ -528,3 +534,69 @@ async def test_a_script_replaying_a_staff_question_is_still_a_script():
     rows = (await list_conversations_on(_DB(msgs), "2026-08-21"))["rows"]
     assert all(r["source"]["tag"] == "local" for r in rows), \
         [r["source"]["tag"] for r in rows]
+
+
+# --- signals people leave about themselves ---------------------------------
+
+
+@pytest.mark.asyncio
+async def test_a_rating_comment_that_says_it_was_a_check_is_believed():
+    """Every comment left on this service so far declared itself.
+
+    "this is just Kevin checking that the bot is up and running!", "demo",
+    and "Students might not understand the word 'Reserve'" -- a check, a
+    demo, and an evaluator talking about students in the third person. Not
+    one was a patron describing their own visit.
+    """
+    noon = dt.datetime(2026, 8, 21, 12, tzinfo=NY)
+    db = _DB([_msg("c", noon, "user", "do you have Sociology for Dummies")],
+             feedback={"c": "this is just Kevin checking that the bot is up"})
+    r = (await list_conversations_on(db, "2026-08-21"))["rows"][0]
+    assert r["source"]["tag"] == "staff"
+    assert "rating comment" in r["source"]["why"]
+
+
+@pytest.mark.asyncio
+async def test_an_evaluators_comment_about_students_counts():
+    noon = dt.datetime(2026, 8, 21, 12, tzinfo=NY)
+    db = _DB([_msg("c", noon, "user", "how do I check out Adobe")],
+             feedback={"c": "Students might not understand the word Reserve"})
+    assert (await list_conversations_on(db, "2026-08-21"))["rows"][0]["source"]["tag"] == "staff"
+
+
+@pytest.mark.asyncio
+async def test_a_patron_describing_their_own_visit_is_not_relabelled():
+    noon = dt.datetime(2026, 8, 21, 12, tzinfo=NY)
+    db = _DB([_msg("c", noon, "user", "when do you close")],
+             feedback={"c": "helpful, found what I needed"})
+    assert (await list_conversations_on(db, "2026-08-21"))["rows"][0]["source"]["tag"] == "unlabelled"
+
+
+@pytest.mark.asyncio
+async def test_a_long_verbatim_repeat_from_an_earlier_day_is_a_replay():
+    """The replay landed in twos and threes, on days after the original.
+
+    Below the burst threshold and outside the day the same-day repeat rule
+    can see, so neither caught it.
+    """
+    long_q = ("A visiting alum recently stopped by the Alumni Centre to ask "
+              "about his father's graduating class photograph")
+    earlier = dt.datetime(2026, 8, 20, 12, tzinfo=NY)
+    today = dt.datetime(2026, 8, 21, 12, tzinfo=NY)
+    db = _DB([_msg("original", earlier, "user", long_q),
+              _msg("replay", today, "user", long_q)])
+    r = (await list_conversations_on(db, "2026-08-21"))["rows"][0]
+    assert r["source"]["tag"] == "local"
+    assert "word for word" in r["source"]["why"]
+
+
+@pytest.mark.asyncio
+async def test_a_short_common_question_repeating_is_not_a_replay():
+    # "when do you close" recurs all day and means nothing. Claiming it
+    # would write off ordinary traffic as machine noise.
+    earlier = dt.datetime(2026, 8, 20, 12, tzinfo=NY)
+    today = dt.datetime(2026, 8, 21, 12, tzinfo=NY)
+    db = _DB([_msg("a", earlier, "user", "when do you close"),
+              _msg("b", today, "user", "when do you close")])
+    r = (await list_conversations_on(db, "2026-08-21"))["rows"][0]
+    assert r["source"]["tag"] == "unlabelled"
