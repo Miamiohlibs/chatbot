@@ -44,11 +44,23 @@ cd ai-core
 
 - Gold set: `ai-core/src/eval/golden_set.jsonl` — each case carries the
   operator's review history in its `notes` field (judge_v2 reads it).
-- History and current numbers: see the dated reports in
-  `ai-core/docs/eval/` (latest: judge_v2 run 2026-07-16, 74.4% judge-good,
-  operator-estimated true rate ~93%).
+- History and current numbers: dated reports in `ai-core/docs/eval/`.
 - After changing gold or judge, re-run and commit the report + the
   per-case results JSONL next to it, so the next triage never loses data.
+
+### Two different quality numbers, and why both are kept
+
+| Measured against | Latest | What it tells you |
+|---|---|---|
+| **Gold set** (234 constructed cases, LLM judge) | 82.1% judged correct, per-category run 2026-08-18 | Regression safety net. Comparable run to run. |
+| **Real traffic** (206 distinct questions people actually typed, hand-scored) | 171 good / 28 weak / **7 bad**, 2026-08-21 | What a patron experiences. Harder: typos, half-sentences, pasted paragraphs, mid-flow fragments. |
+
+The gold number is the one to watch for regressions; the real-traffic number
+is the honest one. They are not comparable to each other and neither replaces
+the other. Method and the open failures: [docs/OPEN-WORK.md](docs/OPEN-WORK.md).
+
+**The full eval hangs if run in one process on this host.** Run it per
+category with a memory cap — see `ai-core/scripts/run_eval_safely.sh`.
 
 ## Documentation map
 
@@ -58,3 +70,8 @@ cd ai-core
   for the v2-rebuild surfaces
 - [docs/programmer-guide/00-INDEX.md](docs/programmer-guide/00-INDEX.md) —
   architecture deep-dive
+- [docs/HANDOVER.md](docs/HANDOVER.md) — **start here if you are taking this
+  over**: what it is, what you can change safely, what you must not, and what
+  to watch
+- [docs/OPEN-WORK.md](docs/OPEN-WORK.md) — known failures and the traps that
+  make measuring this system harder than it looks

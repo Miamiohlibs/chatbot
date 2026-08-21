@@ -4,8 +4,18 @@ Written 2026-08-20, from scoring **206 distinct real questions** (66 browser
 conversations, 8/05–8/19) against gold rewritten from scratch. Not from the
 eval suite: these are the questions people actually typed.
 
-Baseline that day, hand-scored, after the P0/P1 fixes:
-**159 good / 27 weak / 20 bad.**
+Scored three times as fixes landed, every run hand-scored against the same
+gold, the last two against production:
+
+| | good | weak | bad |
+|---|---:|---:|---:|
+| 2026-08-20, before any of it | 140 | 24 | **42** |
+| after the P0/P1 routing fixes | 159 | 27 | 20 |
+| **2026-08-21, current** | **171** | **28** | **7** |
+
+The 35 fixes in between were each verified in production, not in-process --
+in-process runs silently lose LibCal credentials and the booking path, which
+is trap 1 and 2 below.
 
 The eval suite scores the same build around 82%. The two numbers measure
 different things and both are true — gold is constructed, real traffic has
@@ -36,6 +46,18 @@ with a reason so the next person can see it was already turned down.
 ---
 
 ## 2. Twenty answers still wrong, in three groups
+
+### The 7 that remain
+
+| Question | What happens |
+|---|---|
+| "My laptop is broken. how long can I check one out" | answers the broken half, never the loan period |
+| "I have a question about interlibrary loan" | refused on some runs, answered on others — nondeterminism |
+| "What time does the Gardner-Harvey Library open on August 21, 2026?" | swallowed by an open booking flow from three turns earlier |
+| "Does the Gardner-Harvey Library have historical materials about the MUM campus?" | clarification chip, no destination |
+| "I need to correct a book title that I requested from ILL today" | refused as out of scope |
+| "Where could I find records of past event contracts…" | the staff-privacy guard replaces a good answer, intermittently |
+| "OneSearch page keeps saying 404 not found" | catalogue guidance, no route to report the broken page |
 
 ### Group B — boundary questions, needing an operator decision (5)
 

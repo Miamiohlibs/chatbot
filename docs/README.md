@@ -1,7 +1,7 @@
 # Developer Documentation
 
 **Miami University Libraries Smart Chatbot**
-**Last Updated:** July 18, 2026
+**Last Updated:** August 21, 2026
 
 Everything in this folder describes the **current** system (the v2
 rebuild — the only serving path since 2026-07-17). Anything describing
@@ -21,6 +21,10 @@ the retired v3.1 stack lives under [archive/](./archive/).
 | [07-DATA-SOURCES.md](./07-DATA-SOURCES.md) | **Which single source owns each fact** (people, subjects, hours, corrections) + known data gaps |
 | [MAINTENANCE-2026-07-17-overnight.md](./MAINTENANCE-2026-07-17-overnight.md) | The post-legacy-removal audit report |
 | [STUDENT-TEST-2026-07.md](./STUDENT-TEST-2026-07.md) | 10-question student acceptance test + grading rubric (80% pass gate) |
+| [HANDOVER.md](./HANDOVER.md) | **Taking this over? Start here.** What the system is, who can change what, the things that will bite you |
+| [OPEN-WORK.md](./OPEN-WORK.md) | Known failures after the 2026-08-21 real-traffic review, and the five measurement traps |
+| [OPS-BACKUP.md](./OPS-BACKUP.md) | Database backup: what runs, where it lands, how to restore |
+| [BUDGET.md](./BUDGET.md) | The spend ladder, the purses, and what happens at each rung |
 
 ## Deeper / adjacent
 
