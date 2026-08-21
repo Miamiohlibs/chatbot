@@ -284,15 +284,23 @@ def saml_settings(cfg: SSOConfig) -> dict:
     assertion is an assertion anyone can forge, and the whole point of this
     module is that the identity is proven rather than claimed.
     """
+    # NO singleLogoutService. Advertising SAML Single Logout would put an
+    # endpoint in the metadata that Miami IT would then configure, and this
+    # SP does not implement one -- /admin/sso/sls returned 404 while the
+    # metadata claimed it existed. A dead endpoint in published metadata is
+    # worse than an absent one: it fails at logout time, in production, for
+    # somebody who has no idea why.
+    #
+    # Local sign-out at /admin/sso/logout drops this service's session,
+    # which is the whole of what an operator needs. SLS would additionally
+    # end their Miami session everywhere, and SAML SLS is notoriously
+    # unreliable at that. If it is ever wanted, implement the route FIRST
+    # and re-send the metadata.
     sp: dict = {
         "entityId": cfg.sp_entity_id,
         "assertionConsumerService": {
             "url": cfg.acs_url,
             "binding": "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST",
-        },
-        "singleLogoutService": {
-            "url": cfg.sls_url,
-            "binding": "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect",
         },
         # Transient is Miami's default and is deliberately anonymous -- it
         # cannot identify anyone, which is why the whitelist reads an
@@ -327,12 +335,19 @@ def saml_settings(cfg: SSOConfig) -> dict:
                 "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256",
             "digestAlgorithm": "http://www.w3.org/2001/04/xmlenc#sha256",
         },
-        "contactPerson": {
+        # contactPerson is included ONLY with a real address. python3-saml
+        # rejects the whole settings dict with "contact_not_enought_data"
+        # when the block exists but the email is blank -- which would take
+        # out the metadata endpoint entirely, in exchange for an optional
+        # courtesy field. An unset SSO_CONTACT_EMAIL must cost the contact
+        # line, not the login.
+        **({"contactPerson": {
             "technical": {
-                "givenName": _env("SSO_CONTACT_NAME", "Miami University Libraries"),
-                "emailAddress": _env("SSO_CONTACT_EMAIL", ""),
+                "givenName": _env("SSO_CONTACT_NAME",
+                                  "Miami University Libraries"),
+                "emailAddress": _env("SSO_CONTACT_EMAIL"),
             },
-        },
+        }} if _env("SSO_CONTACT_EMAIL") else {}),
         "organization": {
             "en-US": {
                 "name": "Miami University Libraries",

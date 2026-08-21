@@ -387,3 +387,42 @@ def test_a_browser_is_redirected_by_a_real_route():
                    follow_redirects=False)
     assert r.status_code == 307
     assert r.headers["location"].startswith("/admin/sso/login?next=")
+
+
+def test_metadata_advertises_no_endpoint_that_does_not_exist():
+    """Everything in the published metadata must be a route we serve.
+
+    The first draft advertised /admin/sso/sls, which 404'd. Miami IT
+    configures their side FROM this document, so a phantom endpoint becomes
+    their configuration and fails in production later.
+    """
+    from onelogin.saml2.settings import OneLogin_Saml2_Settings
+
+    xml = OneLogin_Saml2_Settings(
+        saml_settings(cfg()), sp_validation_only=True).get_sp_metadata()
+    xml = xml.decode() if isinstance(xml, bytes) else xml
+
+    import re
+    advertised = set(re.findall(r'Location="https://[^"]*(/admin/sso/[\w-]+)"', xml))
+
+    from src.api.admin.sso_router import build_sso_router
+    served = {getattr(r, "path", "") for r in build_sso_router(cfg()).routes}
+
+    missing = {p for p in advertised if p not in served}
+    assert not missing, f"metadata advertises unserved endpoint(s): {missing}"
+
+
+def test_single_logout_is_not_advertised():
+    from onelogin.saml2.settings import OneLogin_Saml2_Settings
+    xml = OneLogin_Saml2_Settings(
+        saml_settings(cfg()), sp_validation_only=True).get_sp_metadata()
+    xml = xml.decode() if isinstance(xml, bytes) else xml
+    assert "SingleLogoutService" not in xml
+
+
+def test_metadata_still_builds_with_no_contact_email(monkeypatch):
+    # An optional courtesy field must never be able to take out the login.
+    monkeypatch.delenv("SSO_CONTACT_EMAIL", raising=False)
+    from onelogin.saml2.settings import OneLogin_Saml2_Settings
+    s = OneLogin_Saml2_Settings(saml_settings(cfg()), sp_validation_only=True)
+    assert s.get_sp_metadata()
