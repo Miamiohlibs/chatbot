@@ -497,7 +497,9 @@ async def test_an_operator_address_typed_into_the_chat_is_staff(monkeypatch):
                    "qum@miamioh.edu")])
     r = (await list_conversations_on(db, "2026-08-21"))["rows"][0]
     assert r["source"]["tag"] == "staff"
-    assert "own address" in r["source"]["why"]
+    assert "staff address or NetID" in r["source"]["why"]
+    # And it does not say whose.
+    assert "qum" not in r["source"]["why"]
 
 
 @pytest.mark.asyncio
@@ -509,3 +511,20 @@ async def test_a_patron_address_is_not_treated_as_staff(monkeypatch):
                    "student123@miamioh.edu")])
     r = (await list_conversations_on(db, "2026-08-21"))["rows"][0]
     assert r["source"]["tag"] == "unlabelled"
+
+
+@pytest.mark.asyncio
+async def test_a_script_replaying_a_staff_question_is_still_a_script():
+    """How it arrived beats what it contains.
+
+    The developer's replay set includes questions that hold a staff address.
+    Reading the address first labelled our own replay as a colleague's
+    testing, which misattributes machine traffic to a person.
+    """
+    base = dt.datetime(2026, 8, 21, 12, tzinfo=NY)
+    msgs = [_msg(f"s{i}", base + dt.timedelta(seconds=2 * i), "user",
+                 "I am a remote student, contact qum@miamioh.edu")
+            for i in range(6)]
+    rows = (await list_conversations_on(_DB(msgs), "2026-08-21"))["rows"]
+    assert all(r["source"]["tag"] == "local" for r in rows), \
+        [r["source"]["tag"] for r in rows]

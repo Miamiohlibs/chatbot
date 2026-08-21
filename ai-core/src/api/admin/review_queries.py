@@ -868,18 +868,6 @@ def classify_source(conv: dict) -> dict:
     qs = conv.get("questions") or []
     joined = " ".join(qs).lower()
 
-    # Somebody typed an operator's own address into the chat -- the booking
-    # flow asks for one. That is not an inference about how they typed; it
-    # is the address of a person who runs this service.
-    staff_addrs = _known_staff_addresses()
-    if staff_addrs:
-        low = joined.lower()
-        hit_addr = next((a for a in staff_addrs if a in low), "")
-        if hit_addr:
-            return {"label": "staff test", "tag": "staff",
-                    "why": f"An operator's own address ({hit_addr}) was "
-                           f"typed into this conversation."}
-
     said = next((p for p in _SELF_DECLARED
                  if any(p in (q or "").lower()[:60] for q in qs)), "")
     if said:
@@ -910,6 +898,19 @@ def classify_source(conv: dict) -> dict:
                 "why": f"One of {burst['n']} conversations opened within "
                        f"{burst['span_s'] / 60:.0f} min. A person opens one "
                        f"chat window; a run like this is somebody testing."}
+
+    # AFTER the arrival signals above, not before. How a conversation
+    # reached the server is a harder fact than what its text contains: a
+    # script replaying a question that happens to hold a staff address is
+    # still a script, and calling it staff testing would misattribute our
+    # own replay to a colleague.
+    from src.api.admin.staff_directory import looks_like_staff
+
+    if looks_like_staff(joined) or any(
+            a in joined.lower() for a in _known_staff_addresses()):
+        return {"label": "staff test", "tag": "staff",
+                "why": "A library staff address or NetID appears in this "
+                       "conversation. Who is not recorded here."}
 
     if conv.get("repeated_question", 0) >= 2:
         return {"label": "staff?", "tag": "maybe-staff",
