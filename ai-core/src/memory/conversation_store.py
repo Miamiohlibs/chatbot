@@ -68,7 +68,30 @@ async def create_conversation(tool_used: List[str] = None,
     data: dict = {"toolUsed": tool_used or []}
     if origin:
         data["origin"] = origin
-    conversation = await prisma.conversation.create(data=data)
+    try:
+        conversation = await prisma.conversation.create(data=data)
+    except Exception:
+        # NEVER let the origin marker cost somebody their conversation.
+        #
+        # This is not hypothetical: the generated Prisma client can lag the
+        # schema, and on 2026-08-21 it did. `origin` existed in the schema
+        # and in the database, the client did not know about it, and every
+        # visitor carrying the staff cookie got FieldNotFoundError -- which
+        # surfaced as a socket handshake that would not complete. A librarian
+        # who clicked the test link could no longer use the chatbot at all.
+        #
+        # Retrying without the marker loses a label. Not retrying loses the
+        # patron. The label is the cheaper thing to drop, and the log says
+        # it happened rather than hiding it.
+        if not origin:
+            raise
+        logging.warning(
+            "could not record origin=%r on a new conversation; creating it "
+            "without the marker. The generated Prisma client is probably "
+            "behind prisma/schema.prisma -- re-run `prisma generate`.",
+            origin, exc_info=True)
+        conversation = await prisma.conversation.create(
+            data={"toolUsed": tool_used or []})
     return conversation.id
 
 async def add_message(

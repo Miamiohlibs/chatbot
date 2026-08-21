@@ -63,6 +63,15 @@ model Message {
 
 model Conversation {
   id                   String                @id @default(uuid())
+  /// Where this session came from. Null for ordinary traffic.
+  ///
+  /// "staff" is set when the visitor arrived through /staff-test, the link
+  /// library staff use when they are trying the bot rather than using it.
+  /// Until this existed the only way to tell staff testing from patron use
+  /// was to read the transcript and guess -- and guessing towards "patron"
+  /// inflates every claim about real usage, which is the mistake the beta
+  /// report had to walk back three times.
+  origin               String?
   toolUsed             String[]              @default([])
   conversationFeedback ConversationFeedback?
   messageList          Message[]
