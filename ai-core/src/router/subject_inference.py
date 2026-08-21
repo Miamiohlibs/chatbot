@@ -81,6 +81,45 @@ def _load_special() -> "tuple[str, ...]":
     return tuple(t.lower() for t in sc.get("terms", []) if t)
 
 
+@lru_cache(maxsize=1)
+def _load_special_rules() -> "tuple[tuple[str, tuple[tuple[str, ...], ...], tuple[str, ...]], ...]":
+    """((rule_id, all_of_groups, none_of), ...) for ACTIVE rules only.
+
+    A rule is the escape hatch for a question that is unmistakably ours but
+    contains no single word that could ever go on the term list. "Records of
+    past event contracts that Miami University has executed" is the case that
+    forced it: every word in it is ordinary English, and only the CO-OCCURRENCE
+    of a records word with a Miami-the-institution word means University
+    Archives.
+
+    Kept in the same reviewable JSON, as word lists rather than a regex, so
+    striking one is still a data edit a librarian can make.
+    """
+    try:
+        raw = json.loads(_DATA.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return ()
+    sc = raw.get("special_collections") or {}
+    if sc.get("status") != "active":
+        return ()
+    out = []
+    for rule in sc.get("co_occurrence", []):
+        if rule.get("status") != "active":
+            continue
+        groups = tuple(
+            tuple(w.lower() for w in group if w)
+            for group in rule.get("all_of", [])
+        )
+        if not groups or not all(groups):
+            continue
+        out.append((
+            rule.get("id", "rule"),
+            groups,
+            tuple(w.lower() for w in rule.get("none_of", []) if w),
+        ))
+    return tuple(out)
+
+
 def _hit(message: str, terms: "tuple[str, ...]") -> Optional[str]:
     """The first term present on WORD boundaries, or None.
 
@@ -112,5 +151,16 @@ def looks_like_special_collections(message: str) -> Optional[str]:
     Separate from the subjects above because it is not an inference about a
     PERSON: Special Collections & University Archives actually holds local,
     university and family history, so this is a holdings-backed route.
+
+    Terms are tried first because a term match names the thing the patron
+    said; a rule match only names the rule.
     """
-    return _hit(message, _load_special())
+    term = _hit(message, _load_special())
+    if term:
+        return term
+    for rule_id, groups, none_of in _load_special_rules():
+        if any(_hit(message, (w,)) for w in none_of):
+            continue
+        if all(_hit(message, group) for group in groups):
+            return rule_id
+    return None

@@ -5185,3 +5185,107 @@ def test_directions_to_a_building_are_not_a_request_for_material():
     for q in ("how do i get research help",
               "how can I find books about totalitarianism"):
         assert F(q) is not None, q
+
+
+def test_a_co_occurrence_rule_routes_institutional_records_to_the_archives():
+    """R087 -- "records of past event contracts that Miami University has
+    executed" -- is unmistakably a University Archives question and contains
+    no single word that could ever go on the exclusive-term list. Every word
+    in it is ordinary English; only the CO-OCCURRENCE means archives.
+
+    Both directions, because a rule this shape is exactly the kind that
+    quietly swallows its neighbours.
+    """
+    from src.router.subject_inference import looks_like_special_collections
+
+    for q in (
+            # The real question text, verbatim from live traffic.
+            "Where could I find records of past event contracts that Miami "
+            "University has executed for events?",
+            "Where can I find the university's board of trustees minutes "
+            "from 1970?",
+            "where are the papers of former Miami University presidents",
+            "does the library keep correspondence from Miami University deans",
+    ):
+        assert looks_like_special_collections(q) == "institutional_records", q
+
+    # A patron's OWN records are the registrar or MyAccount, never us; and
+    # an ordinary library question that happens to name the university must
+    # not be dragged into Special Collections.
+    for q in ("Can I get a copy of my transcript from the university?",
+              "What are the university library hours today?",
+              "How do I renew my checkout at the university library?",
+              "Can I print documents at King Library?",
+              "Where do I find newspaper articles about Miami University?",
+              "How many books does the university library have?",
+              "I need help finding scholarly papers on climate change",
+              "Are there study rooms at the university library?"):
+        assert looks_like_special_collections(q) is None, q
+
+
+def test_every_co_occurrence_rule_is_reviewable_data_not_a_regex():
+    """The file is data so a librarian can strike an entry without reading
+    Python. A rule earns that only if it is still word lists with a status --
+    the moment one becomes a regex, the reviewability claim is false.
+    """
+    import json
+    from pathlib import Path
+
+    from src.router import subject_inference as SI
+
+    raw = json.loads(Path(SI._DATA).read_text(encoding="utf-8"))
+    rules = raw["special_collections"].get("co_occurrence", [])
+    assert rules, "the rule list vanished; the R087 route depends on it"
+    regex_chars = set(r"[](){}|*+?^$\\")
+    for rule in rules:
+        assert rule.get("status") in ("active", "rejected"), rule.get("id")
+        assert rule.get("why"), f"{rule.get('id')} has no stated reason"
+        assert rule.get("all_of"), rule.get("id")
+        for group in rule["all_of"]:
+            assert group, f"{rule.get('id')} has an empty all_of group"
+            for word in group + rule.get("none_of", []):
+                assert not (set(word) & regex_chars), (
+                    f"{rule.get('id')} contains {word!r}, which is a pattern, "
+                    f"not a word a librarian can read")
+
+
+def test_a_rejected_co_occurrence_rule_stops_firing():
+    """Reversibility is the promise made to the reviewer: status 'rejected'
+    must actually turn a rule off, not merely annotate it."""
+    import json
+    from pathlib import Path
+    from unittest.mock import patch
+
+    from src.router import subject_inference as SI
+
+    raw = json.loads(Path(SI._DATA).read_text(encoding="utf-8"))
+    for rule in raw["special_collections"]["co_occurrence"]:
+        rule["status"] = "rejected"
+
+    q = ("Where could I find records of past event contracts that Miami "
+         "University has executed for events?")
+    assert SI.looks_like_special_collections(q) == "institutional_records"
+
+    SI._load_special_rules.cache_clear()
+    try:
+        with patch.object(SI, "_DATA") as fake:
+            fake.read_text.return_value = json.dumps(raw)
+            assert SI.looks_like_special_collections(q) is None
+    finally:
+        SI._load_special_rules.cache_clear()
+    # ...and it comes back once the rejection is undone.
+    assert SI.looks_like_special_collections(q) == "institutional_records"
+
+
+def test_the_staff_privacy_refusal_does_not_accuse_the_patron():
+    """This guard inspects the ANSWER, so it fires on questions that never
+    asked for a contact. R087 asked about archives and was told "I don't
+    share staff contact lists" -- an answer to a question nobody asked.
+    """
+    from src.synthesis.refusal_templates import RefusalTrigger, render_refusal
+
+    copy = render_refusal(RefusalTrigger.STAFF_PRIVACY)
+    assert "I don't share staff contact lists" not in copy
+    # It must still say what it declined to do, and still route to a human.
+    assert "staff contacts" in copy
+    assert "research-support/ask" in copy

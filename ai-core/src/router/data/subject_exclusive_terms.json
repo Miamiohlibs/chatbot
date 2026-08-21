@@ -202,6 +202,47 @@
       "family history",
       "alumni record",
       "local history"
+    ],
+    "_co_occurrence_note": "A RULE, not a word. Fires only when the question contains one word from every 'all_of' list AND none from 'none_of'. This exists because 'records of past event contracts that Miami University has executed' is plainly a University Archives question and contains no single word that could ever be put on the term list above. Read it as a sentence: 'a records word AND a Miami-the-institution word, but nothing about the patron's own account.' Strike a rule by setting status to 'rejected'.",
+    "co_occurrence": [
+      {
+        "id": "institutional_records",
+        "status": "active",
+        "added": "2026-08-21",
+        "why": "Institutional records of Miami itself -- minutes, contracts, correspondence, official papers -- are held by the University Archives. Measured against all 206 real questions and all 234 gold cases before it shipped: it fires on exactly one of the 440 and nothing else.",
+        "all_of": [
+          [
+            "records",
+            "record",
+            "files",
+            "documents",
+            "papers",
+            "correspondence",
+            "minutes",
+            "contracts",
+            "contract"
+          ],
+          [
+            "miami university",
+            "the university",
+            "university's",
+            "the college",
+            "miami's"
+          ]
+        ],
+        "none_of": [
+          "my account",
+          "my record",
+          "student record",
+          "transcript",
+          "immunization",
+          "medical record",
+          "circulation record",
+          "borrowing",
+          "fines",
+          "checkout"
+        ]
+      }
     ]
   }
 }
