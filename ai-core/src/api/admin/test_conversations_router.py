@@ -257,11 +257,16 @@ async def test_the_staff_link_outranks_every_transcript_guess():
 
 
 def _mixed():
-    base = dt.datetime(2026, 8, 21, 12, tzinfo=NY)
-    msgs = ([_msg("staff1", base, "user", "hello")]
-            + [_msg("script1", base, "user", "hello")]
-            + [_msg("plain1", base, "user", "when do you close")]
-            + [_msg("plain2", base, "user", "do you loan software")])
+    # Spread through the day on purpose. Four conversations at the same
+    # instant is a burst, and burst detection would (correctly) relabel the
+    # lot -- which is a different behaviour than the one these tests are
+    # about.
+    base = dt.datetime(2026, 8, 21, 9, tzinfo=NY)
+    h = lambda n: base + dt.timedelta(hours=n)  # noqa: E731
+    msgs = ([_msg("staff1", h(0), "user", "hello there")]
+            + [_msg("script1", h(2), "user", "good morning")]
+            + [_msg("plain1", h(4), "user", "when do you close")]
+            + [_msg("plain2", h(6), "user", "do you loan software")])
     return _DB(msgs, dev_convs=["script1"], origins={"staff1": "staff"})
 
 
@@ -296,3 +301,105 @@ async def test_a_filtered_total_is_the_filtered_count_not_the_day_count():
     # Otherwise the pager offers pages the filter cannot fill.
     res = await list_conversations_on(_mixed(), "2026-08-21", source="staff")
     assert res["total"] == 1
+
+
+# --- testing arrives in runs -----------------------------------------------
+#
+# The per-conversation rules could not see the commonest shape of testing:
+# separate one-question conversations opened seconds apart. On 17 August a
+# batch like that sat in the list with 27 rows unmarked and a handful marked
+# "local test" -- purely because only the turns that reached a model leave a
+# ModelTokenUsage row to read.
+
+
+def _burst(n, gap_s=20, start_hour=12, prefix="b"):
+    base = dt.datetime(2026, 8, 21, start_hour, tzinfo=NY)
+    return [_msg(f"{prefix}{i}", base + dt.timedelta(seconds=gap_s * i),
+                 "user", f"question {i}") for i in range(n)]
+
+
+@pytest.mark.asyncio
+async def test_a_run_of_conversations_seconds_apart_is_flagged_as_testing():
+    # A person opens one chat window. They do not open six in two minutes.
+    db = _DB(_burst(6))
+    rows = (await list_conversations_on(db, "2026-08-21"))["rows"]
+    assert all(r["source"]["tag"] == "maybe-staff" for r in rows), \
+        [r["source"] for r in rows]
+    assert "conversations opened within" in rows[0]["source"]["why"]
+
+
+@pytest.mark.asyncio
+async def test_one_scripted_member_makes_the_whole_run_a_script():
+    # Evidence about one member is evidence about the run: they were the
+    # same script, and only some of its turns happened to reach a model.
+    db = _DB(_burst(6), dev_convs=["b3"])
+    rows = (await list_conversations_on(db, "2026-08-21"))["rows"]
+    assert all(r["source"]["tag"] == "local" for r in rows)
+    assert "no browser origin" in rows[0]["source"]["why"]
+
+
+@pytest.mark.asyncio
+async def test_conversations_spread_through_the_day_are_not_a_burst():
+    # Six people over six hours is a library, not a test run.
+    base = dt.datetime(2026, 8, 21, 9, tzinfo=NY)
+    db = _DB([_msg(f"c{i}", base + dt.timedelta(hours=i), "user", f"q{i}")
+              for i in range(6)])
+    rows = (await list_conversations_on(db, "2026-08-21"))["rows"]
+    assert all(r["source"]["tag"] == "unlabelled" for r in rows)
+
+
+@pytest.mark.asyncio
+async def test_a_short_run_is_left_alone():
+    # Two or three close together is a person retrying, not a script.
+    db = _DB(_burst(3))
+    rows = (await list_conversations_on(db, "2026-08-21"))["rows"]
+    assert all(r["source"]["tag"] == "unlabelled" for r in rows)
+
+
+@pytest.mark.asyncio
+async def test_the_same_question_in_two_windows_is_somebody_checking():
+    base = dt.datetime(2026, 8, 21, 9, tzinfo=NY)
+    db = _DB([
+        _msg("a", base, "user", "who is the education librarian"),
+        _msg("b", base + dt.timedelta(hours=2), "user",
+             "Who is the education librarian?"),
+    ])
+    rows = (await list_conversations_on(db, "2026-08-21"))["rows"]
+    assert all(r["source"]["tag"] == "maybe-staff" for r in rows)
+    assert "separate conversations" in rows[0]["source"]["why"]
+
+
+@pytest.mark.asyncio
+async def test_two_people_asking_the_hours_is_not_a_repeat_test():
+    # Short, common questions must not drag ordinary traffic into the net.
+    base = dt.datetime(2026, 8, 21, 9, tzinfo=NY)
+    db = _DB([_msg("a", base, "user", "hi"),
+              _msg("b", base + dt.timedelta(hours=3), "user", "hi")])
+    rows = (await list_conversations_on(db, "2026-08-21"))["rows"]
+    assert all(r["source"]["tag"] == "unlabelled" for r in rows)
+
+
+@pytest.mark.asyncio
+async def test_somebody_saying_they_are_testing_is_believed():
+    noon = dt.datetime(2026, 8, 21, 12, tzinfo=NY)
+    db = _DB([_msg("t", noon, "user", "hi this is a staff test")])
+    r = (await list_conversations_on(db, "2026-08-21"))["rows"][0]
+    assert r["source"]["tag"] == "maybe-staff"
+    assert "They said so" in r["source"]["why"]
+
+
+@pytest.mark.asyncio
+async def test_a_real_question_containing_the_word_test_is_not_caught():
+    noon = dt.datetime(2026, 8, 21, 12, tzinfo=NY)
+    db = _DB([_msg("q", noon, "user",
+                   "where can I book a quiet room to take a test")])
+    r = (await list_conversations_on(db, "2026-08-21"))["rows"][0]
+    assert r["source"]["tag"] == "unlabelled"
+
+
+@pytest.mark.asyncio
+async def test_the_staff_link_still_outranks_every_inference():
+    db = _DB(_burst(6), origins={"b0": "staff"})
+    rows = {r["conversation_id"]: r for r in
+            (await list_conversations_on(db, "2026-08-21"))["rows"]}
+    assert rows["b0"]["source"]["tag"] == "staff"

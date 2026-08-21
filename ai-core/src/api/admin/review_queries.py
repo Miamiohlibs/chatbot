@@ -29,7 +29,7 @@ primary "questionable answer" trigger), True = up, None = unrated.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
@@ -543,6 +543,11 @@ async def list_conversations_on(db: Any, day: "str", *,
     for v in out:
         v["has_dev_row"] = v["conversation_id"] in dev_ids
         v["origin"] = origins.get(v["conversation_id"])
+
+    # Run-level signals first: they see what a single row cannot.
+    mark_bursts(out)
+    mark_repeats(out)
+    for v in out:
         v["source"] = classify_source(v)
 
     # Counted BEFORE the filter and before paging: a badge on "Staff test"
@@ -678,6 +683,18 @@ async def find_asks_like(db: Any, question: str, *, limit: int = 25) -> list[dic
 STAFF_MIN_QUESTIONS = 6
 STAFF_MAX_MEDIAN_GAP_S = 45.0
 
+# Somebody saying, in the chat, that they are testing. The most reliable
+# signal available and the cheapest -- they told us. Two such conversations
+# sat unlabelled on 21 August with "this is a staff test" typed into them.
+#
+# Anchored to the opening of the message so "how do I book a room to take a
+# test" is not caught by it.
+_SELF_DECLARED = (
+    "this is a test", "this is a staff test", "just testing",
+    "testing the bot", "test message", "ignore this test",
+)
+
+
 # Phrasing a patron does not use about themselves.
 _THIRD_PARTY = (
     "i have a student", "a student who", "professor wanting",
@@ -685,6 +702,84 @@ _THIRD_PARTY = (
     "a faculty member", "one of our students",
 )
 
+
+# --- testing arrives in runs, not one conversation at a time ---------------
+#
+# The per-conversation rules miss the commonest shape of testing there is: a
+# handful of separate one-question conversations opened seconds apart. Each
+# one looks innocent on its own -- somebody asked where the music library is
+# -- and only the RUN gives it away. On 17 August a batch like that sat in
+# the list with some rows marked "local test" and most unmarked, purely
+# because only the turns that reached a language model leave a
+# ModelTokenUsage row to read; the ones a fixed rule answered leave nothing.
+#
+# So the run is classified, not the row. Two signals, both cheap:
+#
+#   * conversations opening within BURST_GAP_S of each other, in a run of
+#     at least BURST_MIN. A person opens one chat window and asks; they do
+#     not open five in ninety seconds.
+#   * the same question typed again in a different conversation. A patron
+#     who got an answer does not re-ask it in a fresh window; somebody
+#     checking whether a fix landed does.
+#
+# Evidence about one member is evidence about the run: if any conversation
+# in a burst carries the dev flag, the whole burst was that script.
+
+BURST_GAP_S = 90.0
+BURST_MIN = 4
+
+
+def mark_bursts(rows: list) -> None:
+    """Label runs of conversations opened too close together to be separate
+    people. Mutates `rows` (each needs first_ts, questions, has_dev_row)."""
+    ordered = sorted(
+        [r for r in rows if r.get("first_ts")], key=lambda r: r["first_ts"])
+    if len(ordered) < BURST_MIN:
+        return
+
+    run: list = [ordered[0]]
+    runs: list = []
+    for prev, cur in zip(ordered, ordered[1:]):
+        if (cur["first_ts"] - prev["first_ts"]).total_seconds() <= BURST_GAP_S:
+            run.append(cur)
+        else:
+            runs.append(run)
+            run = [cur]
+    runs.append(run)
+
+    for group in runs:
+        if len(group) < BURST_MIN:
+            continue
+        scripted = any(g.get("has_dev_row") for g in group)
+        span = (group[-1]["first_ts"] - group[0]["first_ts"]).total_seconds()
+        for g in group:
+            g["burst"] = {
+                "n": len(group),
+                "span_s": span,
+                "scripted": scripted,
+            }
+
+
+def _repeat_key(text: str) -> str:
+    import re as _re
+    return _re.sub(r"[^a-z0-9]+", " ", (text or "").lower()).strip()
+
+
+def mark_repeats(rows: list) -> None:
+    """Flag the same question asked again in a different conversation."""
+    seen: dict = {}
+    for r in rows:
+        for q in (r.get("questions") or []):
+            k = _repeat_key(q)
+            if len(k) < 8:
+                continue
+            seen.setdefault(k, []).append(r)
+    for k, group in seen.items():
+        if len(group) < 2:
+            continue
+        for r in group:
+            r["repeated_question"] = max(r.get("repeated_question", 0),
+                                         len(group))
 
 def classify_source(conv: dict) -> dict:
     """{'label', 'why', 'tag'} for one conversation summary row.
@@ -705,11 +800,38 @@ def classify_source(conv: dict) -> dict:
 
     qs = conv.get("questions") or []
     joined = " ".join(qs).lower()
+
+    said = next((p for p in _SELF_DECLARED
+                 if any(p in (q or "").lower()[:60] for q in qs)), "")
+    if said:
+        return {"label": "staff?", "tag": "maybe-staff",
+                "why": f"They said so: “{said}” appears in the conversation."}
+
     hit = next((p for p in _THIRD_PARTY if p in joined), "")
     if hit:
         return {"label": "staff?", "tag": "maybe-staff",
                 "why": f"Asks on somebody else's behalf (“{hit}”) — "
                        f"phrasing a patron does not use about themselves."}
+
+    burst = conv.get("burst")
+    if burst:
+        if burst["scripted"]:
+            return {"label": "local test", "tag": "local",
+                    "why": f"One of {burst['n']} conversations opened within "
+                           f"{burst['span_s'] / 60:.0f} min, and one of them "
+                           f"reached the server with no browser origin — the "
+                           f"whole run was a script."}
+        return {"label": "staff?", "tag": "maybe-staff",
+                "why": f"One of {burst['n']} conversations opened within "
+                       f"{burst['span_s'] / 60:.0f} min. A person opens one "
+                       f"chat window; a run like this is somebody testing."}
+
+    if conv.get("repeated_question", 0) >= 2:
+        return {"label": "staff?", "tag": "maybe-staff",
+                "why": f"The same question appears in "
+                       f"{conv['repeated_question']} separate conversations. "
+                       f"A patron who got an answer does not re-ask it in a "
+                       f"fresh window."}
 
     times = [t for t in (conv.get("question_times") or []) if t is not None]
     if len(qs) >= STAFF_MIN_QUESTIONS and len(times) >= 2:
@@ -722,3 +844,132 @@ def classify_source(conv: dict) -> dict:
                            f"the pace of working through a list, not of "
                            f"someone with a problem."}
     return {"label": "", "tag": "unlabelled", "why": ""}
+
+
+async def sources_for_conversations(db: Any, conversation_ids: list) -> dict:
+    """{conversation_id: source dict} for an arbitrary set of conversations.
+
+    THE CONTEXT MATTERS, NOT JUST THE ROWS ASKED ABOUT. A scripted run is
+    six conversations opened ninety seconds apart; if only one of them
+    happens to be flagged and we classify that one alone, there is no run to
+    see and it comes back unattributed. The first version did exactly that
+    and swept nothing.
+
+    So the window is widened to every conversation in the same span of time,
+    which is also what the by-day view sees -- and the two must agree, or
+    the queue and the conversation list would say different things about the
+    same person.
+    """
+    ids = [c for c in set(conversation_ids or []) if c]
+    if not ids:
+        return {}
+
+    # The span the asked-about conversations live in, padded so a run that
+    # starts just before the first flagged row is still visible.
+    try:
+        anchors = await db.message.find_many(
+            where={"conversationId": {"in": ids}}, order={"timestamp": "asc"})
+    except Exception:  # noqa: BLE001
+        return {}
+    stamps = [getattr(x, "timestamp", None) for x in anchors]
+    stamps = [t for t in stamps if t is not None]
+    if not stamps:
+        return {}
+    pad = timedelta(minutes=10)
+    lo, hi = min(stamps) - pad, max(stamps) + pad
+
+    try:
+        msgs = await db.message.find_many(
+            where={"timestamp": {"gte": lo, "lte": hi}},
+            order={"timestamp": "asc"}, take=5000)
+    except Exception:  # noqa: BLE001
+        msgs = anchors
+
+    window_ids = list({getattr(x, "conversationId", None) for x in msgs} - {None})
+    try:
+        usage = await db.modeltokenusage.find_many(
+            where={"conversationId": {"in": window_ids}})
+        dev = {u.conversationId for u in usage
+               if "dev" in (getattr(u, "callSite", "") or "")}
+    except Exception:  # noqa: BLE001
+        dev = set()
+    try:
+        convs = await db.conversation.find_many(where={"id": {"in": window_ids}})
+        origins = {c.id: getattr(c, "origin", None) for c in convs}
+    except Exception:  # noqa: BLE001
+        origins = {}
+
+    slots: dict = {}
+    for x in msgs:
+        cid = getattr(x, "conversationId", None)
+        if not cid:
+            continue
+        slot = slots.setdefault(cid, {
+            "conversation_id": cid, "first_ts": getattr(x, "timestamp", None),
+            "questions": [], "question_times": [],
+        })
+        if getattr(x, "type", "") == "user":
+            slot["questions"].append(getattr(x, "content", "") or "")
+            slot["question_times"].append(getattr(x, "timestamp", None))
+
+    rows = list(slots.values())
+    for v in rows:
+        v["has_dev_row"] = v["conversation_id"] in dev
+        v["origin"] = origins.get(v["conversation_id"])
+    mark_bursts(rows)
+    mark_repeats(rows)
+    return {v["conversation_id"]: classify_source(v) for v in rows}
+
+
+TESTING_TAGS = frozenset({"local", "staff", "maybe-staff"})
+
+
+async def close_testing_rows(db: Any, *, filter_preset: str = "flagged",
+                             by: str = "operator",
+                             dry_run: bool = True) -> dict:
+    """Mark flagged turns that came from testing as reviewed.
+
+    A flagged turn is a queue item that says "a patron may have had a bad
+    experience here". A turn from our own scripted run says nothing of the
+    kind, and 286 of the 300 sitting in the queue were exactly that -- the
+    queue was mostly a record of us testing, which buries the fourteen that
+    might be real.
+
+    Testing rows only. A turn we cannot attribute stays in the queue: the
+    cost of leaving one is that somebody reads it, and the cost of closing
+    one wrongly is that nobody ever does.
+    """
+    try:
+        rows = await db.message.find_many(
+            where=flagged_where(filter_preset),
+            order={"timestamp": "desc"}, take=2000)
+    except Exception:  # noqa: BLE001
+        return {"closed": 0, "kept": 0, "by_tag": {}, "dry_run": dry_run}
+
+    sources = await sources_for_conversations(
+        db, [getattr(r, "conversationId", None) for r in rows])
+
+    from collections import Counter
+    hits, kept = [], 0
+    tally: Counter = Counter()
+    for r in rows:
+        tag = (sources.get(getattr(r, "conversationId", None)) or {}).get("tag")
+        if tag in TESTING_TAGS:
+            hits.append(r)
+            tally[tag] += 1
+        else:
+            kept += 1
+
+    if not dry_run:
+        stamp = datetime.now(timezone.utc)
+        for r in hits:
+            try:
+                await db.message.update(
+                    where={"id": r.id},
+                    data={"reviewedAt": stamp, "reviewedBy": by})
+            except Exception:  # noqa: BLE001 -- one bad row must not stop the rest
+                logger.warning("could not close flagged row %s", r.id,
+                               exc_info=True)
+
+    return {"closed": len(hits), "kept": kept, "by_tag": dict(tally),
+            "dry_run": dry_run}

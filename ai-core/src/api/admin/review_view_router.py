@@ -26,8 +26,13 @@ from __future__ import annotations
 import html
 from typing import Any
 
+import logging
+
 from src.api.admin import admin_ui as ui
+
+logger = logging.getLogger(__name__)
 from src.api.admin.review_queries import (
+    close_testing_rows,
     count_flagged,
     FILTERS,
     dashboard_counts,
@@ -71,6 +76,10 @@ def make_token_guard(expected_token: str):
 # surface looks like one tool (redesign 2026-07-28 -- five pages had
 # grown five stylesheets).
 _e = ui.e
+
+
+def _kq_plain(key: str) -> str:
+    return f"key={_e(key)}" if key else ""
 
 
 def _page(title: str, body: str, *, current: str = "", key: str = "",
@@ -199,13 +208,36 @@ def build_review_view_router(deps: dict) -> Any:
         )
         _pager = ui.pager("/admin/review", page=page, per=per, total=total,
                           key=key, extra=f"&filter={_e(filter)}")
+
+        # How much of this queue is our own testing. Shown before anything
+        # is closed, because a bulk write the operator cannot see the shape
+        # of first is a bulk write they cannot judge.
+        sweep = ""
+        if filter == "flagged" and total:
+            preview = await close_testing_rows(db, dry_run=True)
+            if preview["closed"]:
+                bits = ", ".join(f"{n} {t.replace('-', ' ')}"
+                                 for t, n in sorted(preview["by_tag"].items()))
+                sweep = (
+                    f"<div class='note' style='margin:.8rem 0'>"
+                    f"<b>{preview['closed']} of these {total} came from "
+                    f"testing</b> ({bits}). A flagged turn is meant to say a "
+                    f"patron may have had a bad experience; one from our own "
+                    f"scripted run says nothing of the kind, and leaving them "
+                    f"here buries the {preview['kept']} that might be real."
+                    f"<div class='acts' style='margin-top:.6rem'>"
+                    + ui.action(
+                        f"/admin/review/close-testing?{_kq_plain(key)}",
+                        f"Close all {preview['closed']}", primary=True)
+                    + "</div></div>"
+                )
         body = (
             f"<h1>Flagged conversations</h1>"
             f"<p class='lede'>{total} row(s) &middot; filter: "
             f"{_e(filter)}{_scope_note}. Patron star ratings and comments "
             f"show inline; marking a row reviewed drops it out of the "
             f"working views.</p><div class='filter-bar'>{opts}</div>"
-            f"{_pager}"
+            f"{sweep}{_pager}"
             f"<table><tr><th>time</th><th>role</th><th>preview</th>"
             f"<th>flags</th><th>conversation</th></tr>"
             f"{''.join(trs) or '<tr><td colspan=5>none</td></tr>'}"
@@ -214,6 +246,32 @@ def build_review_view_router(deps: dict) -> Any:
         return HTMLResponse(_page("Flagged conversations", body,
                                   current="/admin/review", key=key,
                                   counts=counts))
+
+    @router.get("/admin/review/close-testing", response_class=HTMLResponse)
+    async def close_testing(key: str = "", _g=Depends(guard)) -> Any:
+        """Close every flagged turn that came from testing.
+
+        A GET because it is reached from a link the operator has just read
+        the count on, and it is reversible: closing a row sets reviewedAt,
+        and the `reviewed` tab still shows it.
+        """
+        result = await close_testing_rows(db, dry_run=False, by="operator")
+        logger.info("closed %d flagged rows from testing (%s), kept %d",
+                    result["closed"], result["by_tag"], result["kept"])
+        back = "/admin/review" + (f"?key={_e(key)}" if key else "")
+        return HTMLResponse(_page(
+            "Queue swept",
+            f"<h1>Closed {result['closed']} flagged turn(s)</h1>"
+            f"<p class='lede'>They came from our own testing, so they were "
+            f"never reports of a patron's bad experience. "
+            f"<b>{result['kept']}</b> stayed in the queue.</p>"
+            f"<p class='dim'>Nothing was deleted. Everything closed here is "
+            f"still on the <b>reviewed</b> tab, and marking a row reviewed "
+            f"is reversible.</p>"
+            f"<div class='acts'>{ui.action(back, '← back to the queue', primary=True)}"
+            f"{ui.action(back + ('&' if key else '?') + 'filter=reviewed', 'See what was closed', ghost=True)}"
+            f"</div>",
+            current="/admin/review", key=key))
 
     @router.get("/admin/review/mark/{message_id}", response_class=HTMLResponse)
     async def review_mark(
