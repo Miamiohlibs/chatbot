@@ -62,11 +62,15 @@ def build_conversations_router(deps: dict) -> Any:
     guard = deps["guard"]
 
     @router.get("/admin/conversations", response_class=HTMLResponse)
-    async def conversations(day: str = "", key: str = "",
-                            _g=Depends(guard)) -> Any:
+    async def conversations(day: str = "", key: str = "", page: int = 1,
+                            per: int = 50, _g=Depends(guard)) -> Any:
         day = day or today_local()
+        page = max(1, page)
+        per = min(max(per, 10), 200)
         kq = f"&key={_e(key)}" if key else ""
-        rows = await list_conversations_on(db, day)
+        res = await list_conversations_on(db, day, limit=per,
+                                          offset=(page - 1) * per)
+        rows, total = res["rows"], res["total"]
         days = await conversation_days(db)
 
         is_today = day == today_local()
@@ -93,6 +97,35 @@ def build_conversations_router(deps: dict) -> Any:
             for d in days[:14]
         )
 
+        pages = max(1, -(-total // per))
+        if page > pages and total:
+            # Landing past the end reads as "no data" rather than "wrong
+            # page number", so send them to the last real page instead.
+            from fastapi.responses import RedirectResponse
+            return RedirectResponse(
+                f"/admin/conversations?day={_e(day)}&page={pages}"
+                f"&per={per}{kq}", status_code=303)
+
+        def pager() -> str:
+            if pages <= 1:
+                return ""
+            first = (page - 1) * per + 1
+            last = min(page * per, total)
+            def lnk(p: int, label: str, disabled: bool) -> str:
+                if disabled:
+                    return f"<span class='tag dim'>{label}</span>"
+                return (f"<a class='tag' href='/admin/conversations?day={_e(day)}"
+                        f"&page={p}&per={per}{kq}'>{label}</a>")
+            return (
+                f"<div style='margin:.8rem 0'>"
+                f"{lnk(1, '&laquo; first', page == 1)} "
+                f"{lnk(page - 1, '&lsaquo; prev', page == 1)} "
+                f"<span class='dim' style='margin:0 .5rem'>"
+                f"{first}&ndash;{last} of {total}</span> "
+                f"{lnk(page + 1, 'next &rsaquo;', page >= pages)} "
+                f"{lnk(pages, 'last &raquo;', page >= pages)}</div>"
+            )
+
         if not rows:
             body = (
                 f"<h1>Conversations</h1><div style='margin:.6rem 0'>{nav}</div>"
@@ -104,6 +137,13 @@ def build_conversations_router(deps: dict) -> Any:
 
         def row(r: dict) -> str:
             flags = []
+            src = r.get("source") or {}
+            if src.get("label"):
+                cls = "refusal" if src["label"] == "local test" else "low_confidence"
+                # title= carries the reason, so a label nobody can explain
+                # never appears on this page.
+                flags.append(f"<span class='tag {cls}' title='{_e(src['why'])}'>"
+                             f"{_e(src['label'])}</span>")
             if r["refusals"]:
                 flags.append(f"<span class='tag refusal'>{r['refusals']} refused</span>")
             if r["thumbs_down"]:
@@ -128,17 +168,21 @@ def build_conversations_router(deps: dict) -> Any:
         body = (
             f"<h1>Conversations</h1>"
             f"<div style='margin:.6rem 0'>{nav}</div>"
-            f"<p class='dim'>{len(rows)} conversation(s), "
-            f"{sum(r['asked'] for r in rows)} question(s)"
-            + (f" &middot; <b>{needs}</b> worth a look" if needs else "")
-            + "</p>"
-            f"<style>tr.needs td{{background:#fffaf5}}"
+            f"<p class='dim'>{total} conversation(s) on this day"
+            + (f" &middot; <b>{needs}</b> on this page worth a look" if needs else "")
+            + " &middot; <span title='A label is only shown when something in "
+              "the transcript supports it. No label means nothing does — the "
+              "system stores no identity, so “patron” is never asserted.'>"
+              "how sources are labelled</span></p>"
+            + pager()
+            + f"<style>tr.needs td{{background:#fffaf5}}"
             f"td.num{{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}}"
             f"</style>"
             f"<table><tr><th>Time</th><th>First question</th>"
             f"<th>Asked</th><th></th></tr>"
             + "".join(row(r) for r in rows) + "</table>"
-            f"<h2 style='font-size:.95rem;margin-top:1.4rem'>Other days</h2>"
+            + pager()
+            + f"<h2 style='font-size:.95rem;margin-top:1.4rem'>Other days</h2>"
             f"<div>{recent}</div>"
         )
         return HTMLResponse(ui.page("Conversations", body,

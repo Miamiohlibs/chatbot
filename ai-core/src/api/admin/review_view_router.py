@@ -28,6 +28,7 @@ from typing import Any
 
 from src.api.admin import admin_ui as ui
 from src.api.admin.review_queries import (
+    count_flagged,
     FILTERS,
     dashboard_counts,
     attach_feedback,
@@ -95,12 +96,17 @@ def build_review_view_router(deps: dict) -> Any:
     @router.get("/admin/review", response_class=HTMLResponse)
     async def review_list(
         filter: str = "flagged",
+        page: int = 1,
+        per: int = 50,
         limit: int = 50,
         key: str = "",
         _g=Depends(guard),
     ) -> Any:
         counts = await dashboard_counts(db)
-        rows = await list_flagged(db, filter_preset=filter, limit=limit)
+        page, per, offset = ui.page_bounds(page, per)
+        rows = await list_flagged(db, filter_preset=filter, limit=per,
+                                  offset=offset)
+        total = await count_flagged(db, filter_preset=filter)
         # Patron star ratings live on the conversation, so project them
         # onto the message rows -- otherwise "who rated us" is invisible
         # from the list (operator report 2026-07-27).
@@ -191,16 +197,19 @@ def build_review_view_router(deps: dict) -> Any:
             "" if filter in ("reviewed", "all")
             else " &mdash; unreviewed only"
         )
+        _pager = ui.pager("/admin/review", page=page, per=per, total=total,
+                          key=key, extra=f"&filter={_e(filter)}")
         body = (
             f"<h1>Flagged conversations</h1>"
-            f"<p class='lede'>{len(rows)} row(s) &middot; filter: "
+            f"<p class='lede'>{total} row(s) &middot; filter: "
             f"{_e(filter)}{_scope_note}. Patron star ratings and comments "
             f"show inline; marking a row reviewed drops it out of the "
             f"working views.</p><div class='filter-bar'>{opts}</div>"
+            f"{_pager}"
             f"<table><tr><th>time</th><th>role</th><th>preview</th>"
             f"<th>flags</th><th>conversation</th></tr>"
             f"{''.join(trs) or '<tr><td colspan=5>none</td></tr>'}"
-            f"</table>"
+            f"</table>{_pager}"
         )
         return HTMLResponse(_page("Flagged conversations", body,
                                   current="/admin/review", key=key,
@@ -390,7 +399,12 @@ def build_review_view_router(deps: dict) -> Any:
             f"<th>tool</th><th>ok</th><th>ms</th><th>time</th></tr>"
             f"{tools}</table></div>"
         )
-        return HTMLResponse(_page(f"Conversation {conversation_id}", body))
+        # key= was missing here, which made every tab in the top menu a
+        # dead link on the page an operator lands on most -- you arrive from
+        # Flagged or Conversations, and the only way back out was the
+        # browser. Until SSO is on, the key IS the session.
+        return HTMLResponse(_page(f"Conversation {conversation_id}", body,
+                                  current="/admin/review", key=key))
 
     return router
 

@@ -124,6 +124,49 @@ def _msg_dict(m: Any) -> dict:
     }
 
 
+def flagged_where(filter_preset: str) -> dict:
+    """The Prisma `where` for one preset.
+
+    Extracted so the list and its COUNT cannot drift apart -- a paginated
+    view whose total is computed from a different filter than its rows
+    tells the operator there are more pages than exist, or fewer.
+    """
+    where: dict
+    fp = filter_preset if filter_preset in FILTERS else "flagged"
+    if fp == "thumbs_down":
+        where = {"isPositiveRated": False}
+    elif fp == "thumbs_up":
+        where = {"isPositiveRated": True}
+    elif fp == "refusal":
+        where = {"wasRefusal": True}
+    elif fp == "low_confidence":
+        where = {"confidence": "low"}
+    elif fp == "reviewed":
+        where = {"NOT": [{"reviewedAt": None}]}
+    elif fp == "rated":
+        where = {"type": "assistant"}
+    elif fp == "all":
+        where = {}
+    else:
+        where = {"OR": [{"isPositiveRated": False}, {"wasRefusal": True},
+                        {"confidence": "low"}]}
+    # Handled rows drop out of every working view except the explicit
+    # "reviewed" and "all" tabs -- otherwise the queue never shrinks and a
+    # reviewer cannot tell fresh from already-triaged.
+    if fp not in ("reviewed", "all"):
+        where = ({"AND": [where, {"reviewedAt": None}]} if where
+                 else {"reviewedAt": None})
+    return where
+
+
+async def count_flagged(db: Any, *, filter_preset: str = "flagged") -> int:
+    """How many rows this preset has in total. 0 on any error."""
+    try:
+        return int(await db.message.count(where=flagged_where(filter_preset)))
+    except Exception:  # noqa: BLE001 -- a missing total must not 500 the page
+        return 0
+
+
 async def list_flagged(
     db: Any,
     *,
@@ -137,41 +180,8 @@ async def list_flagged(
     -- the union a reviewer cares about. Newest first. Each row is
     enough for the list view; full drill-down is `conversation_detail`.
     """
-    where: dict
+    where = flagged_where(filter_preset)
     fp = filter_preset if filter_preset in FILTERS else "flagged"
-    if fp == "thumbs_down":
-        where = {"isPositiveRated": False}
-    elif fp == "thumbs_up":
-        # Positive ratings were unreachable before 2026-07-27: the data
-        # was there (Message.isPositiveRated=True) but no preset queried
-        # it, so "what is the bot getting RIGHT" had no surface.
-        where = {"isPositiveRated": True}
-    elif fp == "refusal":
-        where = {"wasRefusal": True}
-    elif fp == "low_confidence":
-        where = {"confidence": "low"}
-    elif fp == "reviewed":
-        where = {"NOT": [{"reviewedAt": None}]}
-    elif fp == "rated":
-        # Turns in a conversation the patron left a star rating on.
-        # Conversation-scoped signal projected onto message rows --
-        # resolved after the query (see _rated_conversation_ids).
-        where = {"type": "assistant"}
-    elif fp == "all":
-        where = {}
-    else:  # flagged: the union reviewers actually want
-        where = {
-            "OR": [
-                {"isPositiveRated": False},
-                {"wasRefusal": True},
-                {"confidence": "low"},
-            ]
-        }
-    # Handled rows drop out of every working view except the explicit
-    # "reviewed" and "all" tabs -- otherwise the queue never shrinks and
-    # a reviewer can't tell fresh from already-triaged.
-    if fp not in ("reviewed", "all"):
-        where = {"AND": [where, {"reviewedAt": None}]} if where else {"reviewedAt": None}
     try:
         rows = await db.message.find_many(
             where=where,
@@ -424,7 +434,8 @@ __all__ = ["FILTERS", "attach_feedback", "conversation_detail",
 
 
 async def list_conversations_on(db: Any, day: "str", *,
-                                limit: int = 200) -> list[dict]:
+                                limit: int = 50,
+                                offset: int = 0) -> dict:
     """Every conversation that had a question on `day` (YYYY-MM-DD, Oxford time).
 
     WHY THIS EXISTS
@@ -443,6 +454,10 @@ async def list_conversations_on(db: Any, day: "str", *,
     Conversations with no user message are skipped: the widget opens a
     socket on page load, so most rows are somebody who never typed anything
     and would otherwise drown the ones who did.
+
+    Returns {rows, total, offset, limit} rather than a bare list, because a
+    page that shows 50 of something without saying how many there are is a
+    page that quietly hides the rest.
     """
     from datetime import date as _date
     from datetime import timedelta as _td
@@ -457,7 +472,7 @@ async def list_conversations_on(db: Any, day: "str", *,
         start = start_local.astimezone(timezone.utc)
         end = end_local.astimezone(timezone.utc)
     except Exception:  # noqa: BLE001 -- a bad date must not 500 the page
-        return []
+        return {"rows": [], "total": 0, "offset": offset, "limit": limit}
 
     try:
         msgs = await db.message.find_many(
@@ -465,7 +480,7 @@ async def list_conversations_on(db: Any, day: "str", *,
             order={"timestamp": "asc"},
         )
     except Exception:  # noqa: BLE001
-        return []
+        return {"rows": [], "total": 0, "offset": offset, "limit": limit}
 
     by_conv: dict = {}
     for m in msgs:
@@ -474,8 +489,9 @@ async def list_conversations_on(db: Any, day: "str", *,
             continue
         slot = by_conv.setdefault(cid, {
             "conversation_id": cid, "first_ts": None, "last_ts": None,
-            "questions": [], "turns": 0, "refusals": 0, "thumbs_down": 0,
-            "thumbs_up": 0, "low_confidence": 0,
+            "questions": [], "question_times": [], "turns": 0,
+            "refusals": 0, "thumbs_down": 0, "thumbs_up": 0,
+            "low_confidence": 0, "has_dev_row": False,
         })
         ts = getattr(m, "timestamp", None)
         if slot["first_ts"] is None:
@@ -483,6 +499,7 @@ async def list_conversations_on(db: Any, day: "str", *,
         slot["last_ts"] = ts
         if getattr(m, "type", "") == "user":
             slot["questions"].append(getattr(m, "content", "") or "")
+            slot["question_times"].append(ts)
         else:
             slot["turns"] += 1
             if getattr(m, "wasRefusal", False):
@@ -495,8 +512,23 @@ async def list_conversations_on(db: Any, day: "str", *,
                 slot["low_confidence"] += 1
 
     out = [v for v in by_conv.values() if v["questions"]]
+
+    # One query for the whole day rather than one per conversation: this
+    # runs on every page load and the box has 4GB.
+    try:
+        usage = await db.modeltokenusage.find_many(
+            where={"createdAt": {"gte": start, "lt": end}})
+        dev_ids = {u.conversationId for u in usage
+                   if "dev" in (getattr(u, "callSite", "") or "")}
+    except Exception:  # noqa: BLE001
+        dev_ids = set()
+    for v in out:
+        v["has_dev_row"] = v["conversation_id"] in dev_ids
+
     out.sort(key=lambda r: r["first_ts"] or datetime.min.replace(
         tzinfo=timezone.utc), reverse=True)
+    total = len(out)
+    out = out[offset:offset + limit]
     for r in out:
         r["opened"] = local_ts(r["first_ts"])
         r["opened_hm"] = (local_dt(r["first_ts"]) or datetime.now()).strftime("%H:%M")
@@ -504,7 +536,8 @@ async def list_conversations_on(db: Any, day: "str", *,
         r["first_question"] = r["questions"][0]
         r["needs_look"] = bool(r["refusals"] or r["thumbs_down"]
                                or r["low_confidence"])
-    return out[:limit]
+        r["source"] = classify_source(r)
+    return {"rows": out, "total": total, "offset": offset, "limit": limit}
 
 
 async def conversation_days(db: Any, *, limit: int = 30) -> list[dict]:
@@ -589,3 +622,63 @@ async def find_asks_like(db: Any, question: str, *, limit: int = 25) -> list[dic
         r["overlap"] = len(qset & rset) / max(1, len(qset))
     out.sort(key=lambda r: (-r["overlap"], r["ts"] is None), reverse=False)
     return out[:limit]
+
+
+# --- where a conversation came from ---------------------------------------
+#
+# Three states, and the third one is honest rather than embarrassing.
+#
+#   local     -- a ModelTokenUsage row for this conversation is tagged
+#                v2_turn_dev, meaning the request arrived with no browser
+#                origin. That is a script. It is a FACT, not a guess.
+#   staff?    -- behaves like somebody working through a list rather than
+#                somebody with a problem. A READING of the transcript, and
+#                labelled as one.
+#   (blank)   -- nothing says otherwise. Could be a patron. Could be a
+#                colleague on their phone. The system stores no identity,
+#                so this is the truthful answer and the UI says so.
+#
+# Getting this wrong in the direction of "patron" is the dangerous one: it
+# inflates every claim about real usage. The heuristics below are therefore
+# written to catch obvious testing, not to be clever.
+
+STAFF_MIN_QUESTIONS = 6
+STAFF_MAX_MEDIAN_GAP_S = 45.0
+
+# Phrasing a patron does not use about themselves.
+_THIRD_PARTY = (
+    "i have a student", "a student who", "professor wanting",
+    "patron asked", "someone asked", "hi librarians",
+    "a faculty member", "one of our students",
+)
+
+
+def classify_source(conv: dict) -> dict:
+    """{'label': str, 'why': str} for one conversation summary row.
+
+    `conv` needs: questions (list[str]), question_times (list[datetime]),
+    has_dev_row (bool).
+    """
+    if conv.get("has_dev_row"):
+        return {"label": "local test",
+                "why": "Reached the server with no browser origin — a script."}
+
+    qs = conv.get("questions") or []
+    joined = " ".join(qs).lower()
+    hit = next((p for p in _THIRD_PARTY if p in joined), "")
+    if hit:
+        return {"label": "staff?",
+                "why": f"Asks on somebody else's behalf (“{hit}”) — "
+                       f"phrasing a patron does not use about themselves."}
+
+    times = [t for t in (conv.get("question_times") or []) if t is not None]
+    if len(qs) >= STAFF_MIN_QUESTIONS and len(times) >= 2:
+        gaps = sorted((times[i + 1] - times[i]).total_seconds()
+                      for i in range(len(times) - 1))
+        median = gaps[len(gaps) // 2]
+        if median <= STAFF_MAX_MEDIAN_GAP_S:
+            return {"label": "staff?",
+                    "why": f"{len(qs)} questions, median {median:.0f}s apart — "
+                           f"the pace of working through a list, not of "
+                           f"someone with a problem."}
+    return {"label": "", "why": ""}

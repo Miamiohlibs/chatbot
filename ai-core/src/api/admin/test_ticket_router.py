@@ -59,12 +59,33 @@ class _FakeTickets:
     async def find_unique(self, where):
         return self.rows.get(where["id"])
 
-    async def find_many(self, where=None, order=None, take=None):
-        rows = list(self.rows.values())
-        # mirror the real "hide finished unless asked" filter
-        if where and where.get("status", {}).get("not") == "done":
-            rows = [r for r in rows if r.status != "done"]
-        return rows
+    def _match(self, rows, where):
+        """Enough of Prisma's `where` for the shapes ticket_where builds."""
+        if not where:
+            return rows
+        if "AND" in where:
+            for clause in where["AND"]:
+                rows = self._match(rows, clause)
+            return rows
+        out = rows
+        st = where.get("status")
+        if isinstance(st, dict) and st.get("not"):
+            out = [r for r in out if r.status != st["not"]]
+        elif isinstance(st, str):
+            out = [r for r in out if r.status == st]
+        if "sourceUrl" in where:
+            out = [r for r in out if (r.sourceUrl or "") == where["sourceUrl"]]
+        if "emailSent" in where:
+            out = [r for r in out if r.emailSent == where["emailSent"]]
+        return out
+
+    async def find_many(self, where=None, order=None, take=None, skip=None):
+        rows = self._match(list(self.rows.values()), where)
+        rows = rows[(skip or 0):]
+        return rows[:take] if take else rows
+
+    async def count(self, where=None):
+        return len(self._match(list(self.rows.values()), where))
 
 
 def _mk_client(monkeypatch, sent_log=None, send_ok=True, code="opensesame"):

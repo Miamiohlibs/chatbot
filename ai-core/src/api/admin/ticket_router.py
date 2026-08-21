@@ -193,6 +193,80 @@ VALID_STATUSES = ("open", "in_progress", "done")
 _LEGACY_STATUS = {"reviewed": "in_progress"}
 
 
+# --- tag filter ------------------------------------------------------------
+#
+# One tag at a time, each one a question an operator actually asks of the
+# queue. Status is the obvious axis; the other two are the ones that make a
+# ticket harder to act on, and both were invisible before -- you had to read
+# every card to find them.
+
+TICKET_TAGS = (
+    ("", "All"),
+    ("open", "Open"),
+    ("in_progress", "In progress"),
+    ("done", "Done"),
+    ("no-source", "No source URL"),
+    ("email-failed", "Alert email failed"),
+)
+
+
+def ticket_where(*, tag: str = "", show_done: bool = False) -> dict:
+    """The Prisma `where` for one tag.
+
+    Shared by the list and its COUNT so a paginated queue cannot advertise
+    more pages than it has.
+
+    A status tag overrides `show_done`: asking for done tickets and being
+    handed none because the default hides them is the kind of thing that
+    reads as a broken filter.
+    """
+    t = (tag or "").strip().lower()
+    if t in VALID_STATUSES:
+        return {"status": t}
+    if t == "no-source":
+        base: dict = {"sourceUrl": ""}
+    elif t == "email-failed":
+        base = {"emailSent": False}
+    else:
+        base = {}
+    if not show_done:
+        done_filter = {"status": {"not": "done"}}
+        return {"AND": [base, done_filter]} if base else done_filter
+    return base
+
+
+async def ticket_tag_counts(db, *, show_done: bool = False) -> dict:
+    """How many tickets each tag holds, for the badges.
+
+    Counted per tag rather than in one pass so the number under a tag is
+    the number that tag will actually show -- a badge that disagrees with
+    the page it opens is worse than no badge.
+    """
+    out: dict = {}
+    for tag, _label in TICKET_TAGS:
+        try:
+            out[tag] = int(await db.correctionticket.count(
+                where=ticket_where(tag=tag, show_done=show_done)))
+        except Exception:  # noqa: BLE001
+            out[tag] = 0
+    return out
+
+
+def render_tag_bar(tag: str, counts: dict, key: str,
+                   show_done: bool) -> str:
+    kq = f"&key={ui.e(key)}" if key else ""
+    sq = "&show=all" if show_done else ""
+    out = []
+    for value, label in TICKET_TAGS:
+        n = counts.get(value, 0)
+        active = " active" if value == tag else ""
+        badge = f" <span class='dim'>{n}</span>" if n else ""
+        out.append(
+            f"<a class='tag{active}' href='/admin/tickets/view"
+            f"?tag={ui.e(value)}{sq}{kq}'>{ui.e(label)}{badge}</a>")
+    return f"<div class='filter-bar'>{' '.join(out)}</div>"
+
+
 def normalize_status(status: object) -> str:
     """Map stored values (incl. the legacy 'reviewed') onto the current
     three. Unknown values fall back to open so a row is never stranded
@@ -251,7 +325,9 @@ def _ticket_actions(tid: str, status: str, kq: str) -> str:
 
 def render_admin_list(tickets: list[dict], key: str,
                       counts: "Optional[dict]" = None,
-                      show_done: bool = False) -> str:
+                      show_done: bool = False, *,
+                      tag: str = "", tag_counts: "Optional[dict]" = None,
+                      page: int = 1, per: int = 25, total: int = 0) -> str:
     kq = f"key={ui.e(key)}" if key else ""
     kq_amp = f"?{kq}" if kq else ""
     cards = []
@@ -293,14 +369,24 @@ def render_admin_list(tickets: list[dict], key: str,
     toggle = ui.action(
         f"/admin/tickets/view?{kq}" + ("" if show_done else "&show=all"),
         "Hide finished" if show_done else "Show finished too", ghost=True)
+    bar = render_tag_bar(tag, tag_counts or {}, key, show_done)
+    _pager = ui.pager("/admin/tickets/view", page=page, per=per,
+                      total=total or len(tickets), key=key,
+                      extra=(f"&tag={ui.e(tag)}" if tag else "")
+                            + ("&show=all" if show_done else ""))
     body = (
         f"<h1>Correction tickets</h1>"
         f"<p class='lede'>Reports from library staff. Work them "
-        f"open &rarr; in progress &rarr; done; each ticket links straight "
-        f"to the corrections tool.</p>"
+        f"open &rarr; in progress &rarr; done; each ticket opens onto its "
+        f"own page with the conversation and a correction form.</p>"
+        f"{bar}"
         f"<div class='acts' style='margin-bottom:1rem'>{toggle}</div>"
+        f"{_pager}"
         + ("".join(cards) or ui.empty(
+            "No tickets here. Try another tag, or the All tab."
+            if tag else
             "No tickets waiting. Staff submit them from the librarian hub."))
+        + _pager
     )
     return ui.page("Correction tickets", body,
                    current="/admin/tickets/view", key=key, counts=counts)
@@ -373,18 +459,32 @@ def build_ticket_router(deps: dict):
     @router.get("/admin/tickets/view", response_class=HTMLResponse,
                 dependencies=[Depends(admin_guard)])
     async def tickets_list(request: Request):
-        key = request.query_params.get("key", "")
-        show_done = request.query_params.get("show", "") == "all"
-        where = {} if show_done else {"status": {"not": "done"}}
-        rows = await db.correctionticket.find_many(
-            where=where, order={"createdAt": "desc"}, take=200,
-        )
+        q = request.query_params
+        key = q.get("key", "")
+        show_done = q.get("show", "") == "all"
+        # One tag at a time: the point is to see a group, and stacking
+        # filters turns a two-click question into a form.
+        tag = (q.get("tag") or "").strip().lower()
+        page, per, offset = ui.page_bounds(q.get("page") or 1, q.get("per") or 25)
+
+        where = ticket_where(tag=tag, show_done=show_done)
+        try:
+            rows = await db.correctionticket.find_many(
+                where=where, order={"createdAt": "desc"}, take=per, skip=offset)
+            total = int(await db.correctionticket.count(where=where))
+        except Exception:  # noqa: BLE001 -- the queue must not 500
+            logger.warning("ticket list query failed", exc_info=True)
+            rows, total = [], 0
+
+        tag_counts = await ticket_tag_counts(db, show_done=show_done)
         from src.api.admin.review_queries import dashboard_counts
         counts = await dashboard_counts(db)
         return HTMLResponse(render_admin_list(
             [r.model_dump() if hasattr(r, "model_dump") else vars(r)
              for r in rows],
             key, counts=counts, show_done=show_done,
+            tag=tag, tag_counts=tag_counts,
+            page=page, per=per, total=total,
         ))
 
     @router.get("/admin/tickets/{ticket_id}", response_class=HTMLResponse,

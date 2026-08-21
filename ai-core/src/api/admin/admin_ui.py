@@ -272,3 +272,46 @@ def empty(msg: str) -> str:
 
 __all__ = ["NAV", "STYLE", "action", "e", "empty", "nav", "page", "pill",
            "stat_card"]
+
+
+def pager(base: str, *, page: int, per: int, total: int,
+          key: str = "", extra: str = "") -> str:
+    """Page links for a list view. Empty when there is only one page.
+
+    `base` is the path without a query string; `extra` is any other query
+    the page needs to keep (a filter, a date). The count is always shown --
+    a list that displays 50 of 400 without saying so is a list that hides
+    350 of them, which is the complaint this exists to answer.
+    """
+    pages = max(1, -(-total // max(1, per)))
+    if pages <= 1:
+        return ""
+    kq = f"&key={e(key)}" if key else ""
+    first, last = (page - 1) * per + 1, min(page * per, total)
+
+    def lnk(p: int, label: str, off: bool) -> str:
+        if off:
+            return f"<span class='tag dim'>{label}</span>"
+        return (f"<a class='tag' href='{e(base)}?page={p}&per={per}"
+                f"{extra}{kq}'>{label}</a>")
+
+    return (
+        f"<div class='pager' style='margin:.8rem 0'>"
+        f"{lnk(1, '&laquo; first', page == 1)} "
+        f"{lnk(page - 1, '&lsaquo; prev', page == 1)} "
+        f"<span class='dim' style='margin:0 .5rem'>{first}&ndash;{last} "
+        f"of {total}</span> "
+        f"{lnk(page + 1, 'next &rsaquo;', page >= pages)} "
+        f"{lnk(pages, 'last &raquo;', page >= pages)}</div>"
+    )
+
+
+def page_bounds(page: int, per: int, *, per_max: int = 200) -> tuple:
+    """(page, per, offset) clamped to sane values.
+
+    Centralised so a hand-edited `?per=100000` cannot turn one page load
+    into a full table scan on a 4GB box.
+    """
+    page = max(1, int(page or 1))
+    per = min(max(int(per or 50), 10), per_max)
+    return page, per, (page - 1) * per
