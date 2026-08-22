@@ -78,6 +78,13 @@ class Finding:
 # --- checks ---------------------------------------------------------------
 
 
+# A conversation the classifier attributes to testing is not patron
+# feedback. Imported rather than restated so this mail and the dashboard
+# cannot drift apart about who somebody was.
+from src.api.admin.review_queries import TESTING_TAGS  # noqa: E402
+from src.observability.incident_alerts import LOW_RATING_MAX  # noqa: E402
+
+
 def check_roster_matches_csv() -> Finding:
     """The CSV is authoritative; the table should equal it exactly."""
     from src.eval.real_backends import _db
@@ -159,50 +166,101 @@ def check_no_stale_subject_links() -> Finding:
                    f"{len(links)} links, all to current staff")
 
 
-def check_real_questions_we_failed(hours: int = 24) -> Finding:
-    """The signal that actually matters: real people who asked and got
-    refused. Uses the turn telemetry, so it costs no API calls."""
+def check_what_real_users_disliked(hours: int = 24) -> Finding:
+    """The only performance signal worth mailing anyone: a real person said
+    this was bad.
+
+    WHAT THIS DELIBERATELY DOES NOT REPORT (operator ruling 2026-08-22)
+        Refusals, out-of-scope answers and low-confidence turns. All three
+        are the bot working correctly -- declining what it cannot support is
+        the design, not a fault -- and mailing them daily trained the reader
+        to skim past the mail entirely. What survives is the two signals
+        where a human actually said the answer was no good: a thumbs-down on
+        a turn, and a conversation rated one or two stars.
+
+    WHOSE FEEDBACK COUNTS
+        Only conversations no rule attributes to testing. Our own scripted
+        runs and staff rehearsals produce thumbs-downs too, and reporting
+        them as patron dissatisfaction inflates the one number this mail
+        exists to carry.
+    """
     from src.eval.real_backends import _db
 
     since = dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=hours)
 
     async def q(c):
-        refused = await c.message.find_many(
-            where={"wasRefusal": True, "timestamp": {"gte": since}},
+        downs = await c.message.find_many(
+            where={"isPositiveRated": False, "timestamp": {"gte": since}},
             order={"timestamp": "desc"}, take=50)
-        # `content` on a refused row is the BOT's text ("I don't have a
-        # reliable answer..."), which tells the operator nothing. What is
-        # actionable is the QUESTION, so pull the preceding user turn from
-        # the same conversation.
-        out = []
-        for m in refused:
+        asked = {}
+        for m in downs:
             prior = await c.message.find_many(
                 where={"conversationId": m.conversationId, "type": "user",
                        "timestamp": {"lte": m.timestamp}},
                 order={"timestamp": "desc"}, take=1)
-            out.append((m, (prior[0].content if prior else "") or "(question not found)"))
-        return out
+            asked[m.id] = (prior[0].content if prior else "") or "(question not found)"
+
+        rated = await c.conversationfeedback.find_many()
+        low = []
+        for f in rated:
+            # rating 0 is NOT a bad rating. The star widget initialises to 0
+            # and the form submits whatever it holds, so 0 means "left a
+            # comment, never clicked a star". Dropping the `<= 0` half of
+            # this test would mail every comment-only submission as a patron
+            # complaint -- including one from a librarian that reads
+            # "checking that the bot is up and running".
+            if (f.rating or 0) > LOW_RATING_MAX or (f.rating or 0) <= 0:
+                continue
+            conv = await c.conversation.find_unique(
+                where={"id": f.conversationId})
+            if conv is None or conv.createdAt < since:
+                continue
+            first = await c.message.find_many(
+                where={"conversationId": f.conversationId, "type": "user"},
+                order={"timestamp": "asc"}, take=1)
+            low.append((f, (first[0].content if first else "") or "(no question)"))
+
+        from src.api.admin.review_queries import sources_for_conversations
+        ids = [m.conversationId for m in downs] + [f.conversationId for f, _ in low]
+        sources = await sources_for_conversations(c, ids)
+        return downs, asked, low, sources
 
     try:
-        pairs = _db(q)
-        msgs = [m for m, _ in pairs]
-        asked = {m.id: qtext for m, qtext in pairs}
+        downs, asked, low, sources = _db(q)
     except Exception as e:  # noqa: BLE001
-        return Finding("refused real questions", True,
+        return Finding("what real users disliked", True,
                        f"telemetry unavailable ({type(e).__name__}) -- skipped")
-    if len(msgs) < REFUSAL_ALERT:
-        return Finding("refused real questions", True,
-                       f"{len(msgs)} in the last {hours}h (threshold {REFUSAL_ALERT})")
-    by_trigger: dict = {}
-    for m in msgs:
-        by_trigger.setdefault(m.refusalTrigger or "unknown", []).append(m)
+
+    def is_testing(cid: str) -> bool:
+        return (sources.get(cid) or {}).get("tag") in TESTING_TAGS
+
+    downs = [m for m in downs if not is_testing(m.conversationId)]
+    low = [(f, qtext) for f, qtext in low if not is_testing(f.conversationId)]
+
+    if not downs and not low:
+        return Finding("what real users disliked", True,
+                       f"nobody marked an answer bad in the last {hours}h")
+
     detail = []
-    for trig, group in sorted(by_trigger.items(), key=lambda kv: -len(kv[1])):
-        detail.append(f"{len(group)}x {trig}")
-        for m in group[:3]:
-            detail.append(f"    asked: \"{asked.get(m.id, '')[:100]}\"")
-    return Finding("refused real questions", False,
-                   f"{len(msgs)} refusals in the last {hours}h", detail)
+    if downs:
+        detail.append(f"{len(downs)} answer(s) marked unhelpful:")
+        for m in downs[:10]:
+            detail.append(f'    asked: "{asked.get(m.id, "")[:120]}"')
+            detail.append(f'    said:  "{(m.content or "")[:120]}"')
+            detail.append("")
+    if low:
+        detail.append(f"{len(low)} conversation(s) rated {LOW_RATING_MAX} "
+                      f"or below:")
+        for f, qtext in low[:10]:
+            note = (f.userComment or "").strip()
+            detail.append(f'    {f.rating}/5  asked: "{qtext[:110]}"')
+            if note:
+                detail.append(f'          said: "{note[:160]}"')
+
+    total = len(downs) + len(low)
+    return Finding("what real users disliked", False,
+                   f"{total} piece(s) of negative feedback from real users "
+                   f"in the last {hours}h", detail)
 
 
 def check_corpus_freshness() -> Finding:
@@ -297,7 +355,7 @@ CHECKS = (
     check_roster_matches_csv,
     check_no_duplicate_people,
     check_no_stale_subject_links,
-    check_real_questions_we_failed,
+    check_what_real_users_disliked,
     check_corpus_freshness,
 )
 
@@ -314,8 +372,15 @@ def main(force_email: bool, quiet: bool) -> int:
 
     problems = [f for f in findings if not f.ok]
 
-    lines = [f"Data health {dt.datetime.now().strftime('%Y-%m-%d %H:%M')}", ""]
-    for f in findings:
+    # Patron feedback first. It is what the readers of this mail asked to
+    # see; the maintenance checks below it are the operator's business and
+    # would bury it if they came first.
+    def _sort_key(f):
+        return (0 if f.name == "what real users disliked" else 1, f.name)
+
+    lines = [f"Smart Chatbot — daily report "
+             f"{dt.datetime.now().strftime('%Y-%m-%d %H:%M')}", ""]
+    for f in sorted(findings, key=_sort_key):
         lines.append(f"[{'OK ' if f.ok else 'ACT'}] {f.name}: {f.summary}")
         lines += [f"       {d}" for d in f.detail]
     body = "\n".join(lines)
@@ -337,13 +402,29 @@ def main(force_email: bool, quiet: bool) -> int:
         print(body)
 
     if problems or force_email:
-        subject = (f"[chatbot] data health: {len(problems)} thing(s) need you"
-                   if problems else "[chatbot] data health: all clear")
+        # No "needs you" / "action required" wording. This mail goes to
+        # colleagues as well as the operator now, and a subject line that
+        # tells three people something needs them when it needs one of them
+        # is how a daily mail becomes a filter rule.
+        feedback = next((f for f in findings
+                         if f.name == "what real users disliked"), None)
+        if feedback is not None and not feedback.ok:
+            subject = f"[chatbot] daily report — {feedback.summary}"
+        elif problems:
+            subject = (f"[chatbot] daily report — no patron complaints; "
+                       f"{len(problems)} maintenance item(s)")
+        else:
+            subject = "[chatbot] daily report — all clear"
         try:
             from src.observability.alerting import send_alert_email
+            # A separate list from ALERT_EMAIL_TO on purpose: colleagues
+            # asked to see the daily report, not every incident alert the
+            # service can raise.
+            to = (os.getenv("DAILY_REPORT_EMAIL_TO", "") or "").strip() or None
             send_alert_email(subject, body + (
-                "\n\nA quiet inbox means every check passed -- this mail is "
-                "only sent when there is something to act on."))
+                "\n\nThis mail is only sent when there is something in it. "
+                "A quiet inbox means no patron marked an answer bad and "
+                "every maintenance check passed."), to=to)
             # WARNING, not INFO: under cron the root level is WARNING, so an
             # INFO "email sent" line was dropped and the log could not show
             # whether anyone had been told. Whether a human was notified is
