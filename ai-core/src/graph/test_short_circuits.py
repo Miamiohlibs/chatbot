@@ -5291,26 +5291,73 @@ def test_the_staff_privacy_refusal_does_not_accuse_the_patron():
     assert "research-support/ask" in copy
 
 
-def test_where_can_i_get_needs_an_object_the_library_holds():
-    """"Where can I get a good burrito in town?" was answered with the full
-    research-methods menu and four links.
+# The finding-help menu has hijacked four different questions now: a bare
+# "help", a greeting, "book ... for", and "Where can I get a good burrito in
+# town?" -- which it answered with four bullet points on searching Primo and
+# four links, after the intent classifier had already and correctly called it
+# out_of_scope.
+#
+# Each previous fix excluded the phrase that had just leaked, and the next
+# phrasing walked past it, because the gate only ever asked HOW a question
+# was phrased and never WHAT it was about. These tests are written against
+# that principle rather than against the phrases, so a fifth phrasing is
+# covered without anybody adding a case for it.
 
-    The intent classifier had already called it out_of_scope, correctly, and
-    the finding-help gate fired anyway on the bare phrase "where can I get".
-    Somebody asking about lunch should be told this is a library chatbot, not
-    handed a lecture on searching Primo.
+
+@pytest.mark.parametrize("q", [
+    "Where can I get a good burrito in town?",
+    "where can I get a haircut near campus",
+    "looking for a good coffee shop",
+    "can you point me to the gym",
+    "I need help moving apartments",
+    "trying to find my professor's office",
+    "where do I get a covid test",
+    "direct me to the bursar",
+    "need to find a roommate",
+    "can you get me tickets to the game",
+    "can you direct me to McBride Hall",
+    "help me find my car keys",
+    "where can I find a quiet place to cry",
+    "trying to find a parking spot",
+    "where can I get an ATM",
+    "looking for the BUS schedule",
+])
+def test_sounding_like_a_search_is_not_enough_to_take_the_question(q):
+    """Every one of these matches the phrasing patterns and none of them is
+    a library question. The menu must want evidence of both."""
+    from src.graph.new_orchestrator import _finding_help_answer
+
+    assert _finding_help_answer(q) is None, q
+
+
+@pytest.mark.parametrize("q", [
+    "where can I find books about totalitarianism?",
+    "where can I find articles on air pollution",
+    "where do I find the microfilm for that year",
+    "Can you direct me to GrantFoward?",
+    "How do I find articles in PsycINFO?",
+    "Do you have Zotero help?",
+    "Can someone help me with GIS?",
+    "I have a student who needs help accessing a specific AP style manual",
+])
+def test_a_question_about_material_still_gets_the_menu(q):
+    from src.graph.new_orchestrator import _finding_help_answer
+
+    assert _finding_help_answer(q) is not None, q
+
+
+def test_the_supported_tools_are_a_list_not_a_pattern():
+    """Which software the Libraries support is a fact, and enumerating it
+    beats guessing at it.
+
+    Treating any all-caps word as a database name missed GIS at four letters
+    and admitted "an ATM" and "the BUS schedule" at three. A name missing
+    from the list costs one menu; a pattern that guesses costs the trust of
+    everyone it guesses wrong about.
     """
-    from src.graph.new_orchestrator import _finding_help_answer
+    from src.graph.new_orchestrator import _FIND_HELP_TOOL_RE
 
-    assert _finding_help_answer("Where can I get a good burrito in town?") is None
-    assert _finding_help_answer("where can I get a parking permit") is None
-    assert _finding_help_answer("where do I get a bus pass") is None
-
-
-def test_the_questions_that_needed_that_branch_still_work():
-    from src.graph.new_orchestrator import _finding_help_answer
-
-    for q in ("where can I find books about totalitarianism?",
-              "where can I find articles on air pollution",
-              "where do I find the microfilm for that year"):
-        assert _finding_help_answer(q) is not None, q
+    assert _FIND_HELP_TOOL_RE.search("help with GIS")
+    assert _FIND_HELP_TOOL_RE.search("Zotero")
+    assert not _FIND_HELP_TOOL_RE.search("an ATM")
+    assert not _FIND_HELP_TOOL_RE.search("the BUS schedule")

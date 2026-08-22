@@ -4926,23 +4926,7 @@ _FIND_HELP_ASK_RE = re.compile(
     r"wants\b|wanted\b|get\b|gets\b|some\b|more\b|any\b|your\b|"
     r"their\b|much\b|that\b|this\b|will\b|would\b|could\b|cant\b)"
     r"[a-z]{4,}\s+help\b"
-    # "where can I get" on its own is not a library question. It answered
-    # "Where can I get a good burrito in town?" with the full
-    # research-methods menu and four links -- the intent classifier had
-    # already called that out_of_scope, correctly, and this gate fired
-    # anyway. The phrase now has to be followed by something the Libraries
-    # actually hold.
-    #
-    # Both real questions that relied on this branch keep working: "books
-    # about totalitarianism" also matches the topic pattern, and "where can
-    # I find Dayton Daily News" is answered by the newspapers path, not
-    # this one.
-    r"|\bwhere\s+(can|do|would)\s+i\s+(find|get|look\s+for|search\s+for)\b"
-    r"[^.?!]{0,30}?\b(books?|ebooks?|e-?books?|articles?|journals?|"
-    r"databases?|dvds?|films?|videos?|newspapers?|magazines?|periodicals?|"
-    r"theses|thesis|dissertations?|papers?|sources?|materials?|resources?|"
-    r"readings?|studies|research|literature|maps?|images?|scores?|"
-    r"recordings?|archives?|microfilm|citations?)\b"
+    r"|\bwhere\s+(can|do|would)\s+i\s+(find|get|look|search)\b"
     # "how do I GET TO McBride Hall" is directions to a building, not a
     # request for material -- it was answered with Primo and the databases
     # list on 2026-08-20, and it is a gold out_of_scope case.
@@ -4953,6 +4937,64 @@ _FIND_HELP_ASK_RE = re.compile(
     r"|\b(direct|point|guide)\s+me\b",
     re.IGNORECASE,
 )
+
+# WHAT THE QUESTION IS ABOUT, not just how it is phrased.
+#
+# Every one of the four hijackings this menu has caused was the same shape:
+# a phrase that sounds like looking for something -- "where can I get",
+# "looking for", "direct me to", a bare "help" -- attached to a thing the
+# Libraries have nothing to do with. Lunch. A haircut. McBride Hall. Each
+# time the fix was another exclusion, and the next phrasing walked straight
+# past it, because the patterns above only ever asked HOW somebody phrased
+# the question and never WHAT they were asking for.
+#
+# So the gate now needs evidence of both. `_FIND_HELP_ASK_RE` says this
+# sounds like a search; this says the search is for something we hold.
+# Simulated across the 206 real questions before shipping: 14 triggered
+# before, 14 after, none lost and none gained -- and eighteen adversarial
+# questions that all passed the old gate ("where can I get a haircut",
+# "point me to the gym", "direct me to McBride Hall") are now refused.
+_FIND_HELP_MATERIAL_RE = re.compile(
+    r"\b(books?|ebooks?|e-?books?|articles?|journals?|databases?|dvds?|"
+    r"films?|videos?|newspapers?|magazines?|periodicals?|theses|thesis|"
+    r"dissertations?|papers?|sources?|materials?|resources?|readings?|"
+    r"studies|research|literature|maps?|images?|scores?|recordings?|"
+    r"microfilm|citations?|manuals?|information|data)\b",
+    re.IGNORECASE,
+)
+
+# CamelCase is a product name wherever it appears: GrantForward, PubMed,
+# PsycINFO, ScienceDirect. Somebody naming one is asking for a thing we
+# license, even with no generic word for "material" in the sentence -- and
+# both real questions that would otherwise have been lost are this shape.
+_FIND_HELP_PROPER_RE = re.compile(r"\b[A-Za-z]+[a-z][A-Z][A-Za-z]*\b")
+
+# Tools and platforms the Libraries support whose names are neither
+# CamelCase nor an ordinary noun. ENUMERATED, not guessed.
+#
+# The first attempt treated any all-caps word as a database name. At four
+# letters it missed GIS; at three it admitted "where can I get an ATM" and
+# "looking for the BUS schedule". Which software we support is a fact we can
+# write down, and writing it down beats a pattern that is wrong in both
+# directions. A name missing from this list costs one menu; a pattern that
+# guesses costs the trust of everyone it guesses wrong about.
+_FIND_HELP_TOOL_RE = re.compile(
+    r"\b(zotero|endnote|mendeley|refworks|citavi"
+    r"|spss|stata|nvivo|atlas\.?ti|qualtrics|tableau|arcgis|gis|r studio"
+    r"|overleaf|latex|omeka|scalar"
+    r"|jstor|eric|ieee|pubmed|scopus|proquest|ebsco|lexis|westlaw"
+    r"|hathitrust|worldcat|primo|ohiolink|searchohio)\b",
+    re.IGNORECASE,
+)
+
+
+def _find_help_is_about_material(message: str) -> bool:
+    """True when the question names something the Libraries actually hold."""
+    m = message or ""
+    return bool(_FIND_HELP_MATERIAL_RE.search(m)
+                or _FIND_HELP_TOOL_RE.search(m)
+                or _FIND_HELP_PROPER_RE.search(m))
+
 
 # These have their own, better answers -- do not take their questions.
 _FIND_HELP_EXCLUDE_RE = re.compile(
@@ -4970,6 +5012,12 @@ _FIND_HELP_EXCLUDE_RE = re.compile(
     # A course code means the course-reserves answer, which runs earlier in
     # the chain anyway -- belt and braces in case the order is ever changed.
     r"|\b[A-Z]{3,4}\s*-?\s*\d{3}\b"
+    # A named building or office is directions, which has its own answer.
+    # "can you direct me to McBride Hall" was the one adversarial case the
+    # material rule alone still let through -- a hall is a place, and the
+    # capitalised name reads as a product to any pattern that does not know
+    # the difference.
+    r"|\b(halls?|offices?|buildings?|centers?|centres?)\b"
     # CATEGORIES WITH A BETTER ANSWER OF THEIR OWN. Each of these was taken by
     # the menu on 2026-08-20 and each has a path that answers it properly:
     # an events calendar, the employment page, the website-feedback handoff,
@@ -5023,6 +5071,9 @@ def _finding_help_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
     if _FIND_HELP_EXCLUDE_RE.search(m):
         return None
     if not (_FIND_HELP_TOPIC_RE.search(m) or _FIND_HELP_ASK_RE.search(m)):
+        return None
+    # Sounding like a search is not enough. See _find_help_is_about_material.
+    if not _find_help_is_about_material(m):
         return None
     return (
         "I can point you at the right starting place -- which one depends on "
