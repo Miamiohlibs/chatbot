@@ -5289,3 +5289,28 @@ def test_the_staff_privacy_refusal_does_not_accuse_the_patron():
     # It must still say what it declined to do, and still route to a human.
     assert "staff contacts" in copy
     assert "research-support/ask" in copy
+
+
+def test_where_can_i_get_needs_an_object_the_library_holds():
+    """"Where can I get a good burrito in town?" was answered with the full
+    research-methods menu and four links.
+
+    The intent classifier had already called it out_of_scope, correctly, and
+    the finding-help gate fired anyway on the bare phrase "where can I get".
+    Somebody asking about lunch should be told this is a library chatbot, not
+    handed a lecture on searching Primo.
+    """
+    from src.graph.new_orchestrator import _finding_help_answer
+
+    assert _finding_help_answer("Where can I get a good burrito in town?") is None
+    assert _finding_help_answer("where can I get a parking permit") is None
+    assert _finding_help_answer("where do I get a bus pass") is None
+
+
+def test_the_questions_that_needed_that_branch_still_work():
+    from src.graph.new_orchestrator import _finding_help_answer
+
+    for q in ("where can I find books about totalitarianism?",
+              "where can I find articles on air pollution",
+              "where do I find the microfilm for that year"):
+        assert _finding_help_answer(q) is not None, q

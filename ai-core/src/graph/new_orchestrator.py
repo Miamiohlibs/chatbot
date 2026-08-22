@@ -4926,7 +4926,23 @@ _FIND_HELP_ASK_RE = re.compile(
     r"wants\b|wanted\b|get\b|gets\b|some\b|more\b|any\b|your\b|"
     r"their\b|much\b|that\b|this\b|will\b|would\b|could\b|cant\b)"
     r"[a-z]{4,}\s+help\b"
-    r"|\bwhere\s+(can|do|would)\s+i\s+(find|get|look|search)\b"
+    # "where can I get" on its own is not a library question. It answered
+    # "Where can I get a good burrito in town?" with the full
+    # research-methods menu and four links -- the intent classifier had
+    # already called that out_of_scope, correctly, and this gate fired
+    # anyway. The phrase now has to be followed by something the Libraries
+    # actually hold.
+    #
+    # Both real questions that relied on this branch keep working: "books
+    # about totalitarianism" also matches the topic pattern, and "where can
+    # I find Dayton Daily News" is answered by the newspapers path, not
+    # this one.
+    r"|\bwhere\s+(can|do|would)\s+i\s+(find|get|look\s+for|search\s+for)\b"
+    r"[^.?!]{0,30}?\b(books?|ebooks?|e-?books?|articles?|journals?|"
+    r"databases?|dvds?|films?|videos?|newspapers?|magazines?|periodicals?|"
+    r"theses|thesis|dissertations?|papers?|sources?|materials?|resources?|"
+    r"readings?|studies|research|literature|maps?|images?|scores?|"
+    r"recordings?|archives?|microfilm|citations?)\b"
     # "how do I GET TO McBride Hall" is directions to a building, not a
     # request for material -- it was answered with Primo and the databases
     # list on 2026-08-20, and it is a gold out_of_scope case.
