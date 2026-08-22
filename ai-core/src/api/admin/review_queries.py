@@ -1188,8 +1188,26 @@ async def sources_for_conversations(db: Any, conversation_ids: list) -> dict:
     try:
         convs = await db.conversation.find_many(where={"id": {"in": window_ids}})
         origins = {c.id: getattr(c, "origin", None) for c in convs}
+        overrides = {c.id: (getattr(c, "sourceOverride", None),
+                            getattr(c, "sourceOverrideBy", None))
+                     for c in convs}
     except Exception:  # noqa: BLE001
-        origins = {}
+        origins, overrides = {}, {}
+    # The rating comment, same as the by-day view reads. Without it this
+    # function and list_conversations_on disagree about the same
+    # conversation -- the dashboard called one "staff test" on the strength
+    # of a comment reading "demo" while the daily mail counted it as patron
+    # dissatisfaction.
+    #
+    # Its own try: a failure here must not also cost us the origins above,
+    # which are the strongest evidence we hold.
+    try:
+        fbs = await db.conversationfeedback.find_many(
+            where={"conversationId": {"in": window_ids}})
+        notes = {f.conversationId: (getattr(f, "userComment", "") or "")
+                 for f in fbs}
+    except Exception:  # noqa: BLE001
+        notes = {}
 
     slots: dict = {}
     for x in msgs:
@@ -1208,6 +1226,10 @@ async def sources_for_conversations(db: Any, conversation_ids: list) -> dict:
     for v in rows:
         v["has_dev_row"] = v["conversation_id"] in dev
         v["origin"] = origins.get(v["conversation_id"])
+        v["feedback_comment"] = notes.get(v["conversation_id"], "")
+        ov, ov_by = overrides.get(v["conversation_id"], (None, None))
+        v["source_override"] = ov
+        v["source_override_by"] = ov_by
     mark_bursts(rows)
     mark_repeats(rows)
     return {v["conversation_id"]: classify_source(v) for v in rows}
