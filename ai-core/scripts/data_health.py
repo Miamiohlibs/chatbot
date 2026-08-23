@@ -401,39 +401,53 @@ def main(force_email: bool, quiet: bool) -> int:
     else:
         print(body)
 
-    if problems or force_email:
-        # No "needs you" / "action required" wording. This mail goes to
-        # colleagues as well as the operator now, and a subject line that
-        # tells three people something needs them when it needs one of them
-        # is how a daily mail becomes a filter rule.
-        feedback = next((f for f in findings
-                         if f.name == "what real users disliked"), None)
-        if feedback is not None and not feedback.ok:
-            subject = f"[chatbot] daily report — {feedback.summary}"
-        elif problems:
-            subject = (f"[chatbot] daily report — no patron complaints; "
-                       f"{len(problems)} maintenance item(s)")
-        else:
-            subject = "[chatbot] daily report — all clear"
-        try:
-            from src.observability.alerting import send_alert_email
-            # A separate list from ALERT_EMAIL_TO on purpose: colleagues
-            # asked to see the daily report, not every incident alert the
-            # service can raise.
-            to = (os.getenv("DAILY_REPORT_EMAIL_TO", "") or "").strip() or None
-            send_alert_email(subject, body + (
-                "\n\nThis mail is only sent when there is something in it. "
-                "A quiet inbox means no patron marked an answer bad and "
-                "every maintenance check passed."), to=to)
-            # WARNING, not INFO: under cron the root level is WARNING, so an
-            # INFO "email sent" line was dropped and the log could not show
-            # whether anyone had been told. Whether a human was notified is
-            # exactly what this log is for.
+    # Send every day, pass or fail. This used to go out only when a check
+    # failed, which worked while it was one operator's maintenance log --
+    # but it is now a daily report three people were told to expect, and to
+    # them a missing mail is indistinguishable from a broken cron. That is
+    # not hypothetical: the first all-clear morning after the checks were
+    # narrowed, the readers concluded the job was dead. An "all clear" mail
+    # is the product, not an empty one.
+    del force_email  # kept in the signature; every run mails now
+    # No "needs you" / "action required" wording. This mail goes to
+    # colleagues as well as the operator now, and a subject line that
+    # tells three people something needs them when it needs one of them
+    # is how a daily mail becomes a filter rule.
+    feedback = next((f for f in findings
+                     if f.name == "what real users disliked"), None)
+    if feedback is not None and not feedback.ok:
+        subject = f"[chatbot] daily report — {feedback.summary}"
+    elif problems:
+        subject = (f"[chatbot] daily report — no patron complaints; "
+                   f"{len(problems)} maintenance item(s)")
+    else:
+        subject = "[chatbot] daily report — all clear"
+    try:
+        from src.observability.alerting import send_alert_email
+        # A separate list from ALERT_EMAIL_TO on purpose: colleagues
+        # asked to see the daily report, not every incident alert the
+        # service can raise.
+        to = (os.getenv("DAILY_REPORT_EMAIL_TO", "") or "").strip() or None
+        ok = send_alert_email(subject, body + (
+            "\n\nThis report goes out every morning whether or not "
+            "anything is wrong, so a morning with no mail means the job "
+            "failed to run and nothing else."), to=to)
+        # Whether a human was told is exactly what this log is for, so it
+        # records what actually happened and does so at a level cron keeps.
+        # WARNING, not INFO: under cron the root level is WARNING, so an
+        # INFO "email sent" line was dropped entirely. And send_alert_email
+        # returns False rather than raising, so logging "emailed"
+        # unconditionally left a failed delivery looking like a good one.
+        if ok:
             logger.warning("data health: emailed %d problem(s): %s",
                            len(problems), subject)
-        except Exception as e:  # noqa: BLE001
-            logger.error("could not send the health email: %s", e)
+        else:
+            logger.error("data health: SEND FAILED, nobody was told: %s",
+                         subject)
             return 2
+    except Exception as e:  # noqa: BLE001
+        logger.error("could not send the health email: %s", e)
+        return 2
     return 1 if problems else 0
 
 

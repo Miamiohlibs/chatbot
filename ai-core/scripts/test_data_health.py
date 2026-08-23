@@ -22,8 +22,10 @@ def _run(monkeypatch, findings, quiet, capsys, sent=None):
     def _fake_send(subject, body, to=None):
         # `to` matters now: the daily report goes to a wider list than the
         # incident alerts, and a fake that cannot receive it would hide a
-        # send failure as a passing test.
+        # send failure as a passing test. Returning True matters too --
+        # the real function returns a bool and main() branches on it.
         calls.append((subject, body, to))
+        return True
     monkeypatch.setattr("src.observability.alerting.send_alert_email", _fake_send)
     code = dh.main(force_email=False, quiet=quiet)
     if sent is not None:
@@ -99,7 +101,7 @@ def test_a_check_that_raises_becomes_a_finding_not_a_crash(monkeypatch, capsys):
         raise RuntimeError("weaviate is down")
     monkeypatch.setattr(dh, "CHECKS", [_boom, lambda: _finding("b", True)])
     monkeypatch.setattr("src.observability.alerting.send_alert_email",
-                        lambda *a, **k: None)
+                        lambda *a, **k: True)  # the real one returns a bool
     code = dh.main(force_email=False, quiet=True)
     out = capsys.readouterr().out
     assert code == 1
@@ -216,3 +218,34 @@ def test_an_unrated_comment_is_not_counted_as_a_bad_rating():
     assert "<= 0" in src or "0 <" in src, (
         "the zero-rating guard is gone; every comment-only submission will "
         "be mailed as patron dissatisfaction")
+
+
+def test_an_all_clear_morning_still_sends_the_report(monkeypatch, capsys):
+    """The bug this locks down: on 2026-08-23 every check passed, so nothing
+    was mailed, and the three readers concluded the cron was broken.
+
+    Silence has to mean one thing. Now it means the job did not run.
+    """
+    sent = []
+    code, _ = _run(monkeypatch, [_finding("a", True), _finding("b", True)],
+                   quiet=True, capsys=capsys, sent=sent)
+    assert len(sent) == 1, "an all-clear day must still produce a report"
+    assert "all clear" in sent[0][0]
+    assert code == 0, "all clear is not a failure exit"
+
+
+def test_a_failed_send_is_logged_as_a_failure_not_as_success(monkeypatch,
+                                                             capsys, caplog):
+    """send_alert_email returns False instead of raising.
+
+    So the happy-path log line had to be conditional, or a morning where
+    nobody was told would read in the log exactly like one where they were.
+    """
+    monkeypatch.setattr(dh, "CHECKS", [lambda: _finding("a", True)])
+    monkeypatch.setattr("src.observability.alerting.send_alert_email",
+                        lambda subject, body, to=None: False)
+    with caplog.at_level("ERROR"):
+        code = dh.main(force_email=False, quiet=True)
+    capsys.readouterr()
+    assert code == 2, "a report nobody received is not a successful run"
+    assert any("SEND FAILED" in r.message for r in caplog.records)
