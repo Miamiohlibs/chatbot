@@ -5361,3 +5361,63 @@ def test_the_supported_tools_are_a_list_not_a_pattern():
     assert _FIND_HELP_TOOL_RE.search("Zotero")
     assert not _FIND_HELP_TOOL_RE.search("an ATM")
     assert not _FIND_HELP_TOOL_RE.search("the BUS schedule")
+
+
+# --- "is there a guide for X?" -------------------------------------------
+#
+# A student asked "is there a subject quide for film studies?" at 02:32 on
+# 2026-08-25 and was told the question was outside what a library chatbot
+# covers. Miami publishes 480 research guides; Film Studies has one.
+#
+# The turn never reached anything that could answer it: _finding_help_answer
+# looks for "books ON <topic>" or "help FINDING <thing>", a guide question is
+# neither, so the intent stayed out_of_scope and step 2.5 refused it.
+
+from src.graph.new_orchestrator import _research_guide_answer
+
+
+def test_the_question_that_was_refused_is_answered() -> None:
+    result = _research_guide_answer("is there a subject quide for film studies?")
+    assert result is not None, (
+        "the exact message a student sent, mistyped as they sent it")
+    answer, citations = result
+    assert "research guides" in answer.lower()
+    assert any("guides" in c["url"] for c in citations)
+
+
+def test_a_typo_in_guide_does_not_lose_the_question() -> None:
+    """"quide" is what the student typed. A question is not less real for
+    being mistyped."""
+    assert _research_guide_answer("subject quide for nursing") is not None
+
+
+def test_a_recognised_subject_is_named_back() -> None:
+    answer, _ = _research_guide_answer("do you have a research guide for nursing")
+    assert "Nursing" in answer
+
+
+def test_an_unrecognised_subject_still_gets_the_index() -> None:
+    """Our subject-to-guide table resolves 52 of the 86 guide names it
+    references, so an answer that named a specific guide would be wrong
+    exactly where the data is thin. The A-Z index is right for everyone."""
+    result = _research_guide_answer("course guide for BIO 116")
+    assert result is not None
+    answer, citations = result
+    assert citations, "an answer with no destination is not an answer"
+
+
+def test_other_senses_of_guide_are_left_alone() -> None:
+    for message in ("what is your citation style guide",
+                    "is there a guide dog policy",
+                    "can I book a guided tour"):
+        assert _research_guide_answer(message) is None, message
+
+
+def test_it_does_not_swallow_the_neighbouring_questions() -> None:
+    """It sits ahead of finding_help in the dispatch list, so a question that
+    belongs to another short circuit must not be caught here."""
+    for message in ("where can I find books about totalitarianism?",
+                    "open rn?",
+                    "do you lend chargers",
+                    "who is the nursing librarian"):
+        assert _research_guide_answer(message) is None, message

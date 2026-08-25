@@ -1127,6 +1127,10 @@ def _run_turn(
             # all of them, so every specific answer above gets first refusal.
             # It exists because "assistance with books on X" and "direct me to
             # <database>" were being refused as out of scope.
+            # Before finding_help: "is there a guide for X" is a narrower
+            # question than "help me find things about X", and the guides
+            # answer names a better destination for it.
+            ("research_guide", _research_guide_answer),
             ("finding_help", _finding_help_answer),
         ):
             _res = _fn(request.user_message)
@@ -5063,6 +5067,84 @@ _FIND_HELP_EXCLUDE_RE = re.compile(
     r"|\bhow\s+long\b[^.?!]{0,40}\bhold\b",
     re.IGNORECASE,
 )
+
+
+# --- "is there a guide for X?" ---------------------------------------------
+#
+# A student asked "is there a subject quide for film studies?" at 02:32 on
+# 2026-08-25 and was told the question was outside what a library chatbot
+# covers. Miami publishes 480 research guides; Film Studies has one.
+#
+# The turn never reached anything that could answer it. `_finding_help_answer`
+# looks for "books ON <topic>" or "help FINDING <thing>", and a guide question
+# is neither, so the intent stayed out_of_scope and step 2.5 refused it.
+#
+# This is a NAVIGATION answer by design: it names where the guides live
+# rather than asserting which guide covers what. Our own subject-to-guide
+# table resolves only 52 of the 86 guide names it references -- Film Studies
+# among the 34 it cannot -- so an answer that named a specific guide would be
+# wrong exactly where the data is thin. The A-Z index is right for every
+# subject, including the ones we cannot map.
+_GUIDE_ASK_RE = re.compile(
+    # "quide" is not a typo on our side: it is what the student typed, and a
+    # question is not less real for being mistyped.
+    r"\b(subject|research|course|class|library|lib)\s*-?\s*(gu?ide|quide)s?\b"
+    r"|\blibguides?\b"
+    r"|\b(gu?ide|quide)s?\s+(for|on|about|to)\s+[a-z]",
+    re.IGNORECASE,
+)
+
+# Guides are not the answer to these, even though the word appears.
+_GUIDE_EXCLUDE_RE = re.compile(
+    r"\b(style\s+gu?ide|citation\s+gu?ide|gu?ide\s+dog|tour\s+gu?ide"
+    r"|user\s+gu?ide|gu?ided\s+tour)\b",
+    re.IGNORECASE,
+)
+
+
+def _research_guide_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
+    """Someone asked whether a guide exists for their subject."""
+    m = message or ""
+    if _GUIDE_EXCLUDE_RE.search(m) or not _GUIDE_ASK_RE.search(m):
+        return None
+
+    subject = None
+    try:
+        from src.tools.subject_aliases import find_subject_by_alias
+
+        # The whole message first (a bare "film studies guide" resolves), then
+        # word by word, so "is there a guide for film studies?" still finds it.
+        subject = find_subject_by_alias(m.strip().strip("?.!,"))
+        if not subject:
+            for w in re.findall(r"[A-Za-z][\w'-]{2,}(?:\s+[A-Za-z][\w'-]{2,})?", m):
+                subject = find_subject_by_alias(w)
+                if subject:
+                    break
+    except Exception:  # noqa: BLE001 -- a lookup must never break the turn
+        subject = None
+
+    lead = (f"Yes -- the Libraries publish research guides, and **{subject}** "
+            f"is one of the subjects they cover.\n\n"
+            if subject else
+            "The Libraries publish research guides by subject and by "
+            "course.\n\n")
+    return (
+        lead
+        + "- **Browse them all**: the research guides page [1] lists every "
+          "guide, by subject and by course.\n"
+          "- **Ask the person who wrote it**: your subject librarian [2] "
+          "maintains the guide for their area and will meet with you.\n\n"
+        + ("Tell me the course number if it is for a specific class -- some "
+           "courses have their own guide."
+           if not subject else
+           f"If you want the {subject} librarian by name, just ask."),
+        [
+            {"n": 1, "url": _RESEARCH_GUIDES_URL,
+             "snippet": "Miami University Libraries — research guides"},
+            {"n": 2, "url": _LIAISONS_URL,
+             "snippet": "Miami University Libraries — subject librarians"},
+        ],
+    )
 
 
 def _finding_help_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
