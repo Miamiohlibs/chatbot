@@ -652,3 +652,88 @@ def test_oxford_still_gets_the_subject_liaison_directory():
     ctx = _refusal_context_for(RefusalTrigger.CROSS_CAMPUS_MISMATCH, "oxford")
     assert ctx is not None
     assert ctx.staff_directory_url.endswith("/organization/liaisons/")
+
+
+# --- staff privacy: redact the contacts, keep the answer ------------------
+#
+# The rule is "never volunteer a staff list". The remedy used to be throwing
+# the whole answer away, which is right when the answer IS the list and
+# wrong when the list is a footnote to something the patron asked about.
+#
+# It cost a real question, asked thirteen times: "where could I find records
+# of past event contracts Miami has executed" came back "I don't share staff
+# contact lists" -- a true sentence about a question nobody asked, with the
+# archives information discarded on the way out.
+
+_ARCHIVES = "https://spec.lib.miamioh.edu/home/university-archives/"
+
+
+def _archives_citation() -> Citation:
+    return Citation(
+        n=1, url=_ARCHIVES,
+        snippet="University Archives keeps administrative records.",
+        chunk_id="chunk-arch", campus="oxford", library=None,
+    )
+
+
+def _run_privacy(answer: str, evidence_text: str):
+    return process_synthesizer_output(
+        SynthesizerOutput(answer=answer, citations=[_archives_citation()],
+                          confidence="high"),
+        scope_campus="oxford", url_allowlist={_ARCHIVES},
+        evidence=[_Ev(evidence_text, source_url=_ARCHIVES)],
+    )
+
+
+def test_an_answer_that_merely_names_someone_survives_redacted() -> None:
+    answer = (
+        "Records of University contracts are held by the University "
+        "Archives, which keeps administrative records of Miami "
+        "University including business documentation [1].\n"
+        "For access, contact Heather Bennett bennethm@miamioh.edu or "
+        "Alyssa Bowling bowlina5@miamioh.edu."
+    )
+    result = _run_privacy(answer, answer.replace(" [1]", ""))
+    assert not result.is_refusal, (
+        "the archives answer was discarded over a contact line at the "
+        "bottom of it")
+    kept = result.answer.answer
+    assert "University Archives" in kept, "the substance must survive"
+    assert "bennethm@miamioh.edu" not in kept
+    assert "bowlina5@miamioh.edu" not in kept
+    assert "Heather Bennett" not in kept, (
+        "the whole line goes -- a name left standing beside a removed "
+        "email is still the roster the rule exists to prevent")
+
+
+def test_an_answer_that_is_only_a_roster_still_refuses() -> None:
+    """The 2026-05-16 violation. Redaction must not become a loophole."""
+    answer = "You can contact bennethm@miamioh.edu or bowlina5@miamioh.edu [1]."
+    result = _run_privacy(answer, answer.replace(" [1]", ""))
+    assert result.is_refusal
+    assert result.refusal.trigger == RefusalTrigger.STAFF_PRIVACY
+
+
+def test_a_roster_with_a_header_still_refuses() -> None:
+    """Nothing survives but the header, which is not an answer."""
+    answer = (
+        "Here are the librarians who can help:\n"
+        "- Heather Bennett bennethm@miamioh.edu\n"
+        "- Alyssa Bowling bowlina5@miamioh.edu"
+    )
+    result = _run_privacy(answer, answer)
+    assert result.is_refusal
+    assert result.refusal.trigger == RefusalTrigger.STAFF_PRIVACY
+
+
+def test_department_inboxes_are_still_not_individuals() -> None:
+    """Unchanged behaviour, asserted so redaction cannot regress it."""
+    answer = (
+        "Special Collections can be reached at speccoll@miamioh.edu, and "
+        "the University Archives at archives@miamioh.edu [1]."
+    )
+    result = _run_privacy(answer, answer.replace(" [1]", ""))
+    assert not result.is_refusal
+    assert "speccoll@miamioh.edu" in result.answer.answer, (
+        "public group inboxes are documented on the website and must not "
+        "be redacted as if they were people")

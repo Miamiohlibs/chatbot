@@ -51,9 +51,12 @@ join) happens in the caller.
 
 from __future__ import annotations
 
+import logging
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Literal, Optional
+
+logger = logging.getLogger(__name__)
 
 from src.synthesis.refusal_templates import (
     RefusalContext,
@@ -164,6 +167,54 @@ Never false-positives on hours / "Closed" -- those aren't emails."""
 
 
 # --- The main entry point --------------------------------------------------
+
+# --- staff-privacy redaction helpers -------------------------------------
+#
+# Line-based on purpose. Removing just the email address would leave the
+# name standing beside it, and a list of names is the roster the rule
+# exists to prevent -- the demonstrated 2026-05-16 violation was names.
+
+_SUBSTANCE_MIN_WORDS = 8
+"""Words that must survive redaction for the answer to still be worth
+sending. Below this the answer was the roster, not a page that happened to
+name someone, and the refusal is the honest response.
+
+Calibrated against both real shapes rather than picked round. A roster
+answer collapses to nothing once its contact lines go -- "You can contact
+X or Y [1]." leaves zero words -- while a roster with a header leaves only
+the header ("Here are the librarians who can help:", seven). The archives
+answer this was built for leaves ten: "Records of University contracts are
+held by the University Archives"."""
+
+
+def _strip_contact_lines(answer: str,
+                         individual_emails: set) -> "tuple[str, int]":
+    """Drop whole lines carrying an individual staff email.
+
+    Returns (kept_text, lines_dropped).
+    """
+    lines = (answer or "").splitlines()
+    kept, dropped = [], 0
+    for line in lines:
+        low = line.lower()
+        if any(e in low for e in individual_emails):
+            dropped += 1
+            continue
+        kept.append(line)
+    text = "\n".join(kept)
+    # Collapse the blank runs the removal leaves behind.
+    while "\n\n\n" in text:
+        text = text.replace("\n\n\n", "\n\n")
+    return text.strip(), dropped
+
+
+def _carries_substance(text: str) -> bool:
+    """Is there still an answer here, or only punctuation and markers?"""
+    stripped = _EMAIL_RE.sub(" ", text or "")
+    stripped = re.sub(r"\[\d+\]", " ", stripped)      # citation markers
+    stripped = re.sub(r"[^\w\s]", " ", stripped)       # bullets, dashes
+    return len(stripped.split()) >= _SUBSTANCE_MIN_WORDS
+
 
 def process_synthesizer_output(
     output: SynthesizerOutput,
@@ -404,6 +455,33 @@ def process_synthesizer_output(
         e for e in distinct_emails
         if e.split("@", 1)[0] not in _DEPT_INBOX_LOCALPARTS
     }
+    if len(individual_emails) >= 2:
+        # REDACT BEFORE REFUSING (2026-08-25).
+        #
+        # The rule is "never volunteer a staff list", and the remedy used to
+        # be throwing the whole answer away. That is right when the answer IS
+        # the list, and wrong when the list is a footnote to something the
+        # patron actually asked about.
+        #
+        # It cost us a real question, asked thirteen times: "where could I
+        # find records of past event contracts Miami has executed" got back
+        # "I don't share staff contact lists" -- a true sentence about a
+        # question nobody asked, with the archives information the patron
+        # wanted discarded on the way out.
+        #
+        # So drop the lines carrying individual contacts (the whole line, so
+        # a name never survives its email) and keep the rest. If nothing of
+        # substance is left, the answer really was a roster and the refusal
+        # stands.
+        kept, dropped = _strip_contact_lines(output.answer,
+                                             individual_emails)
+        if dropped and _carries_substance(kept):
+            logger.info(
+                "staff-privacy: redacted %d contact line(s) rather than "
+                "discarding the answer", dropped)
+            output = replace(output, answer=kept)
+            individual_emails = set()
+
     if len(individual_emails) >= 2:
         failures.append(
             ValidationFailure(
