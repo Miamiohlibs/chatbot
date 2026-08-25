@@ -1073,36 +1073,6 @@ async def _v2_message(sid, data):
         )
 
 
-async def _alert_negative_rating(message_id: str) -> None:
-    """Email the operator about a thumbs-down, WITH the question.
-
-    The rated row is the bot's answer; on its own it says nothing about what
-    went wrong, so this walks back to the preceding user turn -- the same
-    lesson learned in scripts/data_health.py.
-    """
-    try:
-        from src.database.prisma_client import get_prisma_client
-        from src.observability.incident_alerts import alert_thumbs_down
-
-        db = get_prisma_client()
-        answer = await db.message.find_unique(where={"id": message_id})
-        if answer is None:
-            return
-        prior = await db.message.find_many(
-            where={"conversationId": answer.conversationId, "type": "user",
-                   "timestamp": {"lte": answer.timestamp}},
-            order={"timestamp": "desc"}, take=1)
-        await asyncio.to_thread(
-            alert_thumbs_down,
-            message_id=message_id,
-            conversation_id=answer.conversationId,
-            question=(prior[0].content if prior else ""),
-            answer=answer.content or "",
-        )
-    except Exception as e:  # noqa: BLE001 -- never break the rating ack
-        logging.warning(f"thumbs-down alert failed: {e}")
-
-
 async def _v2_message_rating(sid, data):
     """Thumbs up/down on one message. Ported from the legacy handler
     2026-07-17 -- the client kept emitting `messageRating` after the
@@ -1115,11 +1085,13 @@ async def _v2_message_rating(sid, data):
             await update_message_rating(message_id, is_positive)
             logging.info(f"👍 [v2] message {message_id} rated "
                          f"{'positive' if is_positive else 'negative'}")
-            if not is_positive:
-                # Operator told colleagues that a thumbs-down alerts them.
-                # Best-effort and off the critical path: the ack below must
-                # not wait on SMTP.
-                asyncio.create_task(_alert_negative_rating(message_id))
+            # No email here. A thumbs-down used to mail the operator the
+            # moment it happened AND appear in the 9:30 daily report, so the
+            # same complaint arrived twice -- and the instant one went to the
+            # operator alone, which is the audience least able to act on it.
+            # The rating is already durable above; the daily report reads it
+            # from the database and puts it in front of all three readers.
+            # Operator ruling 2026-08-25.
             await sio_v2.emit("ratingAck",
                               {"messageId": message_id, "success": True}, to=sid)
     except Exception as e:  # noqa: BLE001
@@ -1180,16 +1152,9 @@ async def _v2_user_feedback(sid, data):
             await save_conversation_feedback(
                 conversation_id, _rating, _comment)
             logging.info(f"💬 [v2] feedback saved for {conversation_id}")
-            try:
-                from src.observability.incident_alerts import (
-                    LOW_RATING_MAX, alert_low_rating,
-                )
-                if 0 < int(_rating) <= LOW_RATING_MAX:
-                    await asyncio.to_thread(
-                        alert_low_rating, conversation_id=conversation_id,
-                        rating=int(_rating), comment=_comment)
-            except Exception as e:  # noqa: BLE001
-                logging.warning(f"low-rating alert failed: {e}")
+            # No email here either, for the same reason as the thumbs-down
+            # above: the rating is saved, and the 9:30 daily report is where
+            # it reaches the people who read it.
             await sio_v2.emit("feedbackAck",
                               {"conversationId": conversation_id, "success": True},
                               to=sid)

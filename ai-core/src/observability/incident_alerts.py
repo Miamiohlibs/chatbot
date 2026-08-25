@@ -3,7 +3,9 @@ Operator alerts for the three things the operator told colleagues we watch.
 
     (1) server crashes / API connection failures  -- already handled by
         `main._health_alert_watcher`; not duplicated here.
-    (2) thumbs-down, or a 1-2 star conversation rating.
+    (2) thumbs-down, or a 1-2 star conversation rating -- REMOVED from
+        this module 2026-08-25; they belong to the 9:30 daily report now.
+        See the block where they used to live for why.
     (3) suspicious activity: abuse of the rate limiter, or a message that
         looks like an attempt to talk the bot out of its instructions.
 
@@ -18,10 +20,9 @@ WHO GETS THESE, AND WHEN (revised 2026-08-04 for the handover)
                   whoever is covering). Falls back to ALERT_EMAIL_TO when
                   unset, so nothing changes until that variable is set.
 
-      DIGEST   -- worth reading, not worth waking for: a thumbs-down, an
-                  injection attempt that was refused, a rate-limit trip, a
-                  low rating. Appended to a queue and mailed as ONE message
-                  by scripts/alert_digest.py.
+      DIGEST   -- worth reading, not worth waking for: an injection attempt
+                  that was refused, a rate-limit trip. Appended to a queue
+                  and mailed as ONE message by scripts/alert_digest.py.
 
     The commitment made to colleagues was that suspicious activity reaches
     us -- not that it pages us. A daily count of injection attempts is more
@@ -140,38 +141,23 @@ def _send(kind: str, subject: str, body: str) -> bool:
         return False
 
 
-# --- (2) negative feedback -------------------------------------------------
-
-
-def alert_thumbs_down(*, message_id: str, question: str, answer: str,
-                      conversation_id: str = "") -> bool:
-    """A patron marked one answer as bad. Includes the QUESTION, because the
-    answer alone never tells you what went wrong."""
-    return _send(
-        "thumbs-down",
-        "[chatbot] a patron marked an answer as unhelpful",
-        f"Someone gave a thumbs-down. The question is what matters here:\n\n"
-        f"  asked:  {(question or '(not captured)')[:600]}\n\n"
-        f"  answered: {(answer or '(not captured)')[:900]}\n\n"
-        f"  message id:      {message_id}\n"
-        f"  conversation id: {conversation_id or '(unknown)'}\n\n"
-        f"Review it at /admin/review (filter: thumbs_down). If the answer is "
-        f"wrong and the fix is content, a manual correction takes effect on "
-        f"the next message with no deploy.",
-    )
-
-
-def alert_low_rating(*, conversation_id: str, rating: int,
-                     comment: str = "") -> bool:
-    """End-of-conversation rating of 1-2 stars."""
-    return _send(
-        "low-rating",
-        f"[chatbot] a conversation was rated {rating}/5",
-        f"A patron rated a whole conversation {rating} out of 5.\n\n"
-        f"  their comment: {(comment or '(none left)')[:900]}\n"
-        f"  conversation id: {conversation_id}\n\n"
-        f"Read the transcript at /admin/review (filter: rated).",
-    )
+# --- (2) negative feedback -- DELIBERATELY NOT ALERTED ---------------------
+#
+# A thumbs-down and a 1-2 star rating used to mail the operator the instant
+# they happened. Both were removed on 2026-08-25, and the functions with
+# them so nothing can quietly wire them back.
+#
+# The reason is not that they stopped mattering -- they are the ONLY signal
+# the daily report now carries. It is that they were arriving twice: once
+# here, to the operator alone, and again at 9:30 in front of all three
+# people who read that report. The instant copy went to the audience least
+# able to act on it, and doubled the volume of the one thing nobody should
+# learn to skim.
+#
+# The rating is durable in the database the moment it is given, which is
+# where scripts/data_health.py reads it. Nothing is lost by not mailing it
+# here. LOW_RATING_MAX stays -- the daily report still uses it to decide
+# what counts as a bad rating.
 
 
 # --- (3) suspicious activity ----------------------------------------------
@@ -265,9 +251,7 @@ def alert_rate_limit_abuse(*, client_key: str, hits: int,
 
 __all__ = [
     "LOW_RATING_MAX",
-    "alert_low_rating",
     "alert_rate_limit_abuse",
     "alert_suspicious_message",
-    "alert_thumbs_down",
     "looks_like_injection",
 ]
