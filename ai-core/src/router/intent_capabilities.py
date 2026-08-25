@@ -96,10 +96,14 @@ _POINT_TO_URL: dict[str, IntentCapability] = {
         # and then explained that database names overlap and shift. That is
         # OUR routing rationale, not something the student asked or needs --
         # they asked where the databases are. 85 words -> 32.
+        # "with sign-in handled for you" was here until 2026-08-25 and was a
+        # claim the bot cannot make: it cannot sign anybody into anything.
+        # Whether a database asks for credentials is between the student and
+        # that database, and promising otherwise sets them up to be surprised
+        # by the login screen we told them would not be there.
         short_message=(
             "Use the library's Databases A-Z list -- every database Miami "
-            "subscribes to, listed alphabetically and by subject, with "
-            "sign-in handled for you.\n\n"
+            "subscribes to, listed alphabetically and by subject.\n\n"
             "Databases A-Z: https://libguides.lib.miamioh.edu/az/databases"
         ),
     ),

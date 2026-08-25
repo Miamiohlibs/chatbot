@@ -408,3 +408,29 @@ def test_point_to_url_answers_still_carry_their_link():
     from src.router.intent_capabilities import _POINT_TO_URL
     for name, cap in _POINT_TO_URL.items():
         assert cap.canonical_url in cap.short_message, name
+
+
+def test_the_bot_does_not_promise_to_sign_anyone_in() -> None:
+    """It cannot. Whether a database asks for credentials is between the
+    student and that database, and the Databases A-Z copy used to end
+    "...with sign-in handled for you" -- which set a student up to be
+    surprised by the login screen we had told them was not there.
+
+    Asserted across every capability message, not just the one that had it,
+    because the next one written would fail the same way.
+    """
+    import re
+
+    import src.router.intent_capabilities as ic
+
+    tables = [v for v in vars(ic).values()
+              if isinstance(v, dict) and v
+              and hasattr(next(iter(v.values())), "short_message")]
+    assert tables, "no capability tables found -- the test is looking at nothing"
+    banned = re.compile(
+        r"sign[- ]?in\s+(is\s+)?handled|we\s+sign\s+you\s+in|"
+        r"signs?\s+you\s+in|no\s+login\s+(needed|required)", re.I)
+    for table in tables:
+        for name, cap in table.items():
+            msg = getattr(cap, "short_message", "") or ""
+            assert not banned.search(msg), f"{name}: {msg!r}"

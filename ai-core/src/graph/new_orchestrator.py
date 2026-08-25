@@ -5158,8 +5158,7 @@ def _finding_help_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
     if not _find_help_is_about_material(m):
         return None
     return (
-        "I can point you at the right starting place -- which one depends on "
-        "what you are after:\n\n"
+        "I can point you to the right starting place:\n\n"
         "- **Books, ebooks, articles, DVDs** on a topic: search **Primo**, the "
         "library catalogue [1]. It covers our own collection plus OhioLINK "
         "partner libraries.\n"
