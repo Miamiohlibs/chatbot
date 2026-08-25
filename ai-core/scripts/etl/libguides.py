@@ -1,0 +1,225 @@
+"""Subject and course guides, indexed as POINTERS rather than content.
+
+WHY THIS EXISTS
+    A student asked "is there a subject guide for film studies?" at 02:32 on
+    2026-08-25 and was told the question was outside what a library chatbot
+    covers. Miami has a Film Studies guide. We hold its title, its URL and
+    the subjects it serves in Postgres -- 480 guides, 741 subjects, 587
+    subject-to-guide links -- and none of it was reachable from a question.
+
+    The crawl cannot supply this. The A-Z guide index at
+    libguides.lib.miamioh.edu/ renders its list in JavaScript: 66KB of live
+    HTML that yields two links, neither of them a guide. Twenty-three guide
+    pages reached the index by being linked from somewhere else, out of 480.
+
+WHY POINTERS AND NOT CONTENT
+    The operator's framing, 2026-08-12: this bot is the library website's
+    navigator, not an answer generator. A guide's CONTENT is a librarian's
+    working document -- reading lists, database picks, semester notes -- and
+    burning it into the corpus means serving last term's advice as fact.
+
+    What is stable is that the guide EXISTS, what it is called, which
+    subjects it serves and where it lives. That is what a student needs to
+    be handed, and it is what this module publishes. Nothing here is
+    scraped, so nothing dated can leak in; the same DATE_SHAPED guard the
+    navigation source uses is applied anyway, because a guide TITLE can
+    carry a year ("HST 111 Fall 2026") and that would date the pointer.
+
+WHERE THE DATA COMES FROM
+    The LibGuide / Subject / SubjectLibGuide tables, populated by the
+    LibGuides API sync. This module only reads them, so a guide renamed or
+    retired upstream is picked up by the next ETL run without an edit here.
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+import re
+from typing import Optional
+
+from . import classify, config, discover, extract
+from .navigation import DATE_SHAPED
+
+logger = logging.getLogger(__name__)
+
+
+def _norm(name: str) -> str:
+    """Compare guide names ignoring punctuation and the word "and".
+
+    SubjectLibGuide stores the guide by NAME, and the two tables disagree on
+    the Oxford comma -- "Chemistry and Biochemistry" against "Chemistry &
+    Biochemistry". Six guides were lost to that alone.
+
+    Deliberately stops at normalisation. Fuzzy matching would have paired
+    the Film Studies subject with "Journalism 310: Media History", which is
+    worse for the student than the honest silence of no pointer at all.
+    Names that still do not match are logged for a librarian to reconcile.
+    """
+    s = (name or "").lower()
+    s = re.sub(r"\band\b|&", " ", s)
+    s = re.sub(r"[^a-z0-9]+", " ", s)
+    return " ".join(s.split())
+
+
+# Course guides are named for a section that will not exist next year
+# ("CJS 271", "EGS 215: Workplace Writing (Cotugno)"). A student asking for
+# one asks by course code, which the subject route does not serve, and
+# pointing them at last year's section is worse than saying nothing. Only
+# guides reachable from a SUBJECT are published.
+REQUIRE_SUBJECT = os.getenv("ETL_LIBGUIDES_REQUIRE_SUBJECT", "1") != "0"
+
+TOPIC = "research"
+
+# Enough to carry the words a student would actually type, few enough that
+# the pointer stays a single chunk (config.CHUNK_TARGET_TOKENS is 400, and
+# the longest guide serves 40-odd subjects).
+MAX_SUBJECTS_LISTED = 18
+
+
+def _rows() -> "list[tuple[str, str, str, list[str]]]":
+    """(guide_name, url, description, subjects) for every active guide.
+
+    Reads Postgres directly. Returns [] on any failure -- a guide list we
+    cannot read must not take the site crawl down with it.
+    """
+    import asyncio
+
+    async def _go():
+        from prisma import Prisma
+
+        db = Prisma()
+        await db.connect()
+        try:
+            guides = await db.libguide.find_many(where={"isActive": True})
+            subjects = await db.subject.find_many()
+            links = await db.subjectlibguide.find_many()
+            by_id = {s.id: s.name for s in subjects}
+            # SubjectLibGuide.libGuide holds the guide NAME, not an id.
+            per_guide: dict = {}
+            for l in links:
+                name = by_id.get(l.subjectId)
+                if name:
+                    per_guide.setdefault(_norm(l.libGuide), set()).add(name)
+
+            known = {_norm(g.name) for g in guides}
+            orphans = sorted(k for k in per_guide if k and k not in known)
+            if orphans:
+                # NOT a silent drop: these subjects have a guide named in the
+                # roster that no row in LibGuide matches, so the student gets
+                # no pointer. It is a data reconciliation for a librarian,
+                # and it stays visible until someone does it.
+                logger.warning(
+                    "libguides: %d guide name(s) referenced by a subject have "
+                    "no matching guide row, so those subjects get no pointer: "
+                    "%s", len(orphans), ", ".join(orphans[:10]))
+
+            out = []
+            for g in guides:
+                if not (g.url or "").strip():
+                    continue
+                out.append((g.name or "", g.url,
+                            (g.description or "").strip(),
+                            sorted(per_guide.get(_norm(g.name), ()))))
+            return out
+        finally:
+            await db.disconnect()
+
+    try:
+        return asyncio.run(_go())
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("libguides: could not read the guide tables: %s", exc)
+        return []
+
+
+def build_body(name: str, url: str, description: str,
+               subjects: "list[str]") -> Optional[str]:
+    """The indexed text, or None if it is not safe or not useful to index."""
+    if not name or not url:
+        return None
+    if REQUIRE_SUBJECT and not subjects:
+        return None
+
+    # THE URL LEADS, AND THE SUBJECT LIST IS BOUNDED.
+    #
+    # The Education guide serves 40-odd subjects. Written out in full the
+    # pointer ran to 210 words, the chunker cut it in three, and two of the
+    # three chunks were subject names with no destination in them -- a
+    # student matching on "Art Education" would have retrieved a list and no
+    # link, which is the failure this whole module exists to end.
+    #
+    # So the address goes in the opening sentence, where the leading chunk
+    # always carries it, and the list is capped to keep the document to one
+    # chunk. The count is kept honest rather than the overflow hidden.
+    shown = subjects[:MAX_SUBJECTS_LISTED]
+    more = len(subjects) - len(shown)
+    lines = [
+        f"{name} -- a Miami University Libraries research guide, at {url}",
+        "",
+    ]
+    if shown:
+        tail = f", and {more} more subject(s)" if more else ""
+        lines.append("Subjects it covers: " + ", ".join(shown) + tail + ".")
+    if description:
+        lines.append(description.rstrip(".") + ".")
+    lines += [
+        "",
+        f"Current reading lists, recommended databases and anything with a "
+        f"date on it are on the guide itself: {url}",
+    ]
+    body = "\n".join(lines)
+
+    # A guide TITLE can carry a term ("HST 111 Fall 2026"). Publishing that
+    # as a pointer dates the pointer, so refuse it here rather than serve a
+    # student a guide that named a semester which has passed.
+    if DATE_SHAPED.search(body):
+        logger.info("libguides: skipping date-shaped guide %r", name)
+        return None
+    return body
+
+
+def to_classified() -> "list[tuple[extract.ExtractedDoc, classify.DocMetadata]]":
+    out = []
+    for name, url, description, subjects in _rows():
+        body = build_body(name, url, description, subjects)
+        if body is None:
+            continue
+        out.append((
+            extract.ExtractedDoc(
+                url=url,
+                title=f"{name} research guide",
+                body_text=body,
+                breadcrumbs=["Research Guides"],
+                word_count=len(body.split()),
+                schema_org_json=None,
+                last_modified=None,
+                rejection_reason=None,
+                # Authored as one short pointer, like a FAQ: the boilerplate
+                # floor that protects the crawl would drop every one of them.
+                min_chunk_tokens=0,
+            ),
+            classify.DocMetadata(
+                topic=TOPIC,
+                campus="oxford",
+                library=None,
+                audience=["student"],
+                featured_service=None,
+            ),
+        ))
+    return out
+
+
+def load() -> "list[tuple[extract.ExtractedDoc, classify.DocMetadata]]":
+    """The Pipeline.extra_docs_fn entry point. Reads Postgres, no network."""
+    docs = to_classified()
+    logger.info("libguides: %d guide pointer(s) published", len(docs))
+    return docs
+
+
+def discovered(docs) -> "list[discover.DiscoveredUrl]":
+    return [discover.DiscoveredUrl(url=d.url, campus="oxford",
+                                   source="libguide")
+            for d, _ in docs]
+
+
+__all__ = ["build_body", "discovered", "load", "to_classified"]

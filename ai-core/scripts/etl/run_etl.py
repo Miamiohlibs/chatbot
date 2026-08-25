@@ -64,6 +64,7 @@ from scripts.etl import (  # noqa: E402  (sys.path mutation above)
     extract,
     gate,
     libanswers,
+    libguides,
     navigation,
     upsert,
 )
@@ -570,7 +571,8 @@ def _extra_documents() -> "list[tuple[extract.ExtractedDoc, classify.DocMetadata
     """
     docs: list = []
     for name, source in (("libanswers-api", libanswers.load),
-                         ("navigation", navigation.load)):
+                         ("navigation", navigation.load),
+                         ("libguides-db", libguides.load)):
         try:
             docs.extend(source())
         except Exception as exc:  # noqa: BLE001
