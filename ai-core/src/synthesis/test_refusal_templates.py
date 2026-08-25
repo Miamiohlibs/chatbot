@@ -211,3 +211,42 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+# --- a handoff must carry its address ------------------------------------
+#
+# Eight of the nine templates told the patron to use Ask Us and gave them no
+# way to get there. Over the beta that left 41 answers about the building --
+# chargers, a cafe, a lactation room, lost and found -- shipping with an
+# empty citation list, so the only thing offered was a name to go and find.
+
+
+def test_every_template_that_says_ask_us_gives_the_address() -> None:
+    from src.synthesis.refusal_templates import _TEMPLATES, RefusalContext
+    ctx = RefusalContext(
+        campus_display="Middletown",
+        staff_directory_url="https://www.lib.miamioh.edu/about/organization/staff/",
+        service_name="MakerSpace",
+        service_available_at="King Library",
+    )
+    for trigger, template in _TEMPLATES.items():
+        try:
+            rendered = render_refusal(trigger, ctx)
+        except KeyError:
+            rendered = render_refusal(trigger)
+        if "ask us" not in rendered.lower():
+            continue
+        assert "http" in rendered, (
+            f"{trigger} sends the patron to Ask Us without saying where "
+            f"that is: {rendered!r}")
+
+
+def test_a_template_with_its_own_link_is_not_given_a_second_one() -> None:
+    msg = render_refusal(RefusalTrigger.STAFF_PRIVACY)
+    assert msg.count("http") == 1, msg
+
+
+def test_copy_that_does_not_mention_ask_us_is_left_alone() -> None:
+    from src.synthesis.refusal_templates import _with_ask_us
+    assert _with_ask_us("Try again in a few minutes.") == (
+        "Try again in a few minutes.")

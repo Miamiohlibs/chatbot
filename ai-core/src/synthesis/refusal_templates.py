@@ -216,6 +216,33 @@ _TEMPLATES: dict[RefusalTrigger, str] = {
 }
 
 
+ASK_US_URL = "https://www.lib.miamioh.edu/research/research-support/ask/"
+"""Where "ask a librarian" actually goes.
+
+Eight of the nine refusal templates told the patron to use Ask Us and gave
+them no way to get there. Measured over the beta: 41 answers about the
+building -- chargers, a cafe, a lactation room, lost and found -- shipped
+with an empty citation list, so the one thing the bot did offer was a name
+the patron had to go and find for themselves.
+
+The operator's 2026-08-17 ruling is that an unsourced fact about the
+building goes to the front desk, AND that a page we do have is still given.
+A handoff with no address honours the first half and drops the second."""
+
+
+def _with_ask_us(message: str) -> str:
+    """Append the Ask Us address to copy that sends someone there.
+
+    Done at render time rather than in each template so a new template
+    cannot reintroduce the gap, and so the URL lives in exactly one place.
+    """
+    if "ask us" not in (message or "").lower():
+        return message
+    if "http" in message:                     # already carries its own link
+        return message
+    return f"{message} {ASK_US_URL}"
+
+
 def render_refusal(
     trigger: RefusalTrigger,
     context: Optional[RefusalContext] = None,
@@ -243,17 +270,18 @@ def render_refusal(
         # No placeholders for the scope-free templates; format() with
         # an empty dict is a no-op unless the template *did* have a
         # placeholder, in which case KeyError fires as designed.
-        return template.format()
+        return _with_ask_us(template.format())
 
     # Only pass non-None fields so the KeyError above actually fires
     # for missing fields rather than being masked by `None` values.
     kwargs = {
         k: v for k, v in context.__dict__.items() if v is not None
     }
-    return template.format(**kwargs)
+    return _with_ask_us(template.format(**kwargs))
 
 
 __all__ = [
+    "ASK_US_URL",
     "RefusalContext",
     "RefusalTrigger",
     "render_refusal",
