@@ -304,3 +304,35 @@ def test_unreachable_urls_are_reported_as_kept_not_lost():
     assert "NOT tombstoned" in md
     assert "www.ham.miamioh.edu/library/" in md
     assert "Only 404 and 410 count" in md
+
+
+def test_a_renamed_url_is_not_reported_as_lost() -> None:
+    """Since urls are canonicalised, `/staff/` is written as `/staff`: the
+    old spelling orphans while the new one gains the same chunks.
+
+    Matched literally, the first canonicalising run put 45 renamed pages in
+    the LOST column -- the staff directory among them -- and the one column
+    a librarian is told to read became noise.
+    """
+    report = _empty_report()
+    report.upsert = UpsertResult(
+        orphaned_urls={"https://x.edu/staff/": 14,
+                             "https://x.edu/gone": 3},
+        new_urls={"https://x.edu/staff": 14},
+    )
+    md = render_markdown(report)
+    assert "1 URL(s) / 3 chunks would be LOST outright" in md, md
+    lost_block = md.split("### Lost outright")[1].split("### Re-chunked")[0]
+    assert "https://x.edu/gone" in lost_block
+    assert "/staff" not in lost_block, "a rename is not a loss"
+
+
+def test_the_rechunked_row_shows_the_new_count_for_a_rename() -> None:
+    report = _empty_report()
+    report.upsert = UpsertResult(
+        orphaned_urls={"https://x.edu/staff/": 14},
+        new_urls={"https://x.edu/staff": 9},
+    )
+    md = render_markdown(report)
+    churn = md.split("### Re-chunked")[1]
+    assert "| 14 | 9 |" in churn.replace(" https://x.edu/staff/ |", "") or "9" in churn

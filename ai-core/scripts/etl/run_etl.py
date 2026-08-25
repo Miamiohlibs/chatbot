@@ -355,13 +355,17 @@ def run(
             # index, and surfaced separately in the diff so it is visible
             # rather than silent.
             if not _looks_deleted(err):
-                seen_urls.add(canonical or d.url)
+                seen_urls.add(extract.canonical_url(canonical or d.url))
                 report.unreachable_protected.append((d.url, err or "unknown"))
             continue
         report.fetched_url_count += 1
         # Use the post-redirect canonical URL when available -- otherwise
         # `/use/spaces/` and its target both end up indexed separately.
-        canon_url = canonical or d.url
+        # ONE IDENTITY PER PAGE. `/newspapers` and `/newspapers/` are the
+        # same LibGuides page and both were live in the index with three
+        # chunks each -- six chunks for one page, two urls a citation could
+        # carry, and two rows the tombstone step treats as unrelated.
+        canon_url = extract.canonical_url(canonical or d.url)
         seen_urls.add(canon_url)
         seen_for_allowlist.append((canon_url, 200, d.source, "text/html"))
 
@@ -409,7 +413,7 @@ def run(
                     )
                     continue
                 report.fetched_url_count += 1
-                canon_url = c2 or resolved
+                canon_url = extract.canonical_url(c2 or resolved)
                 seen_urls.add(canon_url)
                 seen_for_allowlist.append(
                     (canon_url, 200, d.source, "text/html")
@@ -443,6 +447,10 @@ def run(
             report.fetch_failures.append(("libanswers-api", str(exc)))
             extra = []
         for doc, meta in extra:
+            # Canonicalised on the doc itself, not just for the membership
+            # test: the chunker reads doc.url for every chunk's source_url,
+            # so a slash left here would reach the index anyway.
+            doc.url = extract.canonical_url(doc.url)
             if doc.url in seen_urls:
                 continue
             seen_urls.add(doc.url)

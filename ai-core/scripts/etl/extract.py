@@ -145,7 +145,38 @@ def strip_placeholder(text: str) -> str:
 
 
 def _norm_url(u: str) -> str:
+    """For COMPARING two urls. Lowercased, so never use it for storage."""
     return (u or "").rstrip("/").lower()
+
+
+def canonical_url(u: str) -> str:
+    """The one identity a page gets in the index.
+
+    `/newspapers` and `/newspapers/` are the same LibGuides page, and both
+    were in the live index with three chunks each -- six chunks for one
+    page, two source_urls a citation could carry, and two rows the
+    tombstone step treats as unrelated. 94 of the 244 indexed urls end in a
+    slash, so the pairing was waiting to happen again.
+
+    Verified before adopting: five slash/no-slash pairs across ham, lib,
+    mid and libguides all return 200 with identical bodies either way, so
+    dropping the slash costs nothing at fetch time either.
+
+    NOT lowercased, unlike `_norm_url`. LibGuides paths are case-sensitive
+    -- /ABCs_of_Library_Research and /ESP/home are real -- and folding case
+    here would turn a working citation into a 404.
+
+    The root path keeps its slash: https://host/ is the site, not a page
+    called "".
+    """
+    u = (u or "").strip()
+    if not u:
+        return u
+    # Only a trailing slash on a real path. `https://host/` is left alone.
+    head, sep, tail = u.partition("://")
+    if sep and "/" not in tail.rstrip("/"):
+        return u
+    return u.rstrip("/") or u
 
 
 # A LINK-LIST page's value is its DESTINATIONS, not its prose.

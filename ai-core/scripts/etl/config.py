@@ -30,6 +30,21 @@ _AI_CORE_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
 
 # --- Source domains ---------------------------------------------------------
 
+# CAMPUS INDEX PAGES, for hosts that publish no sitemap at all.
+#
+# Hamilton serves neither /sitemap.xml nor /robots.txt -- both 404 -- so the
+# campus fell back to a hand-maintained SEED_URLS list of 38 urls. Its own
+# library home page links to 67, which is both more and self-maintaining:
+# a page the librarians add shows up on the next run instead of when
+# somebody remembers to edit this file.
+#
+# Only consulted when the campus sitemap yields nothing, and only links on
+# the same host under the same path prefix are taken -- this is one hop off
+# a known-good index page, not a spider.
+CAMPUS_INDEX_PAGES: "Final[dict[str, str]]" = {
+    "hamilton": "https://www.ham.miamioh.edu/library/",
+}
+
 SITEMAPS: Final[dict[str, str]] = {
     # campus -> sitemap URL. discover.py iterates this dict.
     "oxford": "https://www.lib.miamioh.edu/sitemap.xml",

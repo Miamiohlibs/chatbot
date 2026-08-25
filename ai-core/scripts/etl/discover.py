@@ -18,7 +18,7 @@ import logging
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from typing import Optional
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import re
 
@@ -128,6 +128,61 @@ def _fetch_sitemap(sitemap_url: str) -> list[str]:
         return []
 
 
+# Junk that lives on every WordPress-shaped page and is not content.
+_INDEX_LINK_SKIP = re.compile(
+    r"/feed/?$|/comments/feed|[?&]|\.(css|js|png|jpe?g|gif|svg|ico|pdf|xml)$"
+    r"|/wp-|/tag/|/author/|/page/\d",
+    re.IGNORECASE,
+)
+
+
+def harvest_index_page(index_url: str) -> list[str]:
+    """Links from a campus library home page, for hosts with no sitemap.
+
+    Hamilton serves neither /sitemap.xml nor /robots.txt -- both 404 -- so
+    the campus ran on a hand-maintained list of 38 urls while its own home
+    page linked to 67.
+
+    ONE HOP, and only links on the same host under the same path prefix.
+    That bound is what keeps this from becoming a spider: the whole campus
+    website is not ours to crawl, the library's corner of it is.
+
+    Returns [] on any failure, so the caller still falls back to seeds.
+    """
+    try:
+        resp = requests.get(
+            index_url,
+            timeout=config.REQUEST_TIMEOUT_SECONDS,
+            headers={"User-Agent": config.USER_AGENT},
+            verify=urlparse(index_url).hostname not in config.TLS_SKIP_ALLOWLIST,
+        )
+        resp.raise_for_status()
+    except requests.RequestException as e:
+        logger.warning("index page fetch failed",
+                       extra={"url": index_url, "error": str(e)})
+        return []
+
+    base = urlparse(index_url)
+    prefix = base.path if base.path.endswith("/") else base.path + "/"
+    out: dict[str, None] = {}
+    for m in re.finditer(r"""href\s*=\s*["']([^"'>#]+)""", resp.text or "",
+                         re.IGNORECASE):
+        full = urljoin(index_url, m.group(1).strip())
+        p = urlparse(full)
+        if p.scheme not in ("http", "https"):
+            continue
+        if p.hostname != base.hostname:
+            continue
+        if not (p.path == base.path or p.path.startswith(prefix)):
+            continue
+        if _INDEX_LINK_SKIP.search(full):
+            continue
+        out[full] = None
+    logger.info("harvested index page",
+                extra={"url": index_url, "links": len(out)})
+    return list(out)
+
+
 def discover() -> list[DiscoveredUrl]:
     """Discover all URLs to crawl across all campus domains.
 
@@ -142,9 +197,16 @@ def discover() -> list[DiscoveredUrl]:
         sitemap_used = bool(urls)
 
         if not sitemap_used:
-            # Fall back to hand-curated seed URLs for this campus.
-            urls = config.SEED_URLS.get(campus, [])
-            source = "seed"
+            # No sitemap. Prefer the campus library's own index page over the
+            # hand-maintained list: a page the librarians add appears on the
+            # next run rather than when somebody remembers to edit config.
+            # The seeds are unioned in, not replaced -- they carry urls the
+            # home page does not link to.
+            index_url = getattr(config, "CAMPUS_INDEX_PAGES", {}).get(campus)
+            harvested = harvest_index_page(index_url) if index_url else []
+            seeds = list(config.SEED_URLS.get(campus, []))
+            urls = harvested + [u for u in seeds if u not in set(harvested)]
+            source = "index_page" if harvested else "seed"
             logger.info(
                 "sitemap empty/missing, using seed URLs",
                 extra={"campus": campus, "n_seeds": len(urls)},

@@ -297,6 +297,10 @@ def test_an_unreachable_url_stays_in_seen_urls_so_it_is_not_tombstoned(
     )
     run_etl.run(dry_run=True, pipeline=pipeline)
     seen = captured.get("seen", set())
-    assert "https://www.ham.miamioh.edu/library/" in seen, (
+    # Canonical spelling (no trailing slash) since 2026-08-25: one identity
+    # per page. The property under test is unchanged -- the unreachable page
+    # is still in seen_urls and so is still protected from tombstoning --
+    # and the chunks it protects are written under the same canonical url.
+    assert "https://www.ham.miamioh.edu/library" in seen, (
         "the unreachable Hamilton page would be tombstoned")
-    assert "https://www.lib.miamioh.edu/ok/" in seen
+    assert "https://www.lib.miamioh.edu/ok" in seen

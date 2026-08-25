@@ -212,9 +212,22 @@ def render_markdown(report: DiffReport) -> str:
                      f"here is the thing to catch.")
         lines.append("")
         new_by_url = getattr(report.upsert, "new_urls", None) or {}
+
+        # A RENAME IS NOT A LOSS.
+        #
+        # Since urls are canonicalised (2026-08-25), `/staff/` is written as
+        # `/staff`, and the old spelling orphans while the new one gains the
+        # same chunks. Matched literally, that run put 45 renamed pages in
+        # the LOST column -- including the whole staff directory -- and the
+        # one column a librarian is told to read became noise.
+        #
+        # So the comparison strips a trailing slash on both sides. It does
+        # nothing on a run with no renames in it.
+        _c = lambda u: (u or "").rstrip("/")  # noqa: E731
+        _new_canon = {_c(u): n for u, n in new_by_url.items()}
         # LOST = orphaned and gained nothing back. That is the column to read.
-        lost = [(u, n) for u, n in orphans if u not in new_by_url]
-        churn = [(u, n) for u, n in orphans if u in new_by_url]
+        lost = [(u, n) for u, n in orphans if _c(u) not in _new_canon]
+        churn = [(u, n) for u, n in orphans if _c(u) in _new_canon]
         lines.append(f"**{len(churn)} of these were merely re-chunked** "
                      f"(edited text: they appear in the new chunks too). "
                      f"**{len(lost)} URL(s) / "
@@ -238,7 +251,7 @@ def render_markdown(report: DiffReport) -> str:
         lines.append("| old | new | URL |")
         lines.append("|---:|---:|---|")
         for url, n in churn[:200]:
-            lines.append(f"| {n} | {new_by_url.get(url, 0)} | {url} |")
+            lines.append(f"| {n} | {_new_canon.get(_c(url), 0)} | {url} |")
         if len(churn) > 200:
             lines.append(f"| … | … | and {len(churn) - 200} more URL(s) |")
         lines.append("")

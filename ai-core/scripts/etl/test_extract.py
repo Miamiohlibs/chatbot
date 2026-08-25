@@ -559,3 +559,40 @@ def test_ordinary_pages_are_untouched() -> None:
             "Study rooms may be booked online.")
     assert not looks_like_placeholder(real)
     assert strip_placeholder(real) == real
+
+
+# --- one identity per page -----------------------------------------------
+#
+# `/newspapers` and `/newspapers/` are the same LibGuides page, and both were
+# live in the index with three chunks each: six chunks for one page, two urls
+# a citation could carry, and two rows the tombstone step treats as
+# unrelated. 94 of the 244 indexed urls end in a slash.
+
+
+def test_a_trailing_slash_is_not_a_different_page() -> None:
+    from scripts.etl.extract import canonical_url
+    assert (canonical_url("https://libguides.lib.miamioh.edu/newspapers/")
+            == canonical_url("https://libguides.lib.miamioh.edu/newspapers"))
+
+
+def test_case_is_preserved() -> None:
+    """LibGuides paths are case-sensitive. /ABCs_of_Library_Research and
+    /ESP/home are real, and folding case turns a working citation into a
+    404 -- which is why _norm_url, which lowercases, is for comparison
+    only."""
+    from scripts.etl.extract import canonical_url
+    u = "https://libguides.lib.miamioh.edu/ABCs_of_Library_Research"
+    assert canonical_url(u) == u
+
+
+def test_the_site_root_keeps_its_slash() -> None:
+    """https://host/ is the site, not a page called ""."""
+    from scripts.etl.extract import canonical_url
+    assert (canonical_url("https://libguides.lib.miamioh.edu/")
+            == "https://libguides.lib.miamioh.edu/")
+
+
+def test_empty_input_is_survivable() -> None:
+    from scripts.etl.extract import canonical_url
+    assert canonical_url("") == ""
+    assert canonical_url(None) is None or canonical_url(None) == ""

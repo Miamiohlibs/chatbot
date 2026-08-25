@@ -495,3 +495,65 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+# --- campuses with no sitemap -------------------------------------------
+#
+# Hamilton serves neither /sitemap.xml nor /robots.txt -- both 404 -- so the
+# campus ran on a hand-maintained list of 38 urls while its own library home
+# page linked to 67.
+
+_HAM = "https://www.ham.miamioh.edu/library/"
+
+_INDEX_HTML = """
+<a href="/library/about/">About</a>
+<a href="/library/about/hours/">Hours</a>
+<a href="/library/services/">Services</a>
+<a href="https://www.ham.miamioh.edu/library/my-library-account/">Account</a>
+<a href="/library/feed/">RSS</a>
+<a href="/library/comments/feed/">Comments</a>
+<a href="/library/primo-searchbox.css">stylesheet</a>
+<a href="/admissions/">Admissions</a>
+<a href="https://www.lib.miamioh.edu/">Oxford</a>
+<a href="/library/about/">About again</a>
+"""
+
+
+class _Resp:
+    status_code = 200
+
+    def __init__(self, text):
+        self.text = text
+
+    def raise_for_status(self):
+        return None
+
+
+def test_it_takes_the_library_links_and_nothing_else(monkeypatch) -> None:
+    monkeypatch.setattr(discover_mod.requests, "get",
+                        lambda *a, **k: _Resp(_INDEX_HTML))
+    got = discover_mod.harvest_index_page(_HAM)
+    assert "https://www.ham.miamioh.edu/library/about/" in got
+    assert "https://www.ham.miamioh.edu/library/services/" in got
+    # Off-prefix and off-host are not ours to crawl from here.
+    assert not any("/admissions" in u for u in got)
+    assert not any("www.lib.miamioh.edu" in u for u in got)
+    # Feeds and assets are not pages.
+    assert not any("feed" in u for u in got)
+    assert not any(u.endswith(".css") for u in got)
+
+
+def test_a_link_listed_twice_is_one_url(monkeypatch) -> None:
+    monkeypatch.setattr(discover_mod.requests, "get",
+                        lambda *a, **k: _Resp(_INDEX_HTML))
+    got = discover_mod.harvest_index_page(_HAM)
+    assert len(got) == len(set(got))
+
+
+def test_a_dead_index_page_falls_back_rather_than_raising(monkeypatch) -> None:
+    """The seeds are still there. Losing the index page must cost coverage,
+    never the run."""
+    def _boom(*a, **k):
+        raise discover_mod.requests.RequestException("ham cert")
+    monkeypatch.setattr(discover_mod.requests, "get", _boom)
+    assert discover_mod.harvest_index_page(_HAM) == []
