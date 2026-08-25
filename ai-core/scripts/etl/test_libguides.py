@@ -116,3 +116,56 @@ def test_a_short_subject_list_is_not_padded() -> None:
         "Music", "https://libguides.lib.miamioh.edu/c.php?g=22067", "",
         ["Music", "Musicology"])
     assert "more subject(s)" not in body
+
+
+# --- readable addresses ---------------------------------------------------
+
+
+class _Resp:
+    def __init__(self, text): self.text = text
+
+
+def _og(url):
+    return _Resp(f'<meta property="og:url" content="{url}" />')
+
+
+def test_a_c_php_url_is_replaced_by_the_friendly_one() -> None:
+    """LibGuide rows store what the API hands back: c.php?g=22058. That is
+    the address a patron would be shown, and it tells them nothing."""
+    out = libguides.friendly_url(
+        "https://libguides.lib.miamioh.edu/c.php?g=1053974",
+        get=lambda *a, **k: _og("https://libguides.lib.miamioh.edu/games-night"))
+    assert out == "https://libguides.lib.miamioh.edu/games-night"
+
+
+def test_the_escaped_ampersand_is_decoded() -> None:
+    """og:url is HTML, so its ampersands arrive escaped. Left as-is the
+    citation reads c.php?g=22072&amp;p=129894 and the p parameter is lost,
+    landing the patron on the wrong tab of the guide."""
+    out = libguides.friendly_url(
+        "https://libguides.lib.miamioh.edu/c.php?g=22072",
+        get=lambda *a, **k: _og(
+            "https://libguides.lib.miamioh.edu/c.php?g=22072&amp;p=129894"))
+    assert "&amp;" not in out
+    assert out.endswith("g=22072&p=129894")
+
+
+def test_an_og_url_pointing_elsewhere_is_ignored() -> None:
+    """A template artefact must not redirect a guide citation off-site."""
+    original = "https://libguides.lib.miamioh.edu/c.php?g=22058"
+    assert libguides.friendly_url(
+        original, get=lambda *a, **k: _og("https://example.com/")) == original
+
+
+def test_a_lookup_failure_keeps_the_working_address() -> None:
+    def _boom(*a, **k):
+        raise RuntimeError("libguides timed out")
+    original = "https://libguides.lib.miamioh.edu/c.php?g=22058"
+    assert libguides.friendly_url(original, get=_boom) == original
+
+
+def test_a_url_that_is_already_friendly_costs_no_request() -> None:
+    def _never(*a, **k):
+        raise AssertionError("should not have been fetched")
+    url = "https://libguides.lib.miamioh.edu/education"
+    assert libguides.friendly_url(url, get=_never) == url

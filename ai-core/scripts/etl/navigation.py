@@ -110,7 +110,13 @@ SOURCES: "tuple[NavigationSource, ...]" = (
         # Requested by Circulation 2026-08-12. The page they named,
         # www.lib.miamioh.edu/games, is a meta-refresh shim; this is what it
         # points at and what has the content.
-        url="https://libguides.lib.miamioh.edu/games-night/home",
+        #
+        # The guide root, not /home. Both serve the same page, and the
+        # operator confirmed 2026-08-25 that this is the link to hand out.
+        # Citing /home also left the root indexed from an older crawl with
+        # nothing producing it, so every run proposed tombstoning a URL that
+        # was perfectly alive.
+        url="https://libguides.lib.miamioh.edu/games-night",
         short_url="https://www.lib.miamioh.edu/games",
         title="Library Game Nights",
         covers=(

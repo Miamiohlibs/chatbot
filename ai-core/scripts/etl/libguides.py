@@ -33,6 +33,7 @@ WHERE THE DATA COMES FROM
 
 from __future__ import annotations
 
+import html
 import logging
 import os
 import re
@@ -132,6 +133,48 @@ def _rows() -> "list[tuple[str, str, str, list[str]]]":
         return []
 
 
+def friendly_url(url: str, get=None) -> str:
+    """The readable address for a guide, or `url` unchanged.
+
+    LibGuide rows store `c.php?g=22058`, which is what the API hands back.
+    That is the address a patron would be shown, and it tells them nothing
+    about where they are going. Every guide also has a friendly URL, and the
+    page announces it as og:url -- `/education`, `/games-night/home`.
+
+    It matters beyond looks: the crawl already indexes some guides under
+    their friendly URL, so publishing the c.php form would put the same
+    guide in the index twice under two identities.
+
+    One request per published guide -- about fifty on a nightly run. On any
+    failure the c.php form is kept, which still works.
+    """
+    if not url or "c.php" not in url:
+        return url
+    try:
+        import requests
+
+        get = get or requests.get
+        r = get(url, timeout=config.REQUEST_TIMEOUT_SECONDS,
+                headers={"User-Agent": config.USER_AGENT})
+        m = re.search(
+            r"""<meta[^>]+property=["']og:url["'][^>]*content=["']([^"']+)""",
+            r.text or "", re.I)
+        if not m:
+            return url
+        # og:url is HTML, so its ampersands arrive escaped. Left as-is the
+        # citation would read `c.php?g=22072&amp;p=129894` and the `p`
+        # parameter would be lost, landing the patron on the wrong tab.
+        found = html.unescape(m.group(1).strip())
+        # Only accept a LibGuides address: an og:url pointing anywhere else
+        # is a template artefact, not this guide.
+        if found.startswith("https://libguides.lib.miamioh.edu/"):
+            return found
+    except Exception as exc:  # noqa: BLE001
+        logger.info("libguides: keeping %s (og:url lookup failed: %s)",
+                    url, exc)
+    return url
+
+
 def build_body(name: str, url: str, description: str,
                subjects: "list[str]") -> Optional[str]:
     """The indexed text, or None if it is not safe or not useful to index."""
@@ -181,6 +224,11 @@ def build_body(name: str, url: str, description: str,
 def to_classified() -> "list[tuple[extract.ExtractedDoc, classify.DocMetadata]]":
     out = []
     for name, url, description, subjects in _rows():
+        # Resolve the readable address only for guides we will actually
+        # publish, so a course guide nobody can reach costs no request.
+        if build_body(name, url, description, subjects) is None:
+            continue
+        url = friendly_url(url)
         body = build_body(name, url, description, subjects)
         if body is None:
             continue
