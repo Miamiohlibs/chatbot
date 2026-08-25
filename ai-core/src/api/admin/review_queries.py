@@ -806,6 +806,13 @@ SCRIPT_MEDIAN_GAP_S = 5.0
 # whole history: at 12 characters 1,627 conversations look like repeats, at
 # 40 it is 609, and the ones it stops claiming are exactly the short common
 # questions.
+# How far apart two conversations must sit before they belong to separate
+# reading windows in sources_for_conversations. Comfortably wider than the
+# 10-minute pad on each side, so neighbouring windows do not overlap.
+_CLUSTER_SPLIT = timedelta(minutes=30)
+# Per-window row cap. Reached only by a genuinely dense window, and reported
+# rather than applied silently.
+_WINDOW_TAKE = 5000
 REPLAY_MIN_CHARS = 40
 
 # A conversation that ORIGINATES nothing. Every question in it was already
@@ -1168,14 +1175,64 @@ async def sources_for_conversations(db: Any, conversation_ids: list) -> dict:
     if not stamps:
         return {}
     pad = timedelta(minutes=10)
-    lo, hi = min(stamps) - pad, max(stamps) + pad
 
-    try:
-        msgs = await db.message.find_many(
-            where={"timestamp": {"gte": lo, "lte": hi}},
-            order={"timestamp": "asc"}, take=5000)
-    except Exception:  # noqa: BLE001
+    # ONE WINDOW PER CLUSTER, NOT ONE WINDOW OVER EVERYTHING.
+    #
+    # This used to take min(stamps) to max(stamps) as a single span and read
+    # it with take=5000. Ask about conversations from the 5th and the 25th
+    # and that span is twenty days -- far more than 5000 messages -- and the
+    # ascending sort meant the cap kept the OLDEST 5000 and silently dropped
+    # everything recent. Measured 2026-08-25: 260 ids in, 39 of them came
+    # back with no verdict at all, the examples all from the last few days.
+    #
+    # The direction of that loss is the dangerous one. No verdict means no
+    # testing tag, and no testing tag reads as a member of the public, so
+    # the wider the span asked about, the more our own scripted runs were
+    # counted as patrons.
+    #
+    # Runs are bursts minutes apart with hours of nothing between them, so
+    # the timeline is naturally clustered. Reading each cluster separately
+    # costs a few small queries instead of one enormous one, and nothing in
+    # between the clusters was ever needed.
+    sorted_stamps = sorted(stamps)
+    clusters: list = [[sorted_stamps[0], sorted_stamps[0]]]
+    for t in sorted_stamps[1:]:
+        if t - clusters[-1][1] > _CLUSTER_SPLIT:
+            clusters.append([t, t])
+        else:
+            clusters[-1][1] = t
+
+    msgs, seen_msg, truncated = [], set(), 0
+    for c_lo, c_hi in clusters:
+        try:
+            batch = await db.message.find_many(
+                where={"timestamp": {"gte": c_lo - pad, "lte": c_hi + pad}},
+                order={"timestamp": "asc"}, take=_WINDOW_TAKE)
+        except Exception:  # noqa: BLE001
+            batch = []
+        if len(batch) >= _WINDOW_TAKE:
+            # Never a silent cap: a truncated cluster is a cluster whose
+            # later conversations lost their run, which is exactly the bug
+            # above in miniature.
+            truncated += 1
+        for x in batch:
+            if x.id not in seen_msg:
+                seen_msg.add(x.id)
+                msgs.append(x)
+    if truncated:
+        logger.warning(
+            "sources_for_conversations: %d of %d time windows hit the %d-row "
+            "cap; conversations in those windows may be under-attributed",
+            truncated, len(clusters), _WINDOW_TAKE)
+    if not msgs:
         msgs = anchors
+
+    missing = set(ids) - {getattr(x, "conversationId", None) for x in msgs}
+    if missing:
+        # Belt and braces: whatever the windows missed, classify on its own
+        # rather than hand back nothing for it.
+        msgs.extend(a for a in anchors
+                    if getattr(a, "conversationId", None) in missing)
 
     window_ids = list({getattr(x, "conversationId", None) for x in msgs} - {None})
     try:
