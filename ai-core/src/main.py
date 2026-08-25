@@ -477,6 +477,21 @@ app.include_router(build_staff_test_router())
 from src.api.admin.killswitch_router import build_killswitch_router  # noqa: E402
 
 app.include_router(build_killswitch_router({}))
+
+# Corpus review, mounted the same way and for the same reason: the people
+# who know whether a page belongs in the index are not the people with a
+# shell on this box. Its own allowlist and passphrase (ETL_APPROVERS /
+# ETL_APPROVAL_PASSWORD), both fail-closed -- approving a corpus change and
+# taking the service offline are different authorities.
+from src.api.admin.etl_approval_router import (  # noqa: E402
+    build_etl_approval_router,
+)
+
+app.include_router(build_etl_approval_router({}))
+logging.info(
+    "Corpus review mounted at /admin/etl -- guarded by approver email + "
+    "passphrase; it records approval and never runs the apply itself."
+)
 logging.info(
     "Kill switch mounted STANDALONE at /admin/service -- independent of "
     "ADMIN_API_TOKEN and of SSO, guarded by operator email + passphrase."

@@ -195,6 +195,9 @@ NAV = (
     ("/admin/review", "Flagged", "flagged"),
     ("/admin/corrections/view", "Corrections", None),
     ("/admin/cost", "Cost", None),
+    # Corpus review sits beside Service because both are gates a colleague
+    # walks up to and operates, rather than reference they read.
+    ("/admin/etl", "Corpus review", None),
     ("/admin/service", "Service", None),
 )
 
