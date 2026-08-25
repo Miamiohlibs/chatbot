@@ -492,3 +492,70 @@ def test_real_article_text_still_extracts():
     out = extract(html, "https://www.lib.miamioh.edu/use/technology/printing/")
     assert out.rejection_reason is None
     assert "per page" in out.body_text
+
+
+# --- placeholder copy is not content -------------------------------------
+#
+# Six department pages ship with the theme's filler still in them, and eight
+# chunks of it reached the live index. It is worse than an empty page:
+# retrieval matches "about the department" against it happily, and the
+# synthesiser is handed Latin to answer from.
+#
+# Operator ruling 2026-08-25: never index it.
+
+_DEPT_PAGE = """<div class="main-content">
+<h1>About Us</h1>
+<p>This is a description of the work Steward &amp; Sustain department.
+Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod
+tempor incididunt ut labore et dolore magna aliqua.</p>
+<h2>Staff</h2>
+<ul>
+<li>Jacqueline Johnson: Head of Special Collections and Archives</li>
+<li>Office: 349A King Library</li>
+<li>Phone: (513) 529-2024</li>
+<li>Email: johnsoj@miamioh.edu</li>
+<li>Ani Karagianis: University Archivist</li>
+<li>Office: 350 King Library</li>
+<li>Email: karagia@miamioh.edu</li>
+</ul>
+</div><footer>site footer</footer>"""
+
+
+def test_filler_is_stripped_and_the_real_page_survives() -> None:
+    """The page is one Latin paragraph followed by seven real librarians.
+
+    Dropping it to be rid of the Latin would throw away the only place that
+    names them.
+    """
+    doc = extract(_DEPT_PAGE, "https://www.lib.miamioh.edu/about/departments/x/")
+    assert doc.rejection_reason is None
+    assert "Lorem ipsum" not in doc.body_text
+    assert "consectetur" not in doc.body_text
+    assert "This is a description of the work" not in doc.body_text
+    assert "Jacqueline Johnson" in doc.body_text, "the staff list must survive"
+    assert "johnsoj@miamioh.edu" in doc.body_text
+
+
+def test_a_page_that_is_only_filler_is_refused() -> None:
+    html = """<div class="main-content"><h1>About Us</h1>
+    <p>Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do
+    eiusmod tempor incididunt ut labore et dolore magna aliqua.</p>
+    </div><footer>f</footer>"""
+    doc = extract(html, "https://www.lib.miamioh.edu/about/departments/y/")
+    assert doc.rejection_reason is not None
+    assert "Lorem" not in (doc.body_text or "")
+
+
+def test_the_theme_stub_sentence_is_caught_too() -> None:
+    """It is English, so a Latin-only test would have let it through."""
+    from scripts.etl.extract import looks_like_placeholder
+    assert looks_like_placeholder(
+        "This is a description of the work Share & Showcase department.")
+
+
+def test_ordinary_pages_are_untouched() -> None:
+    from scripts.etl.extract import looks_like_placeholder, strip_placeholder
+    real = ("King Library is open 7:30am to 9:00pm today. "
+            "Study rooms may be booked online.")
+    assert not looks_like_placeholder(real)
+    assert strip_placeholder(real) == real

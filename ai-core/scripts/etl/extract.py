@@ -92,6 +92,57 @@ NO_EXTRACTABLE_TEXT = "no_extractable_text"
 # 553-byte stub. Both extract to nothing and they are not the same problem.
 SHELL_MIN_HTML_CHARS = 4000
 
+# PLACEHOLDER COPY IS NOT CONTENT.
+#
+# Six department pages ship with the theme's filler still in them -- "About
+# Us: This is a description of the work Steward & Sustain department. Lorem
+# ipsum dolor sit amet..." -- and eight chunks of it reached the live index.
+# It is worse than an empty page: retrieval matches "about the department"
+# against it happily, and the synthesiser is handed Latin to answer from.
+#
+# Operator ruling 2026-08-25: never index it. A page whose body is filler is
+# a page nobody has written yet, and having nothing is more honest than
+# having something shaped like an answer.
+#
+# STRIPPED, NOT REJECTED. The filler sits in its own paragraph and the rest
+# of the page is real: /about/departments/steward-sustain/ is one Latin
+# paragraph followed by seven librarians with their offices, phones and
+# addresses -- including the Head of Special Collections and Archives.
+# Dropping the page to be rid of the Latin would throw away the only place
+# that names them. What is left falls through to the ordinary too_short
+# check, so a page that was ONLY filler is still refused.
+#
+# Matched line by line on the extracted BODY, so a page that merely links to
+# a typography demo is unaffected. The last marker is the theme's own stub
+# sentence, which is English and would sail past a Latin-only test.
+PLACEHOLDER_TEXT = "placeholder_text"
+"""Rejection reason kept for a body that is filler and nothing else."""
+
+_PLACEHOLDER_RE = re.compile(
+    r"lorem\s+ipsum"
+    r"|dolor\s+sit\s+amet"
+    r"|consectetur\s+adipis"
+    r"|sed\s+do\s+eiusmod\s+tempor"
+    r"|this\s+is\s+a\s+description\s+of\s+the\s+work",
+    re.IGNORECASE,
+)
+
+
+def looks_like_placeholder(text: str) -> bool:
+    """Is this body the theme's filler rather than something a person wrote?"""
+    return bool(_PLACEHOLDER_RE.search(text or ""))
+
+
+def strip_placeholder(text: str) -> str:
+    """Drop the filler paragraphs, keep everything a person actually wrote."""
+    kept = [ln for ln in (text or "").splitlines()
+            if not _PLACEHOLDER_RE.search(ln)]
+    out = "\n".join(kept)
+    while "\n\n\n" in out:
+        out = out.replace("\n\n\n", "\n\n")
+    return out.strip()
+
+
 
 def _norm_url(u: str) -> str:
     return (u or "").rstrip("/").lower()
@@ -416,6 +467,17 @@ def extract(html: str, url: str, last_modified: Optional[str] = None) -> Extract
             rejection_reason="empty",
             redirect_to=find_redirect_target(html, url),
         )
+    if looks_like_placeholder(body_text):
+        body_text = strip_placeholder(body_text)
+        logger.info("stripped placeholder copy", extra={"url": url})
+        if not body_text:
+            return ExtractedDoc(
+                url=url, title=title, body_text="", breadcrumbs=[],
+                word_count=0, schema_org_json=None,
+                last_modified=last_modified,
+                rejection_reason=PLACEHOLDER_TEXT,
+                redirect_to=find_redirect_target(html, url),
+            )
     if len(body_text) < config.EXTRACT_MIN_BODY_CHARS:
         return ExtractedDoc(
             url=url, title=title, body_text="", breadcrumbs=[],
