@@ -36,6 +36,7 @@ from src.scope.aliases import (
     Campus,
     DOMAIN_TO_CAMPUS,
     LIBRARY_ALIASES,
+    SERVICE_ALIASES,
     LIBRARY_DISPLAY,
     LIBRARY_TO_CAMPUS,
     Library,
@@ -182,6 +183,19 @@ def resolve_scope(
 
     # 1. Library alias (most specific)
     lib_match = _longest_alias_match(haystack, LIBRARY_ALIASES)
+
+    # A named building beats a service bound to a different one. "does
+    # Rentschler have a MakerSpace" is a question ABOUT Rentschler; the
+    # MakerSpace is what is being asked about, not where. Without this the
+    # longest-match tie handed the scope to King and the bot answered about
+    # the wrong building instead of saying the MakerSpace is at King.
+    if lib_match in SERVICE_ALIASES:
+        building_only = {a: lib for a, lib in LIBRARY_ALIASES.items()
+                         if a not in SERVICE_ALIASES}
+        building_match = _longest_alias_match(haystack, building_only)
+        if building_match is not None:
+            lib_match = building_match
+
     if lib_match is not None:
         library: Library = LIBRARY_ALIASES[lib_match]
         lib_campus = LIBRARY_TO_CAMPUS[library]

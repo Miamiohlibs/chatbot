@@ -81,6 +81,29 @@ LIBRARY_DISPLAY: dict[Library, str] = {
 #
 # All keys are lowercased ASCII. The matcher lowercases the user input.
 
+# ALIASES THAT NAME A SERVICE OR A PERSON, NOT A BUILDING.
+#
+# These live in LIBRARY_ALIASES because naming one is usually a good signal
+# for which building to search -- there is only one MakerSpace and only one
+# University Archivist. But they are the OBJECT of a question, never its
+# subject, and when a user names an actual building as well, the building is
+# what they are asking about:
+#
+#     "does Rentschler have a MakerSpace"
+#
+# resolved to King/Oxford, because "makerspace" and "rentschler" are the same
+# length and the longest-match tie went the wrong way. The bot then answered
+# about the wrong building instead of saying no, it is at King. Asked four
+# times during the beta.
+#
+# So the resolver prefers a building alias over one of these when both are
+# present. Keep this set in sync with LIBRARY_ALIASES below.
+SERVICE_ALIASES: frozenset = frozenset({
+    "makerspace", "maker space", "the makerspace",
+    "university archivist", "the archivist", "archivist",
+})
+
+
 LIBRARY_ALIASES: dict[str, Library] = {
     # King Library (Oxford main building) -- the default if "the library"
     # is mentioned without context.
