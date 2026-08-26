@@ -139,6 +139,14 @@ async def get_conversation_history(
             # can land anywhere. getattr, because older rows predate the
             # column and a missing one must not break history.
             "cited_urls": list(getattr(msg, "citedUrls", None) or []),
+            # What the previous turn was ABOUT. A short follow-up has no
+            # library vocabulary of its own -- "and the Oxford one", "no I
+            # meant the one in Oxford" -- so classified fresh it scores
+            # below the out-of-scope floor and gets refused. The thread it
+            # belongs to is right here.
+            "intent": getattr(msg, "intent", None),
+            "scope_campus": getattr(msg, "scopeCampus", None),
+            "scope_library": getattr(msg, "scopeLibrary", None),
         }
         for msg in messages
     ]

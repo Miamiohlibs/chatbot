@@ -81,6 +81,26 @@ def _last_cited_urls(history: list) -> list:
     return []
 
 
+def _last_turn_context(history: list) -> dict:
+    """What the most recent ASSISTANT turn was about.
+
+    `{"intent": ..., "campus": ..., "library": ...}`, empty when there is
+    no prior assistant turn. Same reasoning as `_last_cited_urls`: kept off
+    the Responses-API history, which takes {role, content} and nothing else.
+    """
+    for entry in reversed(history or []):
+        if not isinstance(entry, dict):
+            continue
+        if (entry.get("role") or entry.get("type")) != "assistant":
+            continue
+        return {
+            "intent": entry.get("intent"),
+            "campus": entry.get("scope_campus"),
+            "library": entry.get("scope_library"),
+        }
+    return {}
+
+
 def _normalize_history_for_agent(
     history: list[dict],
     current_user_message: str,
@@ -272,6 +292,7 @@ async def handle_v2_message(
         session_origin_url=session_origin_url,
         conversation_history=normalized_history,
         last_cited_urls=_last_cited_urls(conversation_history or []),
+        last_turn=_last_turn_context(conversation_history or []),
     )
     # run_turn is SYNC and a turn takes seconds; calling it directly in
     # this async handler would block the whole event loop (every other

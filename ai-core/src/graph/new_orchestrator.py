@@ -96,6 +96,17 @@ class TurnRequest:
     conversation_history: list[dict] = field(default_factory=list)
     """Prior messages, OpenAI message format."""
 
+    last_turn: dict = field(default_factory=dict)
+    """What the previous assistant turn was about: intent, campus, library.
+
+    A short follow-up carries no library vocabulary of its own. "and the
+    Oxford one", "no I meant the one in Oxford", "that doesn't sound right"
+    all score below the out-of-scope floor when classified as if they were
+    the first thing anyone had said, and get refused -- after the bot had
+    just answered the question they follow up on. Measured 2026-08-26: four
+    of twelve multi-turn scenarios failed this way.
+    """
+
     last_cited_urls: list[str] = field(default_factory=list)
     """The links the PREVIOUS answer actually showed the patron.
 
@@ -407,6 +418,38 @@ def _run_turn(
         )
         bind_request_context(intent="subject_librarian",
                              margin=classification.margin)
+
+    # --- 2.024. A short reply is a follow-up, not a new question ---
+    #
+    # Runs before the other rescues because it is the only one that knows
+    # the turn has a history. See _is_context_follow_up for the four
+    # measured failures it exists for.
+    #
+    # It INHERITS the previous turn's intent rather than guessing a new one.
+    # The alternative -- picking some general intent -- would send "and the
+    # Oxford one" after an hours question somewhere that is not hours.
+    _last = getattr(request, "last_turn", None) or {}
+    if (not booking_flow
+            and _last.get("intent")
+            and _last["intent"] != "out_of_scope"
+            and classification.intent != _last["intent"]
+            and _is_context_follow_up(request.user_message, _last)):
+        log.info("follow-up: inheriting intent %r from the previous turn "
+                 "(classifier said %r)", _last["intent"], classification.intent)
+        classification = _dc_replace(
+            classification, intent=_last["intent"],
+            needs_clarification=False,
+        )
+        bind_request_context(intent=classification.intent,
+                             margin=classification.margin)
+        # Carry the scope too. "and the Oxford one" changes the campus, so
+        # the message still gets its say -- resolve_scope has already run on
+        # it and wins where it found something explicit.
+        if scope.source == "default":
+            _c, _l = _last.get("campus"), _last.get("library")
+            if _c:
+                scope = _dc_replace(scope, campus=_c, library=_l,
+                                    source="previous_turn")
 
     # --- 2.025. "Do you have <title>?" rescued from out_of_scope ---
     # A bare title carries no library vocabulary, so the stateless kNN can
@@ -5196,6 +5239,101 @@ def _research_guide_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
              "snippet": "Miami University Libraries — subject librarians"},
         ],
     )
+
+
+# --- a short reply is a follow-up, not a new question ---------------------
+#
+# Measured 2026-08-26, four of twelve multi-turn scenarios:
+#
+#   "what are the hours at Rentschler" -> answered
+#   "and the Oxford one"               -> find_resource, talked about Primo
+#
+#   "is there a makerspace at Rentschler" -> answered
+#   "no I meant the one in Oxford"        -> out_of_scope, REFUSED
+#
+#   "how long can I keep a laptop" -> answered
+#   "that doesn't sound right"     -> out_of_scope, REFUSED
+#
+# Each second turn was classified as if it were the first thing anyone had
+# said. On its own it carries no library vocabulary, so it lands under the
+# 0.50 floor and is refused -- immediately after the bot answered the
+# question it follows up on. To the patron the bot just stopped
+# understanding English.
+#
+# NARROW ON PURPOSE. It fires only when all of: there IS a previous turn,
+# the message is short, it carries no topic of its own, and the classifier
+# gave up (out_of_scope) or wandered. A message that names its own subject
+# is a new question and keeps normal routing.
+
+_FOLLOW_UP_MAX_WORDS = 8
+"""Word budget for a WEAK follow-up shape -- "and King?", "the other one".
+Short, because the shape alone is not much evidence."""
+
+_FOLLOW_UP_MAX_WORDS_EXPLICIT = 16
+"""Budget when the message says outright that it is about what was just
+said. "that doesn't sound right, I was told it was different" is ten words
+and was refused as out of scope by the eight-word rule -- an explicit
+disagreement is a follow-up at any reasonable length, and cutting it off
+mid-sentence was the arbitrary part."""
+
+# Shapes that name the previous turn outright. These are follow-ups whatever
+# their length, so they get the longer budget.
+_FOLLOW_UP_EXPLICIT_RE = re.compile(
+    r"\bi\s+meant\b"
+    r"|\bthat\s+(?:does\s?n[o']?t|is\s?n[o']?t|was\s?n[o']?t)\b"
+    r"|\bare\s+you\s+sure\b"
+    r"|\b(?:you\s+)?(?:said|told\s+me)\b"
+    r"|^\W*(?:no|actually|wait)\b",
+    re.IGNORECASE,
+)
+
+# Shapes that only make sense as a reply to something already said.
+_FOLLOW_UP_SHAPE_RE = re.compile(
+    r"^\W*(?:and|but|so|ok(?:ay)?|no|yes|yeah|nope|actually|wait|hmm)\b"
+    r"|^\W*(?:what|how)\s+about\b"
+    r"|\bi\s+meant\b"
+    r"|\bthat\s+(?:does\s?n[o']?t|is\s?n[o']?t|was\s?n[o']?t)\b"
+    r"|\b(?:the\s+)?(?:other|same|first|second|latter|former)\s+one\b"
+    r"|^\W*(?:what|how)\s+(?:about|of)\s+"
+    r"|\bare\s+you\s+sure\b"
+    r"|^\W*(?:the\s+)?\w+\s+one\b",
+    re.IGNORECASE,
+)
+
+# If the message names its own subject it is a new question, not a reply.
+# Reuses the find-help material test plus the library/campus aliases, so
+# there is no third vocabulary list to keep in sync.
+def _names_its_own_topic(message: str) -> bool:
+    m = message or ""
+    if _find_help_is_about_material(m):
+        return True
+    # A building or campus name is NOT a topic here. "and the Oxford one",
+    # "no I meant the one in Oxford" are refinements of the question already
+    # asked -- naming where, not naming a new subject. Treating an alias as
+    # a fresh topic was what kept the correction cases failing.
+    #
+    # Length and shape do the work instead: a message long enough to carry a
+    # real question is rejected by the word limit, and one that carries no
+    # follow-up shape never reaches here.
+    return False
+
+
+def _is_context_follow_up(message: str, last_turn: dict) -> bool:
+    """Is this a reply to the previous turn rather than a new question?"""
+    if not (last_turn or {}).get("intent"):
+        return False
+    m = " ".join((message or "").split())
+    if not m:
+        return False
+    explicit = bool(_FOLLOW_UP_EXPLICIT_RE.search(m))
+    budget = (_FOLLOW_UP_MAX_WORDS_EXPLICIT if explicit
+              else _FOLLOW_UP_MAX_WORDS)
+    if len(m.split()) > budget:
+        return False
+    if _names_its_own_topic(m):
+        return False
+    return explicit or bool(_FOLLOW_UP_SHAPE_RE.search(m))
+
 
 
 # --- "where is the link?" -------------------------------------------------

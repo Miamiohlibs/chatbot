@@ -43,7 +43,13 @@ from src.scope.aliases import (
 )
 
 
-ScopeSource = Literal["library_alias", "campus_alias", "session_origin", "default"]
+ScopeSource = Literal["library_alias", "campus_alias", "session_origin",
+                      "previous_turn", "default"]
+"""Where the scope came from.
+
+`previous_turn` is inherited by a short follow-up that named no building of
+its own -- "and the Oxford one", "are you sure" -- and only ever replaces
+`default`, so a message that DID name somewhere keeps what it said."""
 """Where the resolved scope came from -- logged so we can audit how often
 defaults fire vs explicit signals."""
 

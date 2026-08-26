@@ -5523,3 +5523,52 @@ def test_a_bare_link_request_is_not_a_guide_question() -> None:
     """The two short circuits sit next to each other; this one must reach
     the repeat, not the guides page."""
     assert _research_guide_answer("where is the link") is None
+
+
+# --- a short reply is a follow-up, not a new question --------------------
+#
+# Measured 2026-08-26, four of twelve multi-turn scenarios. Each second turn
+# was classified as if it were the first thing anyone had said, scored under
+# the out-of-scope floor, and was refused -- immediately after the bot had
+# answered the question it followed up on.
+
+from src.graph.new_orchestrator import _is_context_follow_up
+
+_LAST = {"intent": "hours", "campus": "hamilton", "library": "rentschler"}
+
+
+def test_the_four_measured_failures_are_recognised() -> None:
+    for message in ("and the Oxford one",
+                    "no I meant the one in Oxford",
+                    "that doesn't sound right, I was told it was different",
+                    "are you sure about that"):
+        assert _is_context_follow_up(message, _LAST), message
+
+
+def test_an_explicit_disagreement_is_a_follow_up_at_any_length() -> None:
+    """Ten words, refused by the eight-word rule. Cutting an explicit
+    disagreement off mid-sentence was the arbitrary part."""
+    assert _is_context_follow_up(
+        "that doesn't sound right, I was told it was different", _LAST)
+
+
+def test_a_real_question_keeps_normal_routing() -> None:
+    for message in ("what are the hours at Rentschler",
+                    "do you lend chargers",
+                    "where can I find books about totalitarianism",
+                    "how do I book a study room at King Library"):
+        assert not _is_context_follow_up(message, _LAST), message
+
+
+def test_with_no_previous_turn_it_never_fires() -> None:
+    """A first message that happens to start with "no" is not a follow-up
+    to anything."""
+    assert not _is_context_follow_up("and the Oxford one", {})
+    assert not _is_context_follow_up("no I meant Oxford", {"intent": None})
+
+
+def test_a_building_name_is_a_refinement_not_a_new_topic() -> None:
+    """Treating an alias as a fresh topic was what kept the correction
+    cases failing: "no I meant the one in Oxford" names WHERE, not what."""
+    assert _is_context_follow_up("no I meant the one in Oxford", _LAST)
+    assert _is_context_follow_up("and King?", _LAST)
