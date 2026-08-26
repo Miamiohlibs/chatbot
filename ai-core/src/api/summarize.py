@@ -23,13 +23,47 @@ class ChatSummaryRequest(BaseModel):
 
 
 class ChatSummaryResponse(BaseModel):
-    """Response model for chat summary."""
+    """Response model for chat summary.
+
+    TWO FIELDS, BECAUSE THE TICKET HAS TWO PLACES TO PUT THIS.
+
+    `summary` is the ticket SUBJECT and is capped by LibAnswers at 150
+    characters. `recap` is for the ticket BODY, where there is room to say
+    what the conversation actually covered.
+
+    They were one field until 2026-08-26, and that made one line do two
+    jobs. A real staff test that evening ran eleven turns -- a film studies
+    guide, a suicide-research topic, personal-vs-subject librarian, two
+    course codes -- and arrived at the librarian as "Film studies research
+    guide link". True, and the only thing a reader could see. The operator's
+    word for it was that it takes a part for the whole.
+    """
     summary: str
+    recap: str = ""
 
 
 # LibAnswers ticket QUESTION (subject) field caps at 150 chars; the ticket
 # form prepends a short "[AI] " marker (5 chars), so the summary gets almost
 # the whole budget. Cap a touch under 145 for a safety margin.
+RECAP_PROMPT = """You are writing the opening of a library help-desk ticket BODY, for a librarian who has not read the chat.
+
+Write a compact account of the WHOLE conversation, in at most 6 short lines. Cover every distinct thing the student raised, in the order they raised it, and say how each one ended.
+
+Format each line as:
+- <what they asked> -- <how it ended>
+
+Rules:
+- Every distinct topic gets a line, including the ones that went fine. The librarian is deciding where to start, and needs to know what NOT to repeat.
+- Say plainly when the bot could not answer, refused, or answered something adjacent to what was asked.
+- No preamble, no closing summary, no invented detail. If the chat is short, write fewer lines.
+
+Example:
+- Film studies research guide -- named the guide but never gave the link, asked twice
+- Research on suicide -- pointed at Primo and the subject librarian
+- Personal Librarian vs subject librarian -- bot said it could not tell them who theirs is
+- Course codes CSE 485 and PSY 201 -- gave the right subject librarian for each"""
+
+
 SUBJECT_CHAR_LIMIT = 140
 
 
@@ -94,6 +128,7 @@ Write ONE line, at most ~130 characters (about 20 words):
 - Lead with what the student STILL NEEDS: the question the bot did not resolve, or the point where its answer was wrong, partial, or a refusal.
 - Keep the specifics a librarian needs to act -- subject, building, course, date, item, campus.
 - LEAVE OUT anything the bot already handled. If the student asked four things and three were answered, name only the fourth.
+- If MORE THAN ONE thing is unresolved, name them all, separated by "; ". Picking one and dropping the others is how a librarian ends up solving the smaller problem. Two or three is normal; if there are more than three, name the three that cost the student the most.
 - If nothing went wrong and nothing is unresolved, just name what the student was working on. Do NOT invent a problem or a sticking point.
 
 No preamble, no "the user asked", no full sentence, no trailing period.
@@ -102,7 +137,10 @@ Examples:
 - Chat covers hours (answered), then fails to find a peer-reviewed article -> "Peer-reviewed articles on insomnia and academic performance"
 - Chat books a room fine, then bot cannot say if the room has a projector -> "Whether King group study rooms have projectors"
 - Chat where everything was answered -> "Renewing OhioLINK books"
-- Bot gave a wrong loan period and the student pushed back -> "Reserve textbook loan period -- bot's answer contradicted by student\""""
+- Bot gave a wrong loan period and the student pushed back -> "Reserve textbook loan period -- bot's answer contradicted by student"
+- Two things left hanging in one chat -> "Film studies guide link; whether a Personal Librarian is assigned\""""
+
+
 
         messages = [
             SystemMessage(content=system_prompt),
@@ -115,11 +153,40 @@ Examples:
             ),
         ]
 
-        # Generate summary using async invoke (matching system pattern)
-        response = await llm.ainvoke(messages)
-        summary = _fit_subject(response.content.strip())
+        # Both calls at once. They read the same transcript and neither
+        # depends on the other, so serialising them would only make the
+        # librarian wait twice.
+        import asyncio
 
-        return ChatSummaryResponse(summary=summary)
+        recap_messages = [
+            SystemMessage(content=RECAP_PROMPT),
+            HumanMessage(
+                content=(
+                    "Full conversation, oldest message first:\n"
+                    f"{request.chatHistory}\n\n"
+                    "What the conversation covered, and how each part ended:"
+                )
+            ),
+        ]
+        subject_res, recap_res = await asyncio.gather(
+            llm.ainvoke(messages),
+            llm.ainvoke(recap_messages),
+            return_exceptions=True,
+        )
+
+        if isinstance(subject_res, BaseException):
+            raise subject_res
+        summary = _fit_subject(subject_res.content.strip())
+
+        # A recap that failed must not cost the subject. The subject is what
+        # the ticket cannot be filed without; the recap is an improvement on
+        # top of it, and an outage on one call should degrade to what we had
+        # before rather than to nothing.
+        recap = ""
+        if not isinstance(recap_res, BaseException):
+            recap = recap_res.content.strip()
+
+        return ChatSummaryResponse(summary=summary, recap=recap)
         
     except Exception as e:
         raise HTTPException(

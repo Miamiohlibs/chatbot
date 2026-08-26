@@ -92,8 +92,21 @@ const TicketWidget = () => {
       // Short marker only ("[AI] "), so almost all of the 150-char subject
       // budget goes to the actual summary instead of a long banner.
       setQuestion((prev) =>
-  `${prev ? `${prev.trim()}\n\n` : ''}[AI] ${data.summary ?? ''}`
-);
+        `${prev ? `${prev.trim()}\n\n` : ''}[AI] ${data.summary ?? ''}`
+      );
+
+      // The subject is capped at 150 characters by LibAnswers, so it can
+      // only carry what is still unresolved. The recap goes where there is
+      // room for the rest -- an eleven-turn chat reached a librarian as one
+      // line about a film studies link, and everything else in it was
+      // invisible (operator, 2026-08-26).
+      if (data.recap) {
+        setDetails((prev) =>
+          prev.includes('--- What the chat covered ---')
+            ? prev
+            : `${prev ? `${prev.trim()}\n\n` : ''}--- What the chat covered ---\n${data.recap}`
+        );
+      }
     } catch (error) {
       console.error('Error generating summary:', error);
       alert('Failed to generate summary. Please enter your question manually. ERROR: ' + error);

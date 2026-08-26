@@ -1,97 +1,71 @@
-"""The ticket subject line handed to a librarian.
+"""What the ticket's AI Summary is allowed to leave out.
 
-This one line is what a librarian reads before deciding what to do with a
-ticket, and it lands in LibAnswers' QUESTION field, which truncates at
-150 characters. Both properties are load-bearing: too long and it is cut
-mid-word in their queue, wrong content and they re-read a transcript the
-summary was supposed to spare them.
+A real staff test on 2026-08-25 ran eleven turns -- a film studies guide,
+a suicide-research topic, personal-vs-subject librarian, two course codes --
+and reached the librarian as one line: "Film studies research guide link".
+True, and the only thing a reader could see. The operator's word for it was
+that it takes a part for the whole.
+
+The subject line cannot be the fix on its own: LibAnswers caps it at 150
+characters, and eleven turns do not fit. So the endpoint returns two things
+now, and these tests are about both.
 """
+
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
-_HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(_HERE.parent.parent))
-
-from src.api import summarize as S  # noqa: E402
+import src.api.summarize as S
 
 
-# --- subject fitting -----------------------------------------------------
+def test_the_response_carries_a_recap_as_well_as_a_subject() -> None:
+    r = S.ChatSummaryResponse(summary="s", recap="- a -- b")
+    assert r.summary == "s"
+    assert r.recap == "- a -- b"
 
 
-def test_a_short_subject_is_left_alone():
-    assert S._fit_subject("Renewing OhioLINK books") == "Renewing OhioLINK books"
+def test_a_missing_recap_is_not_an_error() -> None:
+    """The subject is what a ticket cannot be filed without. A recap that
+    failed to generate degrades to what we had before, not to nothing."""
+    assert S.ChatSummaryResponse(summary="s").recap == ""
 
 
-def test_whitespace_is_collapsed():
-    assert S._fit_subject("  two   lines\nof  text ") == "two lines of text"
-
-
-def test_a_long_subject_is_cut_at_a_word_boundary():
-    """LibAnswers showed "...library hours, leade" in the queue before
-    this -- a subject chopped mid-word reads as a broken ticket."""
-    text = ("Finding peer-reviewed articles about insomnia and academic "
-            "performance for a PSY 301 literature review due next Friday, "
-            "plus how to get the two that are only held at Hamilton")
-    assert len(text) > S.SUBJECT_CHAR_LIMIT, "precondition: long enough to cut"
-    out = S._fit_subject(text)
-    assert len(out) <= S.SUBJECT_CHAR_LIMIT + 1     # +1 for the ellipsis
-    assert out.endswith("…")
-    assert not out[:-1].endswith(" ")
-    # the last surviving word is whole
-    assert text.startswith(out[:-1])
-    assert text[len(out) - 1] in " " or len(out) - 1 == len(text)
-
-
-def test_trailing_punctuation_is_not_left_dangling_before_the_ellipsis():
-    out = S._fit_subject("word " * 40 + "trailing")
-    assert "…" in out
-    assert " …" not in out and ",…" not in out
-
-
-def test_empty_input_does_not_crash():
-    assert S._fit_subject("") == ""
-    assert S._fit_subject(None) == ""
-
-
-# --- what the prompt asks for -------------------------------------------
-#
-# The prompt is the whole behaviour of this endpoint, so its load-bearing
-# instructions are pinned here. Before 2026-08-10 it asked only for "the
-# user's main question(s)" and ended the user turn with "Subject:", which
-# produced a summary of the LAST exchange -- students routinely open with
-# something small, get it answered, then ask the thing they came for, and
-# that was the part the librarian never saw.
-
-
-def _prompt() -> str:
+def test_the_subject_prompt_asks_for_every_unresolved_thing() -> None:
+    """The eleven-turn chat had TWO unresolved threads -- the guide link and
+    who their Personal Librarian is -- and naming one of them is how a
+    librarian ends up solving the smaller problem."""
     import inspect
-    return inspect.getsource(S.summarize_chat)
+
+    src = inspect.getsource(S.summarize_chat)
+    assert "MORE THAN ONE" in src
+    assert '"; "' in src, "no separator specified for multiple items"
 
 
-def test_the_prompt_demands_the_whole_conversation():
-    p = _prompt()
-    assert "WHOLE conversation" in p
-    assert "oldest message first" in p, (
-        "the transcript needs an explicit orientation, or the model "
-        "anchors on whichever end it sees last"
-    )
+def test_the_recap_prompt_covers_what_went_fine_too() -> None:
+    """The librarian is deciding where to start and needs to know what NOT
+    to repeat, so a resolved topic still earns a line."""
+    assert "WHOLE conversation" in S.RECAP_PROMPT
+    assert "including the ones that went fine" in S.RECAP_PROMPT
+    assert "refused" in S.RECAP_PROMPT
 
 
-def test_the_prompt_asks_for_what_is_unresolved_not_a_table_of_contents():
-    p = _prompt()
-    assert "STILL NEEDS" in p
-    assert "LEAVE OUT anything the bot already handled" in p
+def test_the_recap_is_bounded() -> None:
+    """It goes in a ticket body a human reads, not an archive."""
+    assert "at most 6 short lines" in S.RECAP_PROMPT
 
 
-def test_the_prompt_forbids_inventing_a_problem():
-    """A chat that went fine must not be dressed up as a complaint --
-    librarians already fear the bot generates work for them."""
-    p = _prompt()
-    assert "Do NOT invent a problem" in p
+def test_the_subject_still_fits_the_libanswers_field() -> None:
+    """150 characters, minus the "[AI] " marker the form prepends."""
+    assert S.SUBJECT_CHAR_LIMIT <= 145
+    long = "Peer-reviewed articles on insomnia " * 20
+    out = S._fit_subject(long)
+    assert len(out) <= S.SUBJECT_CHAR_LIMIT + 1     # +1 for the ellipsis
+    assert not out.rstrip("…").endswith(" ")
 
 
-def test_the_length_budget_matches_the_libanswers_field():
-    assert S.SUBJECT_CHAR_LIMIT <= 145, "LibAnswers QUESTION caps at 150"
-    assert "~130 characters" in _prompt()
+def test_a_short_subject_is_left_exactly_as_written() -> None:
+    s = "Film studies guide link; whether a Personal Librarian is assigned"
+    assert S._fit_subject(s) == s
+
+
+def test_the_subject_is_never_cut_mid_word() -> None:
+    out = S._fit_subject("supercalifragilistic " * 30)
+    assert "supercalifragilisti…" not in out
