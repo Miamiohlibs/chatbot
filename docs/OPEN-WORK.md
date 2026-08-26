@@ -123,9 +123,50 @@ Recorded because each one nearly produced a false report:
 
 ---
 
+## 3b. Three things only a person can fix (2026-08-26)
+
+Each was found by running the bot against the live data, and none of them is
+a code change.
+
+**LibCal has Special Collections open "8:00pm to 4:00pm" on Fridays.** An
+am/pm slip against the 8:00am the other four weekdays carry. The bot repeated
+it verbatim until 2026-08-26; it now declines an interval that cannot be
+true, so those days read "hours not posted" to patrons instead. Two dates
+were already in the feed when this was found — 2026-08-28 and 2026-09-04,
+both Fridays, so it is a recurring entry, not a one-off. `data_health` checks
+14 days of every space nightly and names bad entries in the mail. **The
+calendar's owner has to edit LibCal.**
+
+**Hamilton has no History liaison, so "who is the history librarian at
+Hamilton" cannot be answered with a Hamilton name.** The campus-preference
+fix works — nursing at Middletown correctly surfaces Hamilton's Krista
+McDonald ahead of Oxford's Ginny Boehme — but preference cannot invent a
+person. The live liaisons page gives Hamilton exactly two liaisons: Mark
+Shores (Appalachian Studies, Communication Studies, Criminal Justice,
+Applied Social Research, Commerce) and Krista McDonald (Liberal Studies,
+Engineering Technology, Psychological Science, Civic and Regional
+Development, Community Arts). **Adding History there is a liaisons-page
+edit.**
+
+**The website contradicts itself on OhioLINK returns.** The circulation
+policies page says OhioLINK items go back to "the bookdrop inside or outside
+the library from which they were borrowed"; the Home Delivery page says "MUL
+and OhioLINK items may be returned to any of the libraries or book drops
+found on the Oxford campus or on the Regional Campuses", and that patrons in
+Ohio may return them to any OhioLINK member library. Both checked against the
+live pages 2026-08-26. ILL is unambiguous and strict (back to the Miami
+library that obtained it); it is OhioLINK that has two published answers.
+
+---
+
 ## 4. Not started
 
 - Re-run all 206 against production after the current commits deploy.
+- "who supports the Honors College?" is judged out of scope; "who is the
+  Honors College librarian?" answers correctly. The classifier keys on the
+  word "librarian" and does not know "supports". Found 2026-08-26, not fixed
+  — one phrasing, and widening an intent matcher is how the find-help menu
+  started taking questions that were not its.
 - The five corrections that never fire — either fix their matching or retire
   them; a mechanism that has never worked is worse than none, because it
   looks like coverage.
