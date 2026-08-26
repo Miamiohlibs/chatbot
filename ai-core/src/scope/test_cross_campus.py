@@ -230,3 +230,137 @@ class TestCrossCampusGuard:
             url_allowlist={_KING, _GH},
         )
         assert result.is_refusal
+
+
+# --- Layer 4: neither campus may be crowded out --------------------------
+
+from dataclasses import dataclass as _dc  # noqa: E402
+
+from src.retrieval.search import RetrievalRequest, search_kb  # noqa: E402
+
+
+class _LopsidedWeaviate:
+    """Stands in for the live collection, where Oxford outweighs the
+    regional campuses roughly ten to one.
+
+    Returns `limit` hits, taking Oxford first, exactly as the real hybrid
+    search did when measured: 19 of 25 places went to Oxford and
+    Middletown got 1.
+    """
+
+    def __init__(self):
+        self.calls = []
+
+    def hybrid_search(self, *, collection, query, where, alpha, limit,
+                      should_match=None):
+        allowed = _campus_values(where)
+        self.calls.append(allowed)
+        pool = (
+            [("oxford", i) for i in range(30)]
+            + [("middletown", i) for i in range(3)]
+        )
+        out = []
+        for campus, i in pool:
+            if campus not in allowed:
+                continue
+            out.append({
+                "chunk_id": f"{campus}-{i}", "source_url": f"https://x/{campus}/{i}",
+                "text": "laptop loan", "campus": campus, "library": "",
+                "topic": None, "featured_service": None, "score": 1.0,
+            })
+            if len(out) >= limit:
+                break
+        return out
+
+
+def _campuses_in(chunks):
+    from collections import Counter
+    return Counter(c.campus for c in chunks)
+
+
+class TestComparisonRetrieval:
+    def test_both_campuses_get_evidence(self):
+        wv = _LopsidedWeaviate()
+        res = search_kb(
+            RetrievalRequest(
+                query="laptop loan period",
+                scope=ScopeFilter(
+                    campus="middletown",
+                    library="gardner_harvey",
+                    also_campuses=("oxford",),
+                ),
+                k=10,
+            ),
+            weaviate=wv,
+            collection="C",
+        )
+        counts = _campuses_in(res.chunks)
+        assert counts["middletown"] >= 3, counts
+        assert counts["oxford"] >= 3, counts
+
+    def test_one_search_per_campus(self):
+        wv = _LopsidedWeaviate()
+        search_kb(
+            RetrievalRequest(
+                query="q",
+                scope=ScopeFilter(campus="middletown", also_campuses=("oxford",)),
+                k=10,
+            ),
+            weaviate=wv, collection="C",
+        )
+        assert len(wv.calls) == 2
+        assert {"middletown", "all"} in wv.calls
+        assert {"oxford", "all"} in wv.calls
+
+    def test_single_campus_still_makes_exactly_one_search(self):
+        """The ordinary turn must not pay for this."""
+        wv = _LopsidedWeaviate()
+        search_kb(
+            RetrievalRequest(
+                query="q", scope=ScopeFilter(campus="oxford", library="king"), k=10
+            ),
+            weaviate=wv, collection="C",
+        )
+        assert len(wv.calls) == 1
+
+    def test_smaller_campus_survives_truncation(self):
+        """Merge order matters, not just merge membership.
+
+        Anything downstream that trims evidence trims from the end. A
+        concatenated merge puts one campus entirely behind the other, so
+        a trim to the first k takes the whole second half of the
+        comparison -- so check the FRONT of the list, not the whole."""
+        wv = _LopsidedWeaviate()
+        res = search_kb(
+            RetrievalRequest(
+                query="q",
+                # Big campus FIRST -- the order that exposes the bug. With
+                # the small campus first, concatenation happens to look
+                # fine because it runs out of chunks before the cut.
+                scope=ScopeFilter(campus="oxford", also_campuses=("middletown",)),
+                k=10,
+            ),
+            weaviate=wv, collection="C",
+        )
+        head = _campuses_in(res.chunks[:6])
+        assert head["middletown"] >= 2 and head["oxford"] >= 2, head
+
+    def test_one_campus_failing_does_not_sink_the_turn(self):
+        class _HalfBroken(_LopsidedWeaviate):
+            def hybrid_search(self, **kw):
+                allowed = _campus_values(kw["where"])
+                if "oxford" in allowed:
+                    raise RuntimeError("boom")
+                return super().hybrid_search(**kw)
+
+        res = search_kb(
+            RetrievalRequest(
+                query="q",
+                scope=ScopeFilter(campus="middletown", also_campuses=("oxford",)),
+                k=10,
+            ),
+            weaviate=_HalfBroken(), collection="C",
+        )
+        assert res.error is None
+        assert res.chunks, "half an answer beats refusing outright"
+        assert set(_campuses_in(res.chunks)) == {"middletown"}

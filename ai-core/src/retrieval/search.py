@@ -19,12 +19,13 @@ playbook §8 (campus / library scope binding).
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Optional, Protocol
 
 from src.retrieval.scope_filter import (
     ScopeFilter,
     build_should_match,
+    campuses_for,
     build_where_clause,
 )
 from src.synthesis.corrections import EvidenceChunk
@@ -135,7 +136,7 @@ def _default_collection() -> str:
     return os.getenv("WEAVIATE_CHUNK_COLLECTION", "Chunk_current")
 
 
-def search_kb(
+def _search_one_campus(
     request: RetrievalRequest,
     *,
     weaviate: WeaviateLike,
@@ -223,6 +224,85 @@ def search_kb(
         raw_hit_count=len(hits),
         used_filter=where,
         error=None,
+    )
+
+
+
+def _interleave(runs: "list[list]") -> list:
+    """Round-robin merge, first-seen chunk_id wins.
+
+    Round-robin, not concatenate, because whatever truncates evidence
+    downstream truncates from the END. Concatenating would put the whole
+    second campus behind the whole first one, and a cut would take the
+    entire second half of the comparison with it -- the same failure
+    this whole change exists to fix, moved one step later.
+    """
+    merged, seen = [], set()
+    for i in range(max((len(r) for r in runs), default=0)):
+        for run in runs:
+            if i >= len(run):
+                continue
+            c = run[i]
+            if c.chunk_id in seen:
+                continue  # campus="all" chunks come back in every run
+            seen.add(c.chunk_id)
+            merged.append(c)
+    return merged
+
+
+def search_kb(
+    request: RetrievalRequest,
+    *,
+    weaviate: WeaviateLike,
+    collection: Optional[str] = None,
+) -> RetrievalResult:
+    """Scope-filtered hybrid search.
+
+    One search for the ordinary turn. For a question that named TWO
+    campuses, one search PER campus, merged round-robin.
+
+    A comparison cannot share a single k. Oxford has an order of
+    magnitude more corpus than the regional campuses, so one combined
+    search hands it nearly every slot: measured on the live collection,
+    "laptop loan period at King and Gardner-Harvey" filled 19 of 25
+    places with Oxford and left Middletown with 1. The synthesizer would
+    then be able to describe only half of what it was asked to compare --
+    a quieter version of the bug, but the same bug.
+
+    Giving each campus its own k costs one extra hybrid query on the rare
+    comparison turn and nothing at all on every other turn.
+    """
+    campuses = campuses_for(request.scope)
+    if len(campuses) < 2:
+        return _search_one_campus(
+            request, weaviate=weaviate, collection=collection
+        )
+
+    runs, errors, raw = [], [], 0
+    for c in campuses:
+        # library=None deliberately: a comparison is campus-level, and
+        # the resolved library belongs to only one side of it.
+        per = replace(
+            request,
+            scope=replace(
+                request.scope, campus=c, also_campuses=(), library=None
+            ),
+        )
+        res = _search_one_campus(per, weaviate=weaviate, collection=collection)
+        if res.error:
+            errors.append(f"{c}: {res.error}")
+            continue
+        raw += res.raw_hit_count
+        runs.append(res.chunks)
+
+    return RetrievalResult(
+        chunks=_interleave(runs),
+        raw_hit_count=raw,
+        used_filter=build_where_clause(request.scope),
+        # Only a total failure is an error. One campus answering is a
+        # worse answer, not a broken one, and refusing outright would be
+        # a regression against the single-campus behaviour we had.
+        error="; ".join(errors) if errors and not runs else None,
     )
 
 

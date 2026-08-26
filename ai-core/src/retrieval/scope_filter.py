@@ -93,7 +93,7 @@ def _and(*operands: dict) -> dict:
     return {"operator": "And", "operands": list(operands)}
 
 
-def _campuses_for(scope: ScopeFilter) -> list:
+def campuses_for(scope: ScopeFilter) -> list:
     """Campuses this query may draw from, primary first, deduplicated."""
     out = [scope.campus]
     for c in getattr(scope, "also_campuses", ()) or ():
@@ -120,7 +120,7 @@ def build_where_clause(scope: ScopeFilter) -> dict:
         # Campus: chunk must be on the user's campus OR be tagged "all"
         # (university-wide content -- Adobe, NYT subscription, etc.).
         _or(
-            *[_eq_text("campus", c) for c in _campuses_for(scope)],
+            *[_eq_text("campus", c) for c in campuses_for(scope)],
             _eq_text("campus", "all"),
         ),
     ]
@@ -137,7 +137,7 @@ def build_where_clause(scope: ScopeFilter) -> dict:
     # accomplishes nothing while this narrowing stands. A comparison is a
     # campus-level question; let the campus clause carry it and let
     # ranking pick the buildings.
-    if scope.library is not None and not _campuses_for(scope)[1:]:
+    if scope.library is not None and not campuses_for(scope)[1:]:
         clauses.append(
             _or(
                 _eq_text("library", scope.library),
@@ -167,6 +167,7 @@ def build_should_match(scope: ScopeFilter) -> Optional[dict]:
 
 __all__ = [
     "ScopeFilter",
+    "campuses_for",
     "build_should_match",
     "build_where_clause",
 ]
