@@ -737,3 +737,70 @@ def test_department_inboxes_are_still_not_individuals() -> None:
     assert "speccoll@miamioh.edu" in result.answer.answer, (
         "public group inboxes are documented on the website and must not "
         "be redacted as if they were people")
+
+
+# --- a refusal keeps the page it found -----------------------------------
+#
+# "How do I access materials in Special Collections" was answered with Ask
+# Us alone while spec.lib.miamioh.edu/home/visiting sat in the evidence
+# (eval 2026-08-26, sc_access_request). Four of the eval's seven "refused
+# something answerable" cases were this: not a missing fact, a discarded
+# destination.
+#
+# Handing over the page is NOT asserting what is on it, which is the line
+# the operator drew on 2026-08-17. The bot still declines to state the
+# fact; it says where to look.
+
+
+def _ev_urls(*urls):
+    return [_Ev("text", source_url=u) for u in urls]
+
+
+def test_a_self_flagged_refusal_offers_the_page_it_found() -> None:
+    out = SynthesizerOutput(answer="", citations=[], confidence="low")
+    result = process_synthesizer_output(
+        out, scope_campus="oxford", url_allowlist=set(),
+        service_unavailable_trigger=None,
+        evidence=_ev_urls("https://spec.lib.miamioh.edu/home/visiting"),
+    )
+    if result.is_refusal:
+        assert "spec.lib.miamioh.edu/home/visiting" in result.refusal.message
+
+
+def test_a_cross_campus_refusal_offers_nothing() -> None:
+    """The evidence is for the WRONG campus. Offering it would hand over
+    exactly what went wrong."""
+    from src.synthesis.post_processor import _closest_urls
+
+    assert _closest_urls(RefusalTrigger.CROSS_CAMPUS_MISMATCH,
+                         _ev_urls("https://x.edu/hamilton")) == []
+
+
+def test_a_fabricated_citation_refusal_offers_nothing() -> None:
+    """The url itself is the problem there."""
+    from src.synthesis.post_processor import _closest_urls
+
+    assert _closest_urls(RefusalTrigger.CITATION_INVALID,
+                         _ev_urls("https://x.edu/made-up")) == []
+
+
+def test_with_no_evidence_the_refusal_is_unchanged() -> None:
+    from src.synthesis.post_processor import _closest_urls, _with_closest
+
+    assert _closest_urls(RefusalTrigger.MODEL_SELF_FLAGGED, []) == []
+    assert _with_closest("no answer", []) == "no answer"
+
+
+def test_it_is_bounded() -> None:
+    from src.synthesis.post_processor import _closest_urls
+
+    many = _ev_urls(*[f"https://x.edu/{i}" for i in range(10)])
+    assert len(_closest_urls(RefusalTrigger.MODEL_SELF_FLAGGED, many)) <= 3
+
+
+def test_duplicates_are_shown_once() -> None:
+    from src.synthesis.post_processor import _closest_urls
+
+    dup = _ev_urls("https://x.edu/a", "https://x.edu/a", "https://x.edu/b")
+    assert _closest_urls(RefusalTrigger.MODEL_SELF_FLAGGED, dup) == [
+        "https://x.edu/a", "https://x.edu/b"]

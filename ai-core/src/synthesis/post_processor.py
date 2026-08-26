@@ -126,6 +126,21 @@ class Refusal:
     message: str
     failures: list[ValidationFailure] = field(default_factory=list)
 
+    closest_urls: list = field(default_factory=list)
+    """Pages retrieval DID find, when the answer had to be withdrawn.
+
+    A refusal used to discard them and offer Ask Us alone. That is right
+    when retrieval found nothing, and wrong when it found the page the
+    patron was asking about: "how do I access materials in Special
+    Collections" was answered with Ask Us while
+    spec.lib.miamioh.edu/home/visiting sat in the evidence (eval
+    2026-08-26, sc_access_request).
+
+    Handing over the page is NOT the same as asserting what is on it --
+    which is the line the operator drew on 2026-08-17. The bot still does
+    not state an undocumented fact; it says where to look.
+    """
+
 
 @dataclass(frozen=True)
 class PostProcessorResult:
@@ -555,13 +570,58 @@ def process_synthesizer_output(
     return PostProcessorResult(
         refusal=Refusal(
             trigger=primary,
-            message=render_refusal(primary, context),
+            message=_with_closest(render_refusal(primary, context),
+                                  _closest_urls(primary, evidence)),
             failures=failures,
+            closest_urls=_closest_urls(primary, evidence),
         )
     )
 
 
 # --- Helpers ---------------------------------------------------------------
+
+
+def _with_closest(message: str, urls: list) -> str:
+    """Append the pages we did find, phrased as a place to look.
+
+    Wording matters here. "The closest page I have" is not a claim about
+    what the page says -- the bot is still declining to state the fact. It
+    is the difference between an unhelpful dead end and a starting point.
+    """
+    if not urls:
+        return message
+    if len(urls) == 1:
+        return f"{message}\n\nThe closest page I have is {urls[0]}"
+    listed = "\n".join(f"- {u}" for u in urls)
+    return f"{message}\n\nThe closest pages I have:\n{listed}"
+
+
+
+# Triggers where handing over the retrieved page is right. Deliberately not
+# all of them: a cross-campus mismatch means the evidence is for the WRONG
+# campus, and a fabricated citation means the url itself is the problem --
+# offering either would be handing over exactly what went wrong.
+_URLS_STILL_USEFUL = frozenset({
+    RefusalTrigger.MODEL_SELF_FLAGGED,
+    RefusalTrigger.NO_RESULTS,
+    RefusalTrigger.LOW_CONFIDENCE,
+})
+
+
+def _closest_urls(trigger: RefusalTrigger, evidence: Optional[list],
+                  limit: int = 3) -> list:
+    """Source urls from the evidence, for refusals where they still help."""
+    if trigger not in _URLS_STILL_USEFUL or not evidence:
+        return []
+    out: list = []
+    for chunk in evidence:
+        url = (getattr(chunk, "source_url", "") or "").strip()
+        if url and url not in out:
+            out.append(url)
+        if len(out) >= limit:
+            break
+    return out
+
 
 
 def _refusal_context_for(
