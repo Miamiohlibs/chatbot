@@ -142,6 +142,29 @@ pre{white-space:pre-wrap;word-break:break-word;overflow-wrap:break-word;
   background:#f3f4f6;padding:.5rem .6rem;border-radius:6px;margin:.4rem 0;
   font-size:.9rem;max-width:100%}
 .scroll-table{overflow-x:auto;-webkit-overflow-scrolling:touch;margin:.4rem 0 1rem}
+/* Rendered ETL diff. The report is markdown we generate, so it is shown as
+   markdown rather than as the raw text an editor would see. */
+.md{line-height:1.55}
+.md h2,.md h3,.md h4{margin:1.4rem 0 .5rem;line-height:1.25}
+.md h2{font-size:1.25rem}
+.md h3{font-size:1.05rem}
+.md h4{font-size:.95rem;color:#555}
+.md p{margin:.5rem 0}
+.md ul{margin:.4rem 0 .8rem;padding-left:1.25rem}
+.md li{margin:.15rem 0}
+.md blockquote{margin:.7rem 0;padding:.55rem .9rem;border-left:3px solid #bfc7d6;
+  background:#f5f7fa;border-radius:0 3px 3px 0;color:#3d4557}
+.md code{background:#eef1f6;padding:.08rem .3rem;border-radius:2px;
+  font-size:.85em;word-break:break-all}
+.md a{word-break:break-all}
+.md .scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;margin:.5rem 0 1rem;
+  border:1px solid #dfe3ea;border-radius:3px}
+.md .scroll table{margin:0;width:auto;min-width:100%}
+.warnbox{border:1px solid #e0c088;background:#fdf6e8;border-radius:3px;
+  padding:.8rem 1rem;margin:1rem 0}
+.warnbox h2{margin:.1rem 0 .4rem;font-size:1.05rem}
+.warnbox ul{margin:.3rem 0 .5rem;padding-left:1.2rem}
+.hint{color:#5b6272;font-size:.88rem}
 .scroll-table table{margin:0;width:auto;min-width:100%}
 .msg{background:#fff;border:1px solid var(--line);border-radius:8px;
   padding:.85rem 1rem;margin:.7rem 0}

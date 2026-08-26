@@ -167,3 +167,86 @@ def test_post_reaches_the_handler_rather_than_422(client, diffs):
     assert r.status_code == 403, (
         f"expected the handler to refuse, got {r.status_code} -- a 422 means "
         f"FastAPI never called it")
+
+
+# --- rendering the diff --------------------------------------------------
+
+def test_the_diff_is_rendered_not_dumped(client):
+    """The report is markdown we generate. Showing it as raw text made the
+    reviewer read the source of a document instead of the document."""
+    r = client.get("/admin/etl")
+    assert "<table" in r.text
+    assert "<strong>3</strong>" in r.text
+    assert "## Summary" not in r.text, "raw markdown reached the page"
+
+
+def test_markup_in_a_page_title_cannot_become_live_html():
+    """The diff carries urls and titles harvested from the web. Escaping
+    happens before any markdown is interpreted, so a crawled page whose
+    title contains a tag renders as text on a page behind a login."""
+    out = R.render_markdown("| 1 | <script>alert(1)</script> |")
+    assert "<script>" not in out
+    assert "&lt;script&gt;" in out
+
+
+def test_a_guide_url_keeps_its_query_string():
+    """c.php guide urls carry an ampersand, and `&amp;` in an href IS the
+    ampersand -- dropping the escape would drop the `p` parameter and land
+    the reader on the wrong tab."""
+    out = R.render_markdown("| 1 | https://libguides.lib.miamioh.edu/c.php?g=1&p=2 |")
+    assert 'href="https://libguides.lib.miamioh.edu/c.php?g=1&amp;p=2"' in out
+
+
+# --- disagreeing with the diff -------------------------------------------
+
+def _reject(diffs, **over):
+    body = {"email": "a@miamioh.edu", "password": "correct horse",
+            "reason": "the events guide goes stale every semester",
+            "urls": "https://www.lib.miamioh.edu/events\nhttps://x.edu/two",
+            "diff_file": diffs.name, "diff_hash": gate.hash_diff_file(diffs)}
+    body.update(over)
+    return body
+
+
+def test_sending_it_back_records_who_and_why(client, diffs, monkeypatch):
+    monkeypatch.setattr(R, "_mail_rejection", lambda *a, **k: None)
+    r = client.post("/admin/etl/reject", data=_reject(diffs),
+                    follow_redirects=False)
+    assert r.status_code == 303
+    rec = R.rejection_of(diffs)
+    assert rec["by"] == "a@miamioh.edu"
+    assert "goes stale" in rec["reason"]
+    assert "https://www.lib.miamioh.edu/events" in rec["urls"]
+
+
+def test_sending_it_back_does_not_approve_it(client, diffs, monkeypatch):
+    """The whole point. A rejection must never satisfy the gate."""
+    monkeypatch.setattr(R, "_mail_rejection", lambda *a, **k: None)
+    client.post("/admin/etl/reject", data=_reject(diffs),
+                follow_redirects=False)
+    assert not gate.verify_gate(diffs).proceed
+
+
+def test_a_reason_is_required(client, diffs, monkeypatch):
+    monkeypatch.setattr(R, "_mail_rejection", lambda *a, **k: None)
+    r = client.post("/admin/etl/reject", data=_reject(diffs, reason="  "))
+    assert r.status_code == 400
+    assert R.rejection_of(diffs) is None
+
+
+def test_a_stranger_cannot_send_it_back(client, diffs, monkeypatch):
+    monkeypatch.setattr(R, "_mail_rejection", lambda *a, **k: None)
+    r = client.post("/admin/etl/reject",
+                    data=_reject(diffs, email="stranger@example.com"))
+    assert r.status_code == 403
+    assert R.rejection_of(diffs) is None
+
+
+def test_the_objection_is_shown_on_the_page(client, diffs, monkeypatch):
+    monkeypatch.setattr(R, "_mail_rejection", lambda *a, **k: None)
+    client.post("/admin/etl/reject", data=_reject(diffs),
+                follow_redirects=False)
+    page = client.get("/admin/etl").text
+    assert "a@miamioh.edu" in page
+    assert "goes stale" in page
+    assert "https://www.lib.miamioh.edu/events" in page
