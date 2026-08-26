@@ -319,6 +319,7 @@ def _resolve_subject_terms(subject: str, name: str) -> list[str]:
 
 
 _PHONE_BY_EMAIL: "Optional[dict[str, str]]" = None
+_CAMPUS_BY_EMAIL: "Optional[dict[str, str]]" = None
 
 
 def _phone_from_db(email: "Optional[str]") -> "Optional[str]":
@@ -353,6 +354,41 @@ def _phone_from_db(email: "Optional[str]") -> "Optional[str]":
     return _PHONE_BY_EMAIL.get(email.strip().lower())
 
 
+def _campus_from_db(email: "Optional[str]") -> "Optional[str]":
+    """Campus for this email from the Librarian table, or None.
+
+    The LibApps API carries no campus, and lookup_librarian's campus filter
+    is written as "drop this person if their campus differs" -- so with the
+    field empty the filter could never fire. "History - HC" was answered
+    with Oxford's subject librarian, because nothing downstream could tell
+    that Krista McDonald is at Hamilton and Jenny Presnell is not.
+
+    Same shape as _phone_from_db: cached per process, matched on email
+    (unique in both systems), and degrades to None so a missing campus
+    costs the filter and never the lookup.
+    """
+    global _CAMPUS_BY_EMAIL
+    if not email:
+        return None
+    if _CAMPUS_BY_EMAIL is None:
+        try:
+            async def _load(client):
+                return await client.librarian.find_many()
+            rows = _db(_load)
+            _CAMPUS_BY_EMAIL = {
+                str(r.email).strip().lower(): str(r.campus).strip()
+                for r in rows
+                if getattr(r, "email", None) and getattr(r, "campus", None)
+            }
+            logger.info("campus backfill: %d librarians have a campus",
+                        len(_CAMPUS_BY_EMAIL))
+        except Exception:  # noqa: BLE001 -- degrade, never fail the lookup
+            logger.warning("campus backfill unavailable", exc_info=True)
+            _CAMPUS_BY_EMAIL = {}
+    return _CAMPUS_BY_EMAIL.get(email.strip().lower())
+
+
+
 def _libguide_lib_to_dict(lib_entry: dict) -> dict:
     """Map a LibGuides API librarian dict to the bot's lookup_librarian shape.
 
@@ -377,7 +413,8 @@ def _libguide_lib_to_dict(lib_entry: dict) -> dict:
         # name + email, which read as the eval being wrong about what we can
         # do. Backfilled by email, which is unique in both systems.
         "phone": lib_entry.get("phone") or _phone_from_db(lib_entry.get("email")),
-        "campus": lib_entry.get("campus"),
+        "campus": (lib_entry.get("campus")
+                   or _campus_from_db(lib_entry.get("email"))),
         "profile_url": lib_entry.get("profile_url"),
         # Operator rule 2026-07-28: every person record says where it
         # came from, and the answer repeats it to the patron.
@@ -437,12 +474,25 @@ def _make_lookup_librarian() -> Callable[[dict], list[dict]]:
         out: list[dict] = []
         for lib in librarians:
             d = _libguide_lib_to_dict(lib)
-            # Optional campus filter (LibGuides API doesn't always tag
-            # campus; if we can't tell, include the librarian).
-            if campus and d.get("campus") and d["campus"] != campus:
-                continue
             if d.get("email"):
                 out.append(d)
+
+        # PREFER the asked-for campus, do not REQUIRE it.
+        #
+        # This was a drop-filter, and it never fired because the LibApps API
+        # carries no campus -- so "History - HC" was answered with Oxford's
+        # subject librarian. Now that campus is backfilled from the roster
+        # the filter would fire, and a plain drop is the wrong shape: most
+        # subjects have no regional liaison at all, so requiring Hamilton
+        # would return nobody where it used to return somebody.
+        #
+        # Preferring keeps both properties: a Hamilton question reaches
+        # Krista McDonald when she covers it, and still reaches the Oxford
+        # subject librarian when nobody regional does.
+        if campus:
+            same = [d for d in out if d.get("campus") == campus]
+            if same:
+                return same
         return out
 
     def lookup(filters: dict) -> list[dict]:
