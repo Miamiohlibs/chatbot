@@ -236,6 +236,7 @@ def process_synthesizer_output(
     *,
     scope_campus: str,
     url_allowlist: set[str],
+    also_campuses: "tuple[str, ...]" = (),
     service_unavailable_trigger: Optional[RefusalContext] = None,
     evidence: Optional[list] = None,
 ) -> PostProcessorResult:
@@ -531,7 +532,18 @@ def process_synthesizer_output(
                 )
             )
             continue
-        if c.campus == scope_campus or c.campus == "all":
+        # A question that named TWO campuses may cite from both. Without
+        # this the cross-campus guard rejected the other half by
+        # construction: "is the laptop loan different at King and
+        # Gardner-Harvey" resolved to Middletown, and every Oxford chunk --
+        # the half we could actually answer -- was thrown out as a scope
+        # violation. Asked seven times during the beta.
+        #
+        # Only campuses the PATRON named are admitted. This is not a
+        # loosening of the guard: a citation from a campus nobody mentioned
+        # is still wrong, and that is the failure the guard exists for.
+        if (c.campus == scope_campus or c.campus == "all"
+                or c.campus in (also_campuses or ())):
             continue
         failures.append(
             ValidationFailure(

@@ -57,6 +57,7 @@ class SynthesisRequest:
     question: str
     evidence: list[EvidenceChunk]
     scope_campus: str
+
     scope_library: Optional[str]
     corrections: list[ManualCorrection]
     url_allowlist: set[str]
@@ -69,6 +70,12 @@ class SynthesisRequest:
     intent: Optional[str] = None
     """Optional intent label from the kNN classifier. Threaded through
     for telemetry; not currently used in prompt construction."""
+
+    also_campuses: "tuple[str, ...]" = ()
+    """Other campuses the SAME question named, e.g. "is the laptop loan
+    different at King and Gardner-Harvey". Passed to the post-processor so
+    the cross-campus guard admits citations from both, instead of rejecting
+    half the answer as a scope violation."""
 
 
 @dataclass(frozen=True)
@@ -413,6 +420,7 @@ def synthesize(
         pp = process_synthesizer_output(
             SynthesizerOutput(answer="", citations=[], confidence="low"),
             scope_campus=request.scope_campus,
+            also_campuses=getattr(request, "also_campuses", ()),
             url_allowlist=request.url_allowlist,
             service_unavailable_trigger=request.service_unavailable,
         )
@@ -449,6 +457,7 @@ def synthesize(
     pp_result = process_synthesizer_output(
         parsed,
         scope_campus=request.scope_campus,
+        also_campuses=getattr(request, "also_campuses", ()),
         url_allowlist=request.url_allowlist,
         # Post-corrections bundle the synthesizer actually saw -> the
         # email-faithfulness check verifies against the same evidence.

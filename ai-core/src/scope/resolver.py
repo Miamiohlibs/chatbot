@@ -67,6 +67,21 @@ class Scope:
     library: Optional[Library]
     source: ScopeSource
 
+    also_campuses: "tuple[Campus, ...]" = ()
+    """Other campuses this ONE question also asked about.
+
+    "is the loan period for laptops different at King Library and the
+    Gardner-Harvey Library?" names two buildings on two campuses. A single
+    `campus` cannot hold that, so the longest alias won and the answer came
+    back about Middletown alone -- with a liaison directory link that has
+    nothing to do with laptops. Asked seven times during the beta.
+
+    Empty for the ordinary single-campus turn, so nothing downstream
+    changes shape unless a question really did name more than one place.
+    `campus` stays the primary: it is what the answer leads with, and what
+    a caller that ignores this field still gets right.
+    """
+
     @property
     def campus_display(self) -> str:
         return CAMPUS_DISPLAY[self.campus]
@@ -80,12 +95,19 @@ class Scope:
         """True if the user gave a clear scope signal (vs default fallback)."""
         return self.source in ("library_alias", "campus_alias")
 
+    @property
+    def all_campuses(self) -> "tuple[Campus, ...]":
+        """Every campus this turn may cite from, primary first."""
+        return (self.campus, *[c for c in self.also_campuses
+                               if c != self.campus])
+
     def as_filter(self) -> dict:
         """Serialize to the dict shape the retriever expects."""
         return {
             "campus": self.campus,
             "library": self.library,
             "source": self.source,
+            "also_campuses": list(self.also_campuses),
         }
 
 
@@ -150,6 +172,65 @@ def resolve_session_origin(origin_url: Optional[str]) -> Optional[Campus]:
     return DOMAIN_TO_CAMPUS.get(host.lower())
 
 
+
+def campuses_named(user_message: str) -> "tuple[Campus, ...]":
+    """Every campus the message names, in the order they appear.
+
+    A comparison question is a normal thing to ask -- "is the loan period
+    for laptops different at King Library and the Gardner-Harvey Library?"
+    -- and the resolver could only ever return one campus for it. The
+    longest alias won, which is arbitrary: it answered about Middletown
+    alone and said it had no information, while the Oxford half was
+    answerable.
+
+    Buildings and campus names both count, and both resolve to a campus.
+    Order matters and is the order of appearance, because the answer should
+    address them the way the patron asked.
+    """
+    hay = (user_message or "").lower()
+    if any(p in hay for p in BLOCKED_CAMPUS_PHRASES):
+        return ()
+
+    found: list = []
+    for alias, library in LIBRARY_ALIASES.items():
+        if alias in SERVICE_ALIASES:
+            continue
+        pos = _alias_position(hay, alias)
+        if pos is not None:
+            found.append((pos, LIBRARY_TO_CAMPUS[library]))
+    for alias, campus in CAMPUS_ALIASES.items():
+        pos = _alias_position(hay, alias)
+        if pos is not None:
+            found.append((pos, campus))
+
+    out: list = []
+    for _pos, campus in sorted(found):
+        if campus not in out:
+            out.append(campus)
+    return tuple(out)
+
+
+def _alias_position(haystack: str, alias: str) -> "Optional[int]":
+    """Where `alias` starts in `haystack` on word boundaries, else None.
+
+    Same boundary rule as _longest_alias_match -- "king" inside "looking"
+    is not a building.
+    """
+    start = 0
+    while True:
+        i = haystack.find(alias, start)
+        if i < 0:
+            return None
+        before_ok = i == 0 or not (haystack[i - 1].isalnum()
+                                   or haystack[i - 1] == "_")
+        end = i + len(alias)
+        after_ok = end >= len(haystack) or not (haystack[end].isalnum()
+                                                or haystack[end] == "_")
+        if before_ok and after_ok:
+            return i
+        start = i + 1
+
+
 def resolve_scope(
     user_message: str,
     session_origin_campus: Optional[Campus] = None,
@@ -179,6 +260,12 @@ def resolve_scope(
         Scope(campus='middletown', library=None, source='session_origin')
     """
     haystack = (user_message or "").lower()
+
+    # A question can name more than one place. Worked out once here and
+    # attached to whatever scope the rules below settle on, so the primary
+    # campus is chosen exactly as it always was and the extra campuses ride
+    # along -- a caller that ignores them behaves identically to before.
+    _named = campuses_named(user_message)
 
     # Suppress campus-alias matching when a known false-positive phrase is
     # present (e.g., "Hamilton Journal-News" -- the newspaper, not the
@@ -217,15 +304,17 @@ def resolve_scope(
                 campus_from_alias = CAMPUS_ALIASES[campus_match]
                 if campus_from_alias != lib_campus:
                     return Scope(
-                        campus=campus_from_alias,
-                        library=None,
-                        source="campus_alias",
-                    )
+            campus=campus_from_alias,
+            library=None,
+            source="campus_alias",
+            also_campuses=tuple(c for c in _named if c != campus_from_alias),
+        )
 
         return Scope(
             campus=lib_campus,
             library=library,
             source="library_alias",
+            also_campuses=tuple(c for c in _named if c != lib_campus),
         )
 
     # 2. Campus alias (no library narrow-down)
@@ -233,10 +322,11 @@ def resolve_scope(
         campus_match = _longest_alias_match(haystack, CAMPUS_ALIASES)
         if campus_match is not None:
             return Scope(
-                campus=CAMPUS_ALIASES[campus_match],
-                library=None,
-                source="campus_alias",
-            )
+            campus=CAMPUS_ALIASES[campus_match],
+            library=None,
+            source="campus_alias",
+            also_campuses=tuple(c for c in _named if c != CAMPUS_ALIASES[campus_match]),
+        )
 
     # 3. Session origin (regional-campus widget user)
     if session_origin_campus is not None:
@@ -244,6 +334,7 @@ def resolve_scope(
             campus=session_origin_campus,
             library=None,
             source="session_origin",
+            also_campuses=tuple(c for c in _named if c != session_origin_campus),
         )
 
     # 4. Default: Oxford, no specific library

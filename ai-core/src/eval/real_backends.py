@@ -1508,6 +1508,7 @@ def _make_search_kb() -> Callable[[str, dict], list[dict]]:
         scope = scope or {}
         sf = ScopeFilter(
             campus=scope.get("campus") or "oxford",
+            also_campuses=tuple(scope.get("also_campuses") or ()),
             # NOTE: the agent sometimes over-specifies library (e.g. passes
             # library="king" for a generic "how do I print" query). Many
             # service chunks carry library="" and would be hard-filtered

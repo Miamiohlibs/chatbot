@@ -1840,6 +1840,7 @@ def _run_turn(
         question=request.user_message,
         evidence=evidence,
         scope_campus=scope.campus,
+        also_campuses=tuple(getattr(scope, "also_campuses", ()) or ()),
         scope_library=scope.library,
         corrections=deps.load_corrections(),
         url_allowlist=deps.load_url_allowlist(),

@@ -169,6 +169,10 @@ def make_search_kb_tool(
     scope_with_feature = ScopeFilter(
         campus=scope.campus,
         library=scope.library,
+        # Carried so a question naming two campuses can retrieve from both.
+        # getattr, because callers build ScopeFilter directly in tests and
+        # the older shape has no such field.
+        also_campuses=tuple(getattr(scope, "also_campuses", ()) or ()),
         featured_service=_intent_to_featured(intent),
     )
 

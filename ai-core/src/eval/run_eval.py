@@ -790,7 +790,9 @@ def run_eval(
                         session_origin_campus=q.needs_session_origin,  # type: ignore[arg-type]
                     )
                     _scope = ScopeFilter(
-                        campus=_s.campus, library=_s.library
+                        campus=_s.campus, library=_s.library,
+                        also_campuses=tuple(
+                            getattr(_s, "also_campuses", ()) or ()),
                     )
                     deps = _build_real_deps(
                         classifier,

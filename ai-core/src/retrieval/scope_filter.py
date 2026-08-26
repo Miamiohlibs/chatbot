@@ -40,6 +40,15 @@ class ScopeFilter:
 
     campus: str
     library: Optional[str] = None
+    also_campuses: "tuple[str, ...]" = ()
+    """Other campuses the SAME question named, from Scope.also_campuses.
+
+    A comparison -- "laptop loan at King and Gardner-Harvey" -- has to be
+    able to retrieve from both, or half of it is unanswerable by
+    construction. Empty for the ordinary turn, and the where-clause is then
+    byte-identical to what it was.
+    """
+
     featured_service: Optional[str] = None
     """Optional intent->service mapping (filled by the agent before
     calling search_kb). When set, retrieval boosts chunks tagged with
@@ -84,6 +93,16 @@ def _and(*operands: dict) -> dict:
     return {"operator": "And", "operands": list(operands)}
 
 
+def _campuses_for(scope: ScopeFilter) -> list:
+    """Campuses this query may draw from, primary first, deduplicated."""
+    out = [scope.campus]
+    for c in getattr(scope, "also_campuses", ()) or ():
+        if c and c not in out:
+            out.append(c)
+    return out
+
+
+
 def build_where_clause(scope: ScopeFilter) -> dict:
     """Build the hard-filter portion of a retrieval query.
 
@@ -101,7 +120,7 @@ def build_where_clause(scope: ScopeFilter) -> dict:
         # Campus: chunk must be on the user's campus OR be tagged "all"
         # (university-wide content -- Adobe, NYT subscription, etc.).
         _or(
-            _eq_text("campus", scope.campus),
+            *[_eq_text("campus", c) for c in _campuses_for(scope)],
             _eq_text("campus", "all"),
         ),
     ]
@@ -109,7 +128,16 @@ def build_where_clause(scope: ScopeFilter) -> dict:
     # Library: hard-filter only if the user explicitly named one. A
     # null library means "any building on this campus" -- ranking
     # decides which surfaces. Same "all" escape hatch as campus.
-    if scope.library is not None:
+    #
+    # EXCEPT when the question named two campuses. "is the laptop loan
+    # different at King and Gardner-Harvey" resolves to ONE library --
+    # whichever alias matched longest -- and hard-filtering on it drops
+    # every chunk from the other building, which is exactly the half the
+    # patron asked us to compare. Widening the campus clause above
+    # accomplishes nothing while this narrowing stands. A comparison is a
+    # campus-level question; let the campus clause carry it and let
+    # ranking pick the buildings.
+    if scope.library is not None and not _campuses_for(scope)[1:]:
         clauses.append(
             _or(
                 _eq_text("library", scope.library),
