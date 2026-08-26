@@ -5421,3 +5421,105 @@ def test_it_does_not_swallow_the_neighbouring_questions() -> None:
                     "do you lend chargers",
                     "who is the nursing librarian"):
         assert _research_guide_answer(message) is None, message
+
+
+# --- "where is the link?" ------------------------------------------------
+#
+# A bare follow-up is a pronoun with no antecedent as far as the classifier
+# is concerned. "where is the link", asked straight after a correct film
+# studies answer, was classified interlibrary_loan on the strength of the
+# word "link" and confidently handed over the ILL url. A student acts on
+# that, which makes it worse than not knowing. Operator's staff test,
+# 2026-08-25.
+
+from src.graph.new_orchestrator import (
+    _is_bare_link_request,
+    _link_repeat_answer,
+)
+
+_PREV = ["https://libguides.lib.miamioh.edu/",
+         "https://www.lib.miamioh.edu/about/organization/liaisons/"]
+
+
+def test_the_bare_follow_up_repeats_the_previous_links() -> None:
+    result = _link_repeat_answer("where is the link", _PREV)
+    assert result is not None
+    answer, citations = result
+    assert "libguides.lib.miamioh.edu" in answer
+    assert [c["url"] for c in citations] == _PREV
+
+
+def test_with_nothing_to_repeat_it_declines() -> None:
+    """A first turn asking "what's the link" has no antecedent. Falling
+    through to normal routing is right; inventing a destination is not."""
+    assert _link_repeat_answer("where is the link", []) is None
+
+
+def test_a_question_that_names_its_own_topic_is_left_alone() -> None:
+    """This is what keeps it from swallowing its neighbours. "where is the
+    link to renew my books" is a real question, not a follow-up."""
+    for message in ("where is the link to renew my books",
+                    "what is the ILL link",
+                    "link to the film studies guide",
+                    "can I have the room booking link"):
+        assert _link_repeat_answer(message, _PREV) is None, message
+
+
+def test_it_does_not_swallow_other_short_circuits() -> None:
+    for message in ("where can I find books about totalitarianism?",
+                    "where is King Library",
+                    "what are the hours",
+                    "where is the makerspace"):
+        assert not _is_bare_link_request(message), message
+
+
+def test_the_wordings_people_actually_use() -> None:
+    for message in ("where is the link", "what's the link", "the link?",
+                    "link please", "can I have the link", "send me the link",
+                    "give me the url", "ok where is the link", "link"):
+        assert _is_bare_link_request(message), message
+
+
+def test_a_long_message_is_never_a_bare_follow_up() -> None:
+    assert not _is_bare_link_request(
+        "sorry could you please just send me the link one more time")
+
+
+def test_duplicate_links_are_shown_once() -> None:
+    answer, citations = _link_repeat_answer(
+        "the link?", ["https://a.edu/x", "https://a.edu/x", "https://b.edu/y"])
+    assert len(citations) == 2
+
+
+def test_it_is_bounded() -> None:
+    """A previous answer with many citations must not dump all of them."""
+    many = [f"https://a.edu/{i}" for i in range(12)]
+    _, citations = _link_repeat_answer("link please", many)
+    assert len(citations) <= 4
+
+
+def test_asking_for_a_guides_link_is_still_asking_for_the_guide() -> None:
+    """"film studies guide link" named no guide word the pattern
+    recognised, fell through, and was answered with the subject
+    librarian's phone number. The patron asked for a page and got a
+    person, twice in one chat."""
+    for message in ("film studies guide link",
+                    "link to the film studies guide",
+                    "nursing guide link"):
+        result = _research_guide_answer(message)
+        assert result is not None, message
+        answer, citations = result
+        assert citations, message
+
+
+def test_the_widened_pattern_still_leaves_other_guides_alone() -> None:
+    for message in ("guide dog policy", "tour guide",
+                    "can I book a guided tour",
+                    "what is your citation style guide"):
+        assert _research_guide_answer(message) is None, message
+
+
+def test_a_bare_link_request_is_not_a_guide_question() -> None:
+    """The two short circuits sit next to each other; this one must reach
+    the repeat, not the guides page."""
+    assert _research_guide_answer("where is the link") is None

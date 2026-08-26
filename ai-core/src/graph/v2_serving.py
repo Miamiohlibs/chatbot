@@ -59,6 +59,28 @@ def _extract_message(data: Any) -> str:
     return ""
 
 
+def _last_cited_urls(history: list) -> list:
+    """Links the most recent ASSISTANT turn showed the patron.
+
+    Deliberately not folded into `_normalize_history_for_agent`: that
+    function's output goes to the Responses API, which takes `{role,
+    content}` items, and extra keys there are a 400 waiting to happen.
+
+    Newest assistant turn only. A follow-up refers to the answer just
+    given, and reaching further back would let "where is the link" reply
+    with a url from three turns ago that the patron has forgotten.
+    """
+    for entry in reversed(history or []):
+        if not isinstance(entry, dict):
+            continue
+        role = entry.get("role") or entry.get("type")
+        if role != "assistant":
+            continue
+        urls = entry.get("cited_urls") or entry.get("citedUrls") or []
+        return [str(u) for u in urls if u]
+    return []
+
+
 def _normalize_history_for_agent(
     history: list[dict],
     current_user_message: str,
@@ -249,6 +271,7 @@ async def handle_v2_message(
         conversation_id=conversation_id,
         session_origin_url=session_origin_url,
         conversation_history=normalized_history,
+        last_cited_urls=_last_cited_urls(conversation_history or []),
     )
     # run_turn is SYNC and a turn takes seconds; calling it directly in
     # this async handler would block the whole event loop (every other

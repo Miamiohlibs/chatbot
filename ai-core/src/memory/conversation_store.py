@@ -132,7 +132,13 @@ async def get_conversation_history(
         {
             "type": msg.type,
             "content": msg.content,
-            "timestamp": msg.timestamp.isoformat()
+            "timestamp": msg.timestamp.isoformat(),
+            # The links this answer actually showed the patron. Needed so a
+            # bare follow-up ("where is the link") has something to refer
+            # BACK to -- without it the turn is classified on its own and
+            # can land anywhere. getattr, because older rows predate the
+            # column and a missing one must not break history.
+            "cited_urls": list(getattr(msg, "citedUrls", None) or []),
         }
         for msg in messages
     ]

@@ -96,6 +96,20 @@ class TurnRequest:
     conversation_history: list[dict] = field(default_factory=list)
     """Prior messages, OpenAI message format."""
 
+    last_cited_urls: list[str] = field(default_factory=list)
+    """The links the PREVIOUS answer actually showed the patron.
+
+    Carried separately from `conversation_history` on purpose: that list is
+    handed to the Responses API, which takes `{role, content}` items, and
+    hanging extra keys off it risks a 400 on every turn.
+
+    Without this a bare follow-up has no antecedent. "where is the link"
+    after a film-studies answer was classified on its own, landed on
+    interlibrary_loan because of the word "link", and confidently handed
+    over the ILL url -- a wrong answer the student would have acted on,
+    which is worse than not knowing (operator's own staff test, 2026-08-25).
+    """
+
 
 @dataclass(frozen=True)
 class TurnResponse:
@@ -960,6 +974,36 @@ def _run_turn(
                 tokens={"input": 0, "cached_input": 0, "output": 0},
                 fired_corrections=[],
                 agent_stopped_reason="room_availability_short_circuit",
+                latency_ms=latency_ms, cited_chunk_ids=[],
+            )
+
+    # --- 2.145b. "where is the link?" -- repeat, do not re-classify ---
+    # Ahead of every other short circuit because it is the only one that
+    # answers from the PREVIOUS turn. Anything downstream would classify it
+    # on its own, which is exactly the failure: the word "link" pulled it to
+    # interlibrary_loan and it handed a student the ILL url after a film
+    # studies question.
+    #
+    # Falls through untouched when there is nothing to repeat, so a first
+    # turn asking "what's the link" still routes normally.
+    if not booking_flow:
+        _repeat = _link_repeat_answer(request.user_message,
+                                      getattr(request, "last_cited_urls", []))
+        if _repeat is not None:
+            _ans, _cites = _repeat
+            latency_ms = int((time.monotonic() - turn_start) * 1000)
+            record_request(endpoint="/chat", status="link_repeat",
+                           latency_s=latency_ms / 1000)
+            log.info("link repeat: %d url(s) from the previous answer",
+                     len(_cites))
+            return TurnResponse(
+                answer=_ans, is_refusal=False, refusal_trigger=None,
+                citations=_cites, confidence="high",
+                intent=classification.intent, scope=scope.as_filter(),
+                model_used="(none -- link_repeat_short_circuit)",
+                tokens={"input": 0, "cached_input": 0, "output": 0},
+                fired_corrections=[],
+                agent_stopped_reason="link_repeat_short_circuit",
                 latency_ms=latency_ms, cited_chunk_ids=[],
             )
 
@@ -5090,7 +5134,14 @@ _GUIDE_ASK_RE = re.compile(
     # question is not less real for being mistyped.
     r"\b(subject|research|course|class|library|lib)\s*-?\s*(gu?ide|quide)s?\b"
     r"|\blibguides?\b"
-    r"|\b(gu?ide|quide)s?\s+(for|on|about|to)\s+[a-z]",
+    r"|\b(gu?ide|quide)s?\s+(for|on|about|to)\s+[a-z]"
+    # "film studies guide link", "link to the nursing guide". Asking for the
+    # LINK to a guide is still asking for the guide -- but without this it
+    # named no guide word the pattern above recognised, fell through, and
+    # was answered with the subject librarian's phone number. The patron
+    # asked for a page and got a person, twice in one chat (2026-08-25).
+    r"|\b(gu?ide|quide)s?\s+(link|url|page)\b"
+    r"|\b(link|url)\s+to\s+(the\s+)?[a-z][\w\s]{0,30}?(gu?ide|quide)s?\b",
     re.IGNORECASE,
 )
 
@@ -5145,6 +5196,81 @@ def _research_guide_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
              "snippet": "Miami University Libraries — subject librarians"},
         ],
     )
+
+
+# --- "where is the link?" -------------------------------------------------
+#
+# A bare follow-up is a pronoun with no antecedent as far as the classifier
+# is concerned: it sees one short sentence with no history. "where is the
+# link", asked straight after a correct film-studies answer, was classified
+# interlibrary_loan on the strength of the word "link" and confidently
+# handed over the ILL url. That is worse than not knowing -- the student
+# acts on it. Operator's own staff test, 2026-08-25.
+#
+# The antecedent it needs already exists: the links the previous answer
+# showed, carried on the request as `last_cited_urls`.
+#
+# DELIBERATELY NARROW. It fires only when the message is a bare request for
+# a link and names nothing of its own, because "where is the link to renew
+# my books" is a real question that must keep normal routing. The test for
+# "names nothing of its own" is what keeps this from swallowing its
+# neighbours.
+_LINK_ASK_RE = re.compile(
+    r"^\W*(?:so\s+|and\s+|ok(?:ay)?[,\s]+|but\s+)?"
+    r"(?:where(?:'?s| is| are)?|what(?:'?s| is| are)?|can i (?:have|get)|"
+    r"could i (?:have|get)|send me|give me|show me|link to|please)?"
+    r"\s*(?:the|that|it|a|its|his|her|their)?\s*"
+    r"(?:link|url|address|page|site|website)s?"
+    r"\s*(?:for (?:it|that|this))?\s*(?:please|pls|thanks|thx)?\W*$",
+    re.IGNORECASE,
+)
+
+# Words that mean the message carries its own topic, so it is a new question
+# rather than a follow-up. Kept broad on purpose: a false negative here
+# costs a repeat of the last links, a false positive costs a real answer.
+_LINK_ASK_HAS_TOPIC_RE = re.compile(
+    r"\b(renew|book|room|hour|ill|interlibrary|loan|print|scan|databas|"
+    r"journal|article|guide|cite|citation|zotero|makerspace|reserve|"
+    r"account|fine|librarian|special|archive|map|course|class|exam|"
+    r"study|borrow|return|wifi|charger|laptop|film|nursing|psycholog)\w*",
+    re.IGNORECASE,
+)
+
+_LINK_ASK_MAX_WORDS = 7
+
+
+def _is_bare_link_request(message: str) -> bool:
+    """Is this "the link, please" and nothing else?"""
+    m = " ".join((message or "").split())
+    if not m or len(m.split()) > _LINK_ASK_MAX_WORDS:
+        return False
+    if _LINK_ASK_HAS_TOPIC_RE.search(m):
+        return False
+    return bool(_LINK_ASK_RE.match(m))
+
+
+def _link_repeat_answer(message: str, last_urls: "list") -> "Optional[tuple]":
+    """Hand back the links the previous answer showed, or None.
+
+    Returns None when there is nothing to repeat, so the turn falls through
+    to normal routing rather than inventing a destination.
+    """
+    if not last_urls or not _is_bare_link_request(message):
+        return None
+    urls = [u for u in dict.fromkeys(last_urls) if u][:4]
+    if not urls:
+        return None
+    if len(urls) == 1:
+        body = f"Here it is: {urls[0]}"
+    else:
+        body = ("Here they are:\n\n"
+                + "\n".join(f"- {u}" for u in urls))
+    return (
+        body,
+        [{"n": i, "url": u, "snippet": "Link from the previous answer"}
+         for i, u in enumerate(urls, 1)],
+    )
+
 
 
 def _finding_help_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
