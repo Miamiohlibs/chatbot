@@ -786,8 +786,13 @@ def test_long_period_hours_short_circuits_to_oxford_page() -> None:
     assert resp.agent_stopped_reason == "point_to_url"
     assert resp.tokens == {"input": 0, "cached_input": 0, "output": 0}
     assert len(resp.citations) == 1
+    # King's OWN page, not the campus hub. The hub lists every Oxford
+    # library and its first table is King's -- fine here by luck, wrong
+    # for "Wertz summer hours", which is the case that exposed it (gold
+    # hr2_wertz_summer). Changed 2026-08-26; the hub is still the answer
+    # when no building is named.
     assert resp.citations[0]["url"] == (
-        "https://www.lib.miamioh.edu/about/locations/hours/"
+        "https://www.lib.miamioh.edu/about/locations/king-library/"
     )
 
 

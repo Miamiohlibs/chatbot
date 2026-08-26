@@ -4387,10 +4387,19 @@ def test_find_help_menu_keeps_the_questions_it_answers_well():
               "How do I find articles in PsycINFO?",
               "I need help with research strategy for my paper",
               "How do I get research help?",
-              # Deliberately NOT excluded, and each is one token away from a
-              # term that IS: Zotero is not "cite/APA/MLA", GIS is not "data
-              # analysis", a dissertation lit review is not "theses".
-              "Do you have Zotero help?",
+              # Each is one token away from a term that IS excluded: GIS is
+              # not "data analysis", a dissertation lit review is not
+              # "theses".
+              #
+              # "Do you have Zotero help?" WAS in this list. It was counted
+              # among the twelve this answer got right on 2026-08-18, and
+              # the real-traffic eval later judged the same answer wrong:
+              # "omits the requested Zotero help and instead gives unrelated
+              # search and librarian guidance". The judge is right -- the
+              # menu never says the word Zotero, and the corpus holds a
+              # Citation Managers guide plus a FAQ naming the tool. Moved to
+              # the excluded set 2026-08-26; falling through produces a
+              # cited answer about Zotero.
               "Can someone help me with GIS?",
               "I need help with my dissertation literature review."):
         assert F(q) is not None, q
@@ -5336,7 +5345,8 @@ def test_sounding_like_a_search_is_not_enough_to_take_the_question(q):
     "where do I find the microfilm for that year",
     "Can you direct me to GrantFoward?",
     "How do I find articles in PsycINFO?",
-    "Do you have Zotero help?",
+    # "Do you have Zotero help?" moved to the excluded set 2026-08-26 --
+    # see test_a_named_citation_manager_falls_through_to_retrieval.
     "Can someone help me with GIS?",
     "I have a student who needs help accessing a specific AP style manual",
 ])
@@ -5664,3 +5674,117 @@ def test_the_genuinely_generic_ask_still_gets_the_index() -> None:
     """"research guide" names nothing, so the index IS the right answer."""
     for message in ("research guide", "libguides", "do you have research guides"):
         assert _research_guide_answer(message) is not None, message
+
+
+# --- naming a citation manager is not "help me find material" ------------
+#
+# The `<word> help` branch of _FIND_HELP_ASK_RE exists to catch "Zotero
+# help" -- its own comment says the word in front of `help` names what the
+# help is ABOUT -- and then _finding_help_answer discards that word and
+# returns the Primo/Databases menu anyway. "Do you have Zotero help?" got a
+# lecture on searching for books that never said the word Zotero, while the
+# corpus holds the Citation Managers guide and a FAQ naming all three tools
+# (gold cite_zotero).
+
+
+@pytest.mark.parametrize("q", [
+    "Do you have Zotero help?",
+    "how do I use EndNote",
+    "I need Mendeley help",
+    "is there EndNote help",
+])
+def test_a_named_citation_manager_falls_through_to_retrieval(q):
+    from src.graph.new_orchestrator import _finding_help_answer
+
+    assert _finding_help_answer(q) is None, (
+        "the menu cannot answer a question about a specific tool it never "
+        "names; retrieval holds the Citation Managers guide"
+    )
+
+
+@pytest.mark.parametrize("q", ["RefWorks help", "Citavi help"])
+def test_a_tool_the_corpus_does_not_cover_keeps_the_menu(q):
+    """The exclusion list is bounded by what retrieval can actually
+    answer. RefWorks and Citavi appear in zero corpus chunks, so sending
+    them to retrieval would trade a mediocre menu for a flat refusal."""
+    from src.graph.new_orchestrator import _finding_help_answer
+
+    assert _finding_help_answer(q) is not None
+
+
+@pytest.mark.parametrize("q", [
+    "I need help finding articles on climate change",
+    "help me find books about the civil war",
+    "where can I find journals on nursing",
+    "assistance locating materials on the Ohio frontier",
+])
+def test_real_find_material_requests_still_get_the_menu(q):
+    """The excludes are a scalpel. This answer takes real traffic and
+    losing it would cost more than the Zotero case gains."""
+    from src.graph.new_orchestrator import _finding_help_answer
+
+    assert _finding_help_answer(q) is not None
+
+
+# --- long-period hours: the right page, and a true reason ----------------
+#
+# "What are Wertz Library's summer hours?" was answered "That's further out
+# than I can look up live" -- in August, about the season running that day --
+# and pointed at the Oxford hours hub, whose first table is King's. Gold
+# hr2_wertz_summer says in as many words not to substitute King's hours, and
+# an answer that never says Wertz does exactly that.
+#
+# The operator ruling stands: an open-ended range still points at a page
+# rather than guessing a term's schedule (PR #63). Only WHICH page, and the
+# reason given, change here.
+
+
+def _long_period(msg, campus="oxford", library=None):
+    from src.graph.new_orchestrator import (
+        Scope,
+        _long_period_hours_response,
+    )
+    from src.router.intent_knn import Classification
+
+    c = Classification(intent="hours", score=0.9, margin=0.5,
+                       needs_clarification=False, candidates=[("hours", 0.9)])
+    scope = Scope(campus=campus, library=library, source="test")
+    return _long_period_hours_response(c, scope, 1, msg)
+
+
+def test_a_named_building_gets_its_own_hours_page():
+    r = _long_period("What are Wertz Library's summer hours?", library="wertz")
+    assert "art-arch" in r.answer
+    assert r.citations[0]["url"].endswith("/art-arch/")
+
+
+def test_no_building_named_still_gets_the_campus_hub():
+    r = _long_period("what are your summer hours")
+    assert "about/locations/hours/" in r.answer
+
+
+def test_a_regional_building_does_not_get_an_oxford_page():
+    r = _long_period("Rentschler summer hours", campus="hamilton",
+                     library="rentschler")
+    assert "ham.miamioh.edu" in r.answer
+
+
+def test_a_current_season_is_not_called_far_away():
+    """The false half of the old sentence. Asked in August, "summer
+    hours" is about now -- telling the patron the date is too far out is
+    simply untrue, whatever the routing decision."""
+    r = _long_period("What are Wertz Library's summer hours?", library="wertz")
+    assert "further out" not in r.answer
+    assert "season" in r.answer or "term" in r.answer
+
+
+def test_a_far_off_date_is_still_called_far_off():
+    r = _long_period("what are the hours on Thanksgiving")
+    assert "further out" in r.answer
+
+
+def test_it_still_points_at_a_page_rather_than_guessing():
+    """The operator ruling this must not overturn."""
+    r = _long_period("What are Wertz Library's summer hours?", library="wertz")
+    assert r.agent_stopped_reason == "point_to_url"
+    assert r.citations and r.citations[0]["url"]

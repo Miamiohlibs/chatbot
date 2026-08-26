@@ -1251,7 +1251,9 @@ def _run_turn(
         latency_ms = int((time.monotonic() - turn_start) * 1000)
         record_request(endpoint="/chat", status="point_to_url",
                        latency_s=latency_ms / 1000)
-        return _long_period_hours_response(classification, scope, latency_ms)
+        return _long_period_hours_response(
+            classification, scope, latency_ms, request.user_message
+        )
 
     # Clarification short-circuit: if the kNN is too uncertain, hand
     # back a structured "please pick one" response before burning
@@ -5120,6 +5122,22 @@ _FIND_HELP_EXCLUDE_RE = re.compile(
     r"|(isn'?t|not|stopped)\s+working|keeps?\s+saying"
     r"|\bvpn\b|off[-\s]campus|\bproxy\b|ezproxy"
     r"|\bhamilton\b|\brentschler\b|\bmiddletown\b|gardner[-\s]?harvey"
+    # CITATION MANAGERS. The `<word> help` branch of _FIND_HELP_ASK_RE was
+    # written to catch "Zotero help" -- its own comment says the word in
+    # front of `help` names what the help is ABOUT -- and then this answer
+    # throws that word away and returns the Primo/Databases menu regardless.
+    # "Do you have Zotero help?" got a lecture on how to search for books
+    # and never said the word Zotero, while the corpus holds the Citation
+    # Managers guide and a FAQ naming all three tools (gold cite_zotero).
+    #
+    # THREE TOOL NAMES, chosen by what the corpus can actually answer.
+    # "cite" and "citation" were already excluded, so "citation help" was
+    # never the broken case -- naming the TOOL was, because nothing here
+    # knew the word. Zotero (3 chunks), EndNote (3) and Mendeley (1) are
+    # all covered by the Citation Managers guide and a FAQ that names them.
+    # RefWorks and Citavi are NOT in the corpus at all: excluding those
+    # would trade a mediocre menu for a flat refusal, so they stay.
+    r"|\bzotero\b|\bmendeley\b|\bend\s?note\b"
     # NAMING A SPECIFIC THING IS NOT "HELP ME FIND MATERIAL ON A TOPIC".
     #
     # The 2026-08-18 run showed this answer taking 26 gold cases and getting
@@ -10112,6 +10130,29 @@ _HOURS_PAGE_URL = {
     "middletown": "https://www.mid.miamioh.edu/library/",
 }
 
+# When the patron NAMED a building, the campus hub is the wrong page: it
+# lists every library, and "what are WERTZ's summer hours" came back
+# pointing at a page whose first table is King's. Gold hr2_wertz_summer
+# says in as many words not to substitute King's hours, and an answer that
+# never says "Wertz" does exactly that.
+#
+# Each of these pages carries the Springshare hours widget for its own
+# building (the "Library Hours display API from Springshare" block is in
+# the served HTML), so the patron lands on that building's schedule.
+# Only buildings whose own page CARRIES the widget and whose campus hub
+# does not already point at them. Checked one by one, 2026-08-26:
+#   king, wertz, sword -> widget present, hub lists several buildings
+#   special            -> page has NO hours widget; sending an hours
+#                         question there shows a page with no hours on it
+#   rentschler         -> the Hamilton hub IS Rentschler's hours page,
+#                         and /about/ is a worse destination than it
+#   gardner_harvey     -> its page and the Middletown hub are one URL
+_LIBRARY_HOURS_PAGE = {
+    "king": "https://www.lib.miamioh.edu/about/locations/king-library/",
+    "wertz": "https://www.lib.miamioh.edu/about/locations/art-arch/",
+    "sword": "https://www.lib.miamioh.edu/about/locations/regional/sword/",
+}
+
 # A "short-term" word VETOES long-period (today/tonight/now use LibCal,
 # which is correct and already works). Checked first.
 _SHORT_TERM_HOURS_RE = re.compile(
@@ -10174,15 +10215,35 @@ def _is_long_period_hours(text: str, today=None) -> bool:
     return bool(_LONG_PERIOD_HOURS_RE.search(t))
 
 
+
+def _resolves_to_a_specific_date(text: str) -> bool:
+    """Did the patron name an actual DATE, as opposed to a season or term?
+
+    Only used to pick which true sentence to say. Anything unresolvable
+    is treated as the open-ended case, which is the safer of the two: it
+    claims less.
+    """
+    try:
+        from datetime import date as _date
+
+        from src.scope.date_window import resolve_target_date
+
+        return resolve_target_date(text or "", today=_date.today()) is not None
+    except Exception:  # noqa: BLE001 -- wording must never break routing
+        return False
+
+
 def _long_period_hours_response(
     classification: Classification,
     scope: Scope,
     latency_ms: int,
+    user_message: str = "",
 ) -> TurnResponse:
     """Point a long-period hours question at the campus hours PAGE
     (rule B). Deterministic, zero-LLM, cited -> the URL is real and
     verified so it passes any downstream URL check."""
-    url = _HOURS_PAGE_URL.get(scope.campus, _HOURS_PAGE_URL["oxford"])
+    url = (_LIBRARY_HOURS_PAGE.get(scope.library or "")
+           or _HOURS_PAGE_URL.get(scope.campus, _HOURS_PAGE_URL["oxford"]))
     # Operator ruling 2026-05-17 (hr_thanksgiving): for a specific
     # holiday / far-off date the bot must EXPLAIN that the date is
     # beyond what it can check live and hand the lookup back to the
@@ -10191,12 +10252,23 @@ def _long_period_hours_response(
     # follow-up: it needs a named-date/relative-date resolver and a
     # LibCal single-date call, which triggers the model/API freshness
     # rule. No current gold case exercises it; not bundled here.)
+    # Two different questions were getting one sentence, and it was false
+    # for one of them. "What are Wertz's SUMMER hours", asked in August,
+    # was answered "that's further out than I can look up live" -- the
+    # season being asked about was the one running that day. The limit is
+    # real (LibCal is only posted a couple of weeks ahead) but the reason
+    # given has to be the true one.
+    if _resolves_to_a_specific_date(user_message):
+        opening = ("That date is further out than I can look up live -- my "
+                   "hours check only covers the next couple of weeks")
+    else:
+        opening = ("I can't give you a whole term's or season's schedule -- "
+                   "my hours check only covers the next couple of weeks")
     msg = (
-        "That's further out than I can look up live -- my hours check "
-        "only covers the near term, and the schedule shifts by term, "
-        "break, and holiday, so I can't reliably tell you that date "
-        "myself. The library's hours page always shows the current and "
-        f"upcoming schedule, so please check the date you need there: {url}."
+        f"{opening}, and the schedule shifts by term, break, and holiday, "
+        "so I can't reliably tell you that myself. The hours page always "
+        "shows the current and upcoming schedule, so please check the date "
+        f"you need there: {url}."
     )
     return TurnResponse(
         answer=msg,
