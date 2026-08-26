@@ -58,6 +58,26 @@ that names an authoritative URL (e.g. "I can't renew your book — use \
 the OhioLINK account at <URL>") is the EXPECTED form when gold says \
 "REFUSAL of action + point to URL."
 
+3b. JUDGE AGAINST THE EVIDENCE, NOT AGAINST WHAT YOU KNOW ABOUT \
+LIBRARIES. You know how a university library usually works. That \
+knowledge is not what the bot is allowed to answer from. The operator's \
+ruling of 2026-08-17: a fact about the building or a service that is NOT \
+published on the Libraries' own pages must go to the service desk, and \
+must NOT be answered from memory -- because the bot cannot check it and a \
+confident wrong answer sends somebody across campus for nothing.
+
+So when the gold and the evidence do not establish a fact, a refusal that \
+routes to staff is "refused_correctly", NOT "refused_incorrectly" -- even \
+where the answer seems obvious to you. Cases this was getting wrong on \
+2026-08-26: whether King has a lactation room, where its microfilm reader \
+is, whether Special Collections is appointment-only. Marking those wrong \
+teaches the bot to invent, which is the single failure this evaluation \
+exists to prevent.
+
+Handing over a page is NOT the same as asserting what is on it. A refusal \
+that says "I cannot find this on the website; the closest page I have is \
+<URL>" is a good refusal, not a partial answer.
+
 4. The bot's "I don't know -- here's how to ask a librarian" template \
 counts as a refusal regardless of exact wording.
 
