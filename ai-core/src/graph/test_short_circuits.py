@@ -5572,3 +5572,64 @@ def test_a_building_name_is_a_refinement_not_a_new_topic() -> None:
     cases failing: "no I meant the one in Oxford" names WHERE, not what."""
     assert _is_context_follow_up("no I meant the one in Oxford", _LAST)
     assert _is_context_follow_up("and King?", _LAST)
+
+
+# --- the guide itself, not a description of guides -----------------------
+#
+# "is there a subject guide for film studies" was answered twice with the
+# subject librarian's phone number. The guide exists; the url was reachable
+# the whole time.
+#
+# It looked like a data-quality problem -- 381 subjects whose guide name did
+# not match any row in the LibGuide table -- and it was a category error.
+# SubjectLibGuide.libGuide holds a LibGuides SUBJECT tag (86 of them);
+# LibGuide.name holds guide TITLES (480). Matching one against the other
+# lined up only where a guide happened to be named after a subject.
+# LibGuides resolves subject -> guide itself, by subject_id.
+
+from src.graph.new_orchestrator import _subject_guide_url
+
+
+def test_a_named_subject_gets_its_own_guide_url(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "src.graph.new_orchestrator._subject_guide_url",
+        lambda s: "https://libguides.lib.miamioh.edu/sb.php?subject_id=25116")
+    result = _research_guide_answer("is there a subject guide for film studies")
+    assert result is not None
+    answer, citations = result
+    assert "sb.php?subject_id=25116" in answer
+    assert citations[0]["url"].startswith("https://libguides.lib.miamioh.edu/")
+
+
+def test_a_lookup_failure_still_answers(monkeypatch) -> None:
+    """~150-300ms against a live API, inside a deterministic short circuit.
+    A slow or dead LibGuides costs the url, never the answer."""
+    monkeypatch.setattr(
+        "src.graph.new_orchestrator._subject_guide_url", lambda s: None)
+    result = _research_guide_answer("is there a subject guide for film studies")
+    assert result is not None
+    answer, citations = result
+    assert "research guides page" in answer
+    assert citations, "an answer with no destination is not an answer"
+
+
+def test_only_a_libguides_address_is_accepted(monkeypatch) -> None:
+    """A citation is a promise. An unexpected shape from the API must not
+    become a link we hand a student."""
+    class _Tool:
+        async def execute(self, **kw):
+            return {"homepage": "https://example.com/not-ours"}
+
+    monkeypatch.setattr(
+        "src.tools.libguide_comprehensive_tools.LibGuideSubjectLookupTool",
+        _Tool)
+    assert _subject_guide_url("Nursing") is None
+
+
+def test_a_blank_subject_asks_nothing(monkeypatch) -> None:
+    called = []
+    monkeypatch.setattr(
+        "src.tools.libguide_comprehensive_tools.LibGuideSubjectLookupTool",
+        lambda: called.append(1))
+    assert _subject_guide_url("") is None
+    assert not called, "no subject means no lookup"

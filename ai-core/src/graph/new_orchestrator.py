@@ -5196,6 +5196,49 @@ _GUIDE_EXCLUDE_RE = re.compile(
 )
 
 
+def _subject_guide_url(subject: str) -> "Optional[str]":
+    """The LibGuides landing page for one subject, or None.
+
+    THE TWO NAMESPACES. `SubjectLibGuide.libGuide` holds a LibGuides
+    SUBJECT tag (86 of them: Accountancy, Anthropology, Geology); the
+    `LibGuide` table holds guide TITLES (480 of them). Matching one against
+    the other was a category error on my part -- the handful that lined up
+    did so because a guide happened to be named after a subject, and the
+    rest looked like a data-quality problem that needed a librarian to
+    reconcile 381 rows by hand. It did not.
+
+    LibGuides resolves subject -> guide itself, by subject_id, and the tool
+    that asks it is already on the serving path for librarian lookups.
+
+    Best effort: ~150-300ms against a live API, and this sits inside a
+    deterministic short circuit. A slow or dead LibGuides costs the URL,
+    never the answer.
+    """
+    if not subject:
+        return None
+    try:
+        import asyncio
+
+        from src.tools.libguide_comprehensive_tools import (
+            LibGuideSubjectLookupTool,
+        )
+
+        res = asyncio.run(
+            LibGuideSubjectLookupTool().execute(query=subject,
+                                                subject_name=subject)
+        ) or {}
+        url = (res.get("homepage") or "").strip()
+        # Only a LibGuides address. Anything else is a shape we did not
+        # expect, and a citation is a promise.
+        if url.startswith("https://libguides.lib.miamioh.edu/"):
+            return url
+    except Exception:  # noqa: BLE001 -- never break the turn for a link
+        log.info("subject guide url lookup failed for %r", subject,
+                 exc_info=True)
+    return None
+
+
+
 def _research_guide_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
     """Someone asked whether a guide exists for their subject."""
     m = message or ""
@@ -5216,6 +5259,25 @@ def _research_guide_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
                     break
     except Exception:  # noqa: BLE001 -- a lookup must never break the turn
         subject = None
+
+    # The guide itself, when we can name the subject. This is the answer the
+    # patron asked for -- "is there a subject guide for film studies" was
+    # answered twice with the librarian's phone number before this existed.
+    guide_url = _subject_guide_url(subject) if subject else None
+    if guide_url:
+        return (
+            f"Yes -- the **{subject}** guide is here:\n\n{guide_url}\n\n"
+            "- **Other subjects**: the research guides page [1] lists every "
+            "guide, by subject and by course.\n"
+            "- **Ask the person who wrote it**: your subject librarian [2] "
+            "maintains the guide for their area and will meet with you.",
+            [
+                {"n": 1, "url": guide_url,
+                 "snippet": f"Miami University Libraries — {subject} guide"},
+                {"n": 2, "url": _LIAISONS_URL,
+                 "snippet": "Miami University Libraries — subject librarians"},
+            ],
+        )
 
     lead = (f"Yes -- the Libraries publish research guides, and **{subject}** "
             f"is one of the subjects they cover.\n\n"
