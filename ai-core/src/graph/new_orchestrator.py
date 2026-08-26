@@ -5196,6 +5196,27 @@ _GUIDE_EXCLUDE_RE = re.compile(
 )
 
 
+# Guides people ask for by name that are not academic subjects. Every url is
+# in the serving corpus and was verified; the list is short and explicit
+# because guessing a slug from the question would put a 404 in a citation.
+_NON_SUBJECT_GUIDES = (
+    (re.compile(r"\bcitation|\bciting\b|\bcite\b|\bapa\b|\bmla\b|"
+                r"\bchicago style\b|zotero|endnote|mendeley|refworks",
+                re.IGNORECASE),
+     "https://libguides.lib.miamioh.edu/citation", "citation"),
+    (re.compile(r"\bnewspapers?\b", re.IGNORECASE),
+     "https://libguides.lib.miamioh.edu/newspapers", "newspapers"),
+    (re.compile(r"\breserves?\b|\btextbooks?\b", re.IGNORECASE),
+     "https://libguides.lib.miamioh.edu/reserves-textbooks",
+     "course reserves and textbooks"),
+    (re.compile(r"\bcirculation polic|\bloan period|\bfines?\b",
+                re.IGNORECASE),
+     "https://libguides.lib.miamioh.edu/mul-circulation-policies",
+     "circulation policies"),
+)
+
+
+
 def _subject_guide_url(subject: str) -> "Optional[str]":
     """The LibGuides landing page for one subject, or None.
 
@@ -5278,6 +5299,27 @@ def _research_guide_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
                  "snippet": "Miami University Libraries — subject librarians"},
             ],
         )
+
+    # GUIDES THAT ARE NOT SUBJECTS.
+    #
+    # `find_subject_by_alias` only knows academic subjects, so "is there a
+    # libguide for citations" resolved to nothing and got the guides INDEX
+    # -- while the citation guide itself sat in the corpus. A regression
+    # this short circuit introduced (eval 2026-08-26,
+    # cit_no_libguide_fabrication).
+    #
+    # Named explicitly rather than inferred: each url below is in the
+    # serving corpus and was checked. Guessing a slug from the question
+    # would put a 404 in a citation, and a citation is a promise.
+    for _pat, _url, _label in _NON_SUBJECT_GUIDES:
+        if _pat.search(m):
+            return (
+                f"Yes -- the **{_label}** guide is here:\n\n{_url}\n\n"
+                "- **Other subjects**: the research guides page [1] lists "
+                "every guide, by subject and by course.",
+                [{"n": 1, "url": _url,
+                  "snippet": f"Miami University Libraries — {_label} guide"}],
+            )
 
     lead = (f"Yes -- the Libraries publish research guides, and **{subject}** "
             f"is one of the subjects they cover.\n\n"

@@ -5633,3 +5633,34 @@ def test_a_blank_subject_asks_nothing(monkeypatch) -> None:
         lambda: called.append(1))
     assert _subject_guide_url("") is None
     assert not called, "no subject means no lookup"
+
+
+def test_a_guide_that_is_not_a_subject_still_gets_its_own_url() -> None:
+    """Regression this short circuit introduced (eval 2026-08-26,
+    cit_no_libguide_fabrication): find_subject_by_alias only knows academic
+    subjects, so "is there a libguide for citations" resolved to nothing and
+    got the guides INDEX -- while the citation guide sat in the corpus.
+
+    Only GUIDE questions reach here. "how do I cite in APA" names no guide
+    and belongs to the citation-help path, which is why it is not listed."""
+    for message in ("is there a libguide for citations",
+                    "citation libguide",
+                    "is there a guide for Zotero"):
+        result = _research_guide_answer(message)
+        assert result is not None, message
+        assert "libguides.lib.miamioh.edu/citation" in result[0], message
+
+
+def test_those_urls_are_named_not_guessed() -> None:
+    """Guessing a slug from the question would put a 404 in a citation, and
+    a citation is a promise. Each one is in the serving corpus."""
+    from src.graph.new_orchestrator import _NON_SUBJECT_GUIDES
+
+    for _pat, url, _label in _NON_SUBJECT_GUIDES:
+        assert url.startswith("https://libguides.lib.miamioh.edu/"), url
+
+
+def test_the_genuinely_generic_ask_still_gets_the_index() -> None:
+    """"research guide" names nothing, so the index IS the right answer."""
+    for message in ("research guide", "libguides", "do you have research guides"):
+        assert _research_guide_answer(message) is not None, message
