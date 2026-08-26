@@ -34,13 +34,36 @@ def diffs(tmp_path, monkeypatch):
     return d
 
 
+KEY = "TOKEN123"
+
+
 @pytest.fixture
 def client(diffs, monkeypatch):
+    """A client that already holds the admin key.
+
+    Every request goes through `?key=` because the page requires it -- see
+    the admin-key tests at the bottom for why.
+    """
     monkeypatch.setenv("ETL_APPROVERS", "a@miamioh.edu,b@miamioh.edu")
     monkeypatch.setenv("ETL_APPROVAL_PASSWORD", "correct horse")
     app = FastAPI()
-    app.include_router(R.build_etl_approval_router({}))
-    return TestClient(app)
+    app.include_router(R.build_etl_approval_router({"admin_token": KEY}))
+    raw = TestClient(app)
+
+    class _Keyed:
+        """Appends the key so the tests read as what they are about."""
+
+        @staticmethod
+        def _u(url):
+            return url + ("&" if "?" in url else "?") + f"key={KEY}"
+
+        def get(self, url, **kw):
+            return raw.get(self._u(url), **kw)
+
+        def post(self, url, **kw):
+            return raw.post(self._u(url), **kw)
+
+    return _Keyed()
 
 
 def _form(diffs, **over):
@@ -250,3 +273,49 @@ def test_the_objection_is_shown_on_the_page(client, diffs, monkeypatch):
     assert "a@miamioh.edu" in page
     assert "goes stale" in page
     assert "https://www.lib.miamioh.edu/events" in page
+
+
+# --- the admin key -------------------------------------------------------
+#
+# This shipped with no guard, copied from the kill switch -- which is
+# deliberately keyless because it must work when everything else is broken.
+# Corpus review has no such requirement, and the cost was visible: the
+# console's nav is built from the key on the request, so a keyless page
+# rendered a keyless menu and every tab became a dead link into a 401.
+
+@pytest.fixture
+def keyed(diffs, monkeypatch):
+    monkeypatch.setenv("ETL_APPROVERS", "a@miamioh.edu")
+    monkeypatch.setenv("ETL_APPROVAL_PASSWORD", "correct horse")
+    app = FastAPI()
+    app.include_router(
+        R.build_etl_approval_router({"admin_token": "TOKEN123"}))
+    return TestClient(app)
+
+
+def test_without_the_admin_key_the_page_is_refused(keyed):
+    assert keyed.get("/admin/etl").status_code == 401
+
+
+def test_a_wrong_admin_key_is_refused(keyed):
+    assert keyed.get("/admin/etl?key=nope").status_code == 401
+
+
+def test_with_the_key_every_nav_tab_carries_it(keyed):
+    """The reported bug. A tab that drops the key is a dead link."""
+    import re
+    html = keyed.get("/admin/etl?key=TOKEN123").text
+    nav = re.search(r"<nav class='tabs'>(.*?)</nav>", html, re.S)
+    assert nav, "no nav rendered"
+    hrefs = re.findall(r"href='([^']+)'", nav.group(1))
+    assert hrefs, "no tabs rendered"
+    for h in hrefs:
+        assert "key=TOKEN123" in h, f"tab without the key: {h}"
+
+
+def test_the_key_guards_looking_and_the_passphrase_guards_signing(keyed, diffs):
+    """Holding the admin key lets you read a diff, not approve one."""
+    r = keyed.post("/admin/etl/approve?key=TOKEN123",
+                   data=_form(diffs, password="wrong"))
+    assert r.status_code == 403
+    assert not gate.verify_gate(diffs).proceed

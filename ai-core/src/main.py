@@ -487,7 +487,8 @@ from src.api.admin.etl_approval_router import (  # noqa: E402
     build_etl_approval_router,
 )
 
-app.include_router(build_etl_approval_router({}))
+app.include_router(build_etl_approval_router(
+    {"admin_token": os.getenv("ADMIN_API_TOKEN", "")}))
 logging.info(
     "Corpus review mounted at /admin/etl -- guarded by approver email + "
     "passphrase; it records approval and never runs the apply itself."

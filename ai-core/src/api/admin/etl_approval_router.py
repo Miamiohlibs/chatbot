@@ -509,13 +509,29 @@ def build_etl_approval_router(deps: dict):
     from fastapi import APIRouter, Depends, Form  # type: ignore
     from fastapi.responses import HTMLResponse, RedirectResponse  # type: ignore
 
-    async def _no_guard() -> None:
-        """This page protects itself with email + passphrase, like the
-        kill switch. A guard may still be injected by a deployment that
-        wants one in front."""
-        return None
+    # THE ADMIN KEY TO LOOK, THE PASSPHRASE TO SIGN.
+    #
+    # This shipped with no guard at all, copied from the kill switch -- which
+    # is deliberately keyless because it has to work when everything else is
+    # broken. Corpus review has no such requirement, and being reachable
+    # without a key had a visible cost: the console's own nav is built from
+    # the key on the request, so a keyless page rendered a keyless menu and
+    # every tab became a dead link into a 401.
+    #
+    # Requiring it fixes the menu and puts this page on the same footing as
+    # the rest of the console. The passphrase still guards the ACTION, so
+    # holding the key lets you read a diff, not approve one.
+    admin_token: str = (deps.get("admin_token")
+                        or os.getenv("ADMIN_API_TOKEN", "")).strip()
 
-    guard = deps.get("guard") or _no_guard
+    async def _require_key(request: Request) -> None:
+        from fastapi import HTTPException  # type: ignore
+
+        supplied = request.query_params.get("key", "")
+        if not admin_token or not hmac.compare_digest(supplied, admin_token):
+            raise HTTPException(status_code=401, detail="admin token required")
+
+    guard = deps.get("guard") or _require_key
     router = APIRouter(prefix="/admin", tags=["admin"])
 
     @router.get("/etl", response_class=HTMLResponse)
