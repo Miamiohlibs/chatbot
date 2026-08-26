@@ -24,6 +24,52 @@ load_dotenv(dotenv_path=root_dir / ".env")
 
 # Complete mapping from https://www.lib.miamioh.edu/about/organization/liaisons/
 # Format: Subject -> List of librarian emails
+LIAISONS_URL = "https://www.lib.miamioh.edu/about/organization/liaisons/"
+
+
+def fetch_liaison_mapping() -> "dict[str, list[str]]":
+    """`{subject: [librarian name, ...]}` read from the liaisons page.
+
+    The hardcoded table below was transcribed from this page by hand and
+    had fallen ten subjects behind it -- Civics, Honors College, Quantum
+    Computing Initiative and others were live on the page and absent here,
+    so nobody asking about them could be routed (checked 2026-08-26).
+    Nothing had been REMOVED upstream, which is the reassuring half: the
+    drift is one-directional and silent.
+
+    Reading the page instead means the next subject the Libraries add
+    arrives on the next sync rather than when somebody remembers this file.
+    The table stays as the fallback, so a fetch failure costs freshness and
+    never the mapping.
+    """
+    import re as _re
+
+    import requests
+
+    from scripts.etl import config as etl_config
+    from scripts.etl import extract as etl_extract
+
+    resp = requests.get(
+        LIAISONS_URL, timeout=etl_config.REQUEST_TIMEOUT_SECONDS,
+        headers={"User-Agent": etl_config.USER_AGENT},
+    )
+    resp.raise_for_status()
+    doc = etl_extract.extract(resp.text, LIAISONS_URL)
+    out: dict = {}
+    for line in (doc.body_text or "").splitlines():
+        hit = _re.match(r"^\s*-\s*(.+?):\s*(.+?)\s*$", line)
+        if not hit:
+            continue
+        subject, people = hit.group(1).strip(), hit.group(2).strip()
+        # The same list carries "Email: x@y" and "Phone: ..." rows.
+        if subject.lower() in {"email", "phone", "office", "website"}:
+            continue
+        names = [p.strip() for p in people.split(",") if p.strip()]
+        if subject and names:
+            out[subject] = names
+    return out
+
+
 SUBJECT_LIBRARIAN_MAPPING = {
     "Accountancy": ["freede@miamioh.edu"],
     "American Studies": ["presnejl@miamioh.edu"],
@@ -115,6 +161,60 @@ SPECIAL_SERVICES = {
 }
 
 
+
+async def build_mapping(db) -> "dict[str, list[str]]":
+    """The mapping to sync: the live page where it can be read, the
+    transcribed table underneath it.
+
+    Returns `{subject: [email, ...]}`, the shape the rest of this script
+    expects. The page gives NAMES, so they are resolved to addresses
+    through the Librarian table -- a name the roster does not carry is
+    skipped and reported rather than guessed at, because inventing an
+    address is worse than leaving a subject unmapped.
+    """
+    merged = {k: list(v) for k, v in SUBJECT_LIBRARIAN_MAPPING.items()}
+    try:
+        live = fetch_liaison_mapping()
+    except Exception as exc:  # noqa: BLE001 -- freshness, never the mapping
+        print(f"  liaisons page unreadable ({exc}); using the table alone")
+        return merged
+
+    people = await db.librarian.find_many()
+    by_name = {}
+    for p in people:
+        if p.name and p.email:
+            by_name[p.name.strip().lower()] = p.email
+            # "Roger A Justus" on the roster is "Roger Justus" on the page.
+            parts = p.name.split()
+            if len(parts) >= 3:
+                by_name[f"{parts[0]} {parts[-1]}".strip().lower()] = p.email
+
+    added = 0
+    unknown: set = set()
+    for subject, names in live.items():
+        emails = []
+        for n in names:
+            e = by_name.get(n.strip().lower())
+            if e:
+                emails.append(e)
+            else:
+                unknown.add(n)
+        if not emails:
+            continue
+        if subject not in merged:
+            added += 1
+        merged[subject] = emails
+
+    print(f"  liaisons page: {len(live)} subjects, {added} not in the table")
+    if unknown:
+        # NOT silent: a liaison the roster does not know is either a new
+        # hire missing from the CSV or a name spelled differently, and both
+        # need a human rather than a guess.
+        print(f"  names on the page but not on the roster: "
+              f"{', '.join(sorted(unknown))}")
+    return merged
+
+
 async def ensure_subject_exists(db: Prisma, subject_name: str) -> str:
     """Ensure a subject exists in the database, return its ID."""
     subject = await db.subject.find_first(where={"name": subject_name})
@@ -136,7 +236,8 @@ async def sync_mappings():
         print("COMPREHENSIVE LIBRARIAN-SUBJECT MAPPING SYNC")
         print("="*80)
         print(f"Source: https://www.lib.miamioh.edu/about/organization/liaisons/")
-        print(f"Subjects to sync: {len(SUBJECT_LIBRARIAN_MAPPING)}")
+        mapping = await build_mapping(db)
+        print(f"Subjects to sync: {len(mapping)}")
         print(f"Special services: {len(SPECIAL_SERVICES)}")
         
         # Step 1: Ensure all subjects exist
@@ -145,7 +246,7 @@ async def sync_mappings():
         print('='*80)
         
         subject_ids = {}
-        for subject_name in SUBJECT_LIBRARIAN_MAPPING.keys():
+        for subject_name in mapping.keys():
             subject_id = await ensure_subject_exists(db, subject_name)
             subject_ids[subject_name] = subject_id
         
@@ -162,7 +263,7 @@ async def sync_mappings():
         print('='*80)
         
         all_emails = set()
-        for emails in SUBJECT_LIBRARIAN_MAPPING.values():
+        for emails in mapping.values():
             all_emails.update(emails)
         
         # Add special service librarians
@@ -203,7 +304,7 @@ async def sync_mappings():
         mappings_created = 0
         mappings_skipped = 0
         
-        for subject_name, librarian_emails in SUBJECT_LIBRARIAN_MAPPING.items():
+        for subject_name, librarian_emails in mapping.items():
             subject_id = subject_ids[subject_name]
             
             print(f"\n{subject_name}:")
