@@ -349,6 +349,132 @@ def check_memory_and_oom() -> Finding:
     return Finding("memory / OOM", ok, summary, detail)
 
 
+
+def check_libcal_hours_are_possible() -> Finding:
+    """LibCal is hand-maintained, and a typo there becomes a patron answer.
+
+    On 2026-08-26 it carried Special Collections as open "8:00pm to 4:00pm"
+    on the Friday -- an am/pm slip against the 8:00am the other four
+    weekdays had -- and the bot repeated it word for word. The bot now
+    declines an interval that cannot be true (interval_is_impossible), but
+    declining is not fixing: the day silently reads "hours not posted"
+    until somebody edits LibCal. Only the owner of that calendar can, so
+    this check exists to tell them.
+    """
+    import asyncio
+
+    try:
+        import httpx
+
+        from src.tools.libcal_comprehensive_tools import (
+            _get_oauth_token,
+            interval_is_impossible,
+        )
+    except Exception as e:  # noqa: BLE001
+        return Finding("libcal hours", True,
+                       f"cannot import the LibCal client ({e}) -- skipped")
+
+    today = dt.date.today()
+    end = today + dt.timedelta(days=13)
+
+    async def _fetch(lid: str) -> dict:
+        token = await _get_oauth_token()
+        async with httpx.AsyncClient(timeout=30) as c:
+            r = await c.get(
+                f"https://api2.libcal.com/1.1/hours/{lid}",
+                params={"from": today.isoformat(), "to": end.isoformat()},
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            r.raise_for_status()
+            return r.json()
+
+    # Enumerating the spaces is THIS check's own job, so a failure here is
+    # a real finding. Reading LibCal is not: an outage there is already
+    # reported by check_dependencies, and repeating it would make one
+    # cause ring two alarms.
+    try:
+        locations = _libcal_locations()
+    except Exception as e:  # noqa: BLE001
+        return Finding(
+            "libcal hours", False,
+            f"cannot list the spaces to check: {e}",
+            ["Nothing was checked. Do NOT read this as 'hours are fine'."],
+        )
+
+    bad: list[str] = []
+    checked = 0
+    try:
+        for lid, label in locations:
+            checked += 1
+            payload = asyncio.run(_fetch(lid))
+            entries = payload if isinstance(payload, list) else [payload]
+            for entry in entries:
+                for day, data in sorted((entry.get("dates") or {}).items()):
+                    for iv in (data.get("hours") or []):
+                        if interval_is_impossible(iv.get("from"), iv.get("to")):
+                            bad.append(
+                                f"{label} ({lid}) on {day}: "
+                                f"{iv.get('from')} to {iv.get('to')}"
+                            )
+    except Exception as e:  # noqa: BLE001
+        # A LibCal outage is already reported by check_dependencies; this
+        # check going quiet must not double-alarm on the same cause.
+        return Finding(
+            "libcal hours", True,
+            f"could not read LibCal ({e}) -- skipped; "
+            f"check_dependencies owns that alarm",
+        )
+
+    if not bad:
+        return Finding(
+            "libcal hours", True,
+            f"{checked} location(s) clean through {end}",
+        )
+    return Finding(
+        "libcal hours", False,
+        f"LibCal publishes {len(bad)} interval(s) that cannot be true",
+        bad + [
+            "The bot refuses to state these, so those days now read "
+            "'hours not posted' to patrons.",
+            "This is a LibCal edit, not a code change -- the calendar's "
+            "owner has to correct the entry.",
+        ],
+    )
+
+
+def _libcal_locations() -> "list[tuple[str, str]]":
+    """(libcal_id, name) for every space we answer hours for.
+
+    Raises rather than returning [] on failure. An empty list read as
+    "nothing to check" is how a health check reports all-clear while
+    seeing nothing at all -- which is what the first version of this did
+    (psycopg is not installed here; asyncpg is).
+    """
+    import asyncio
+
+    import asyncpg
+
+    url = os.getenv("DATABASE_URL") or ""
+    if not url:
+        raise RuntimeError("DATABASE_URL is not set")
+
+    async def _q():
+        conn = await asyncpg.connect(url.replace("?sslmode=disable", ""),
+                                     timeout=10)
+        try:
+            return await conn.fetch(
+                'select libcal_id, name from "LibrarySpace_v2" '
+                "where libcal_id is not null and libcal_id <> ''"
+            )
+        finally:
+            await conn.close()
+
+    rows = asyncio.run(_q())
+    if not rows:
+        raise RuntimeError('no libcal_id rows in "LibrarySpace_v2"')
+    return [(str(r["libcal_id"]), str(r["name"])) for r in rows]
+
+
 CHECKS = (
     check_dependencies,
     check_memory_and_oom,
@@ -357,6 +483,7 @@ CHECKS = (
     check_no_stale_subject_links,
     check_what_real_users_disliked,
     check_corpus_freshness,
+    check_libcal_hours_are_possible,
 )
 
 

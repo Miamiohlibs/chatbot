@@ -249,3 +249,103 @@ def test_a_failed_send_is_logged_as_a_failure_not_as_success(monkeypatch,
     capsys.readouterr()
     assert code == 2, "a report nobody received is not a successful run"
     assert any("SEND FAILED" in r.message for r in caplog.records)
+
+
+# --- LibCal impossible-interval check ------------------------------------
+#
+# WHY: LibCal published Special Collections as open "8:00pm to 4:00pm" on
+# 2026-08-28 and 2026-09-04 -- both Fridays, so a recurring entry with an
+# am/pm typo -- and the bot repeated it word for word. The bot now declines
+# such an interval, but declining is not fixing: those days read "hours not
+# posted" until the calendar's owner edits LibCal, and only this check tells
+# them to.
+
+
+class _Loc:
+    def __init__(self, payload):
+        self.payload = payload
+
+
+def _wire(monkeypatch, locations, payload):
+    monkeypatch.setattr(dh, "_libcal_locations", lambda: locations)
+
+    async def _token():
+        return "t"
+
+    class _Resp:
+        def raise_for_status(self): pass
+        def json(self): return payload
+
+    class _Client:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def get(self, *a, **k): return _Resp()
+
+    import httpx
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **k: _Client())
+    monkeypatch.setattr(
+        "src.tools.libcal_comprehensive_tools._get_oauth_token", _token
+    )
+
+
+def _payload(intervals_by_day):
+    return [{"dates": {
+        day: {"status": "open", "hours": ivs}
+        for day, ivs in intervals_by_day.items()
+    }}]
+
+
+def test_libcal_check_reports_the_impossible_friday(monkeypatch):
+    _wire(monkeypatch, [("8424", "Special Collections")],
+          _payload({"2026-08-28": [{"from": "8:00pm", "to": "4:00pm"}]}))
+    f = dh.check_libcal_hours_are_possible()
+    assert not f.ok
+    assert "2026-08-28" in " ".join(f.detail)
+    assert "8424" in " ".join(f.detail)
+
+
+def test_libcal_check_passes_on_a_real_overnight_close(monkeypatch):
+    """King really is open until 1:00am. Reporting that as broken would
+    make this check worse than not having it."""
+    _wire(monkeypatch, [("1234", "King")],
+          _payload({"2026-08-28": [{"from": "7:00am", "to": "1:00am"}]}))
+    assert dh.check_libcal_hours_are_possible().ok
+
+
+def test_libcal_check_says_how_much_it_looked_at(monkeypatch):
+    _wire(monkeypatch, [("1", "A"), ("2", "B")],
+          _payload({"2026-08-28": [{"from": "8:00am", "to": "4:00pm"}]}))
+    f = dh.check_libcal_hours_are_possible()
+    assert f.ok and "2 location" in f.summary
+
+
+def test_seeing_nothing_is_not_the_same_as_all_clear(monkeypatch):
+    """The bug the first version of this check shipped with.
+
+    It looked spaces up with psycopg, which is not installed here, and
+    swallowed the ImportError into an empty list -- then reported "no
+    impossible intervals" while having read nothing at all. A health
+    check that cannot see must say so."""
+    def _boom():
+        raise RuntimeError("no module named psycopg")
+    monkeypatch.setattr(dh, "_libcal_locations", _boom)
+    f = dh.check_libcal_hours_are_possible()
+    assert not f.ok
+    assert "Nothing was checked" in " ".join(f.detail)
+
+
+def test_a_libcal_outage_does_not_double_alarm(monkeypatch):
+    """check_dependencies already reports LibCal being down. One cause
+    must not ring two alarms in the same mail."""
+    _wire(monkeypatch, [("8424", "Special Collections")], None)
+
+    import httpx
+
+    class _Dead:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def get(self, *a, **k): raise RuntimeError("connection refused")
+
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **k: _Dead())
+    f = dh.check_libcal_hours_are_possible()
+    assert f.ok and "skipped" in f.summary

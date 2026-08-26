@@ -104,6 +104,54 @@ def _clean_libcal_text(raw: str) -> str:
     return txt
 
 
+
+_TIME_RE = re.compile(r"^\s*(\d{1,2})(?::(\d{2}))?\s*([ap]m)?\s*$", re.I)
+
+
+def _minutes_since_midnight(t: str) -> "Optional[int]":
+    """"8:00pm" -> 1200. None if unparseable (never guess)."""
+    m = _TIME_RE.match(str(t or ""))
+    if not m:
+        return None
+    hour = int(m.group(1))
+    minute = int(m.group(2) or 0)
+    suffix = (m.group(3) or "").lower()
+    if hour > 23 or minute > 59:
+        return None
+    if suffix == "pm" and hour != 12:
+        hour += 12
+    elif suffix == "am" and hour == 12:
+        hour = 0
+    return hour * 60 + minute
+
+
+def interval_is_impossible(from_t: str, to_t: str) -> bool:
+    """True for an interval no building actually keeps.
+
+    LibCal is hand-maintained, and on 2026-08-26 it published Special
+    Collections as `{"from": "8:00pm", "to": "4:00pm"}` for the coming
+    Friday -- an am/pm typo against the 8:00am the other four weekdays
+    carry. We repeated it verbatim: "Friday, 8:00pm to 4:00pm", an
+    answer that is wrong on its face to anyone who reads it.
+
+    A closing time BEFORE the opening time is not by itself wrong --
+    King really does close at 1:00am. What separates the two is WHEN it
+    closes: a genuine overnight close lands in the small hours, so an
+    interval that wraps midnight and then runs to the AFTERNOON is a
+    typo, not a schedule. Nothing opens at 8pm and closes at 4pm the
+    next day.
+
+    Deliberately narrow. A wrong "closed" is as harmful as a wrong
+    "open", so this only rejects what cannot be true, and unparseable
+    times are left alone rather than guessed at.
+    """
+    a = _minutes_since_midnight(from_t)
+    b = _minutes_since_midnight(to_t)
+    if a is None or b is None:
+        return False
+    return b < a and b >= 12 * 60
+
+
 def describe_libcal_day(day_data: Optional[Dict[str, Any]]) -> Tuple[str, str]:
     """One `dates[YYYY-MM-DD]` entry -> (state, display text).
 
@@ -125,6 +173,20 @@ def describe_libcal_day(day_data: Optional[Dict[str, Any]]) -> Tuple[str, str]:
     if status == "text":
         return "text", _clean_libcal_text(day_data.get("text")) or "See website"
     if hours_list:
+        # A day whose published interval cannot be true is worse than a
+        # day with no data: the patron can act on it. Decline instead --
+        # "unknown" already means callers point at the hours page rather
+        # than assert. See interval_is_impossible().
+        if any(
+            interval_is_impossible(h.get("from"), h.get("to"))
+            for h in hours_list
+        ):
+            logging.warning(
+                "LibCal published an impossible interval; declining to "
+                "state it: %s",
+                hours_list,
+            )
+            return "unknown", HOURS_NOT_POSTED
         return "open", " and ".join(
             f"{h.get('from')} to {h.get('to')}" for h in hours_list
         )
