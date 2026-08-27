@@ -377,8 +377,13 @@ def build_conversations_router(deps: dict) -> Any:
             f"border-color:var(--miami)}}"
             f".convs td.num{{text-align:right;white-space:nowrap;"
             f"font-variant-numeric:tabular-nums}}</style>"
+            # "Flags" was a bare <th></th>. The column carries refusals,
+            # thumbs, low confidence, the patron's rating and the classified
+            # intent -- the densest column on the page and the only one a
+            # reader had to infer the meaning of. An unlabelled header is
+            # also unreachable to a screen reader.
             f"<table><tr><th>Time</th><th>Source</th><th>First question</th>"
-            f"<th>Asked</th><th></th></tr>"
+            f"<th>Asked</th><th>Flags</th></tr>"
             + "".join(row(r) for r in rows) + "</table>"
             + pager()
             + f"<h2 style='font-size:.95rem;margin-top:1.4rem'>Other days</h2>"

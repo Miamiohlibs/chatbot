@@ -144,3 +144,23 @@ async def test_the_patron_rating_reaches_the_row():
     rows = await attach_feedback(db, res["rows"])
     assert rows[0]["feedback_rating"] == 2
     assert rows[0]["feedback_comment"] == "did not answer me"
+
+
+# --- every column says what it is ----------------------------------------
+
+
+def test_the_flags_column_has_a_header():
+    """It shipped as a bare <th></th>. That column is the densest one on
+    the page -- refusals, thumbs, low confidence, the patron's rating, the
+    classified intent -- and the only one whose meaning a reader had to
+    infer. An empty header is also nothing at all to a screen reader.
+    """
+    import re
+    from pathlib import Path
+
+    src = Path("src/api/admin/conversations_router.py").read_text(
+        encoding="utf-8")
+    header = re.search(r"<th>Time</th>.*?</tr>", src, re.S)
+    assert header, "the conversations table header moved; update this test"
+    assert "<th></th>" not in header.group(0)
+    assert "<th>Flags</th>" in header.group(0)

@@ -41,7 +41,11 @@ def test_admin_hub_links_carry_key_and_list_surfaces():
     r = c.get("/admin/?key=admintok")
     assert r.status_code == 200
     for path in ("/admin/tickets/view?key=admintok",
-                 "/admin/review?key=admintok",
+                 # Flagged folded into Conversations on 2026-08-27, so the
+                 # dashboard points there. Two links to one page would
+                 # invite the reader to hunt for a difference that no
+                 # longer exists.
+                 "/admin/conversations?key=admintok",
                  "/admin/corrections/view?key=admintok",
                  "/admin/cost?key=admintok",
                  "/smoketest",
@@ -116,3 +120,13 @@ def test_staff_hub_drops_ask_us_and_says_what_reporting_costs_them():
     # process. The reassurance that matters moved to the line above it, and
     # that is what this asserts: the wording changed, the promise did not.
     assert "Nothing comes back to you" in r.text
+
+def test_the_dashboard_no_longer_offers_flagged_as_its_own_place():
+    """It is the same page now. A second name for one destination is how
+    somebody ends up checking both and wondering which is authoritative.
+
+    /admin/review itself still redirects -- that is for bookmarks, not for
+    the dashboard to keep advertising."""
+    body = _client().get("/admin/?key=admintok").text
+    assert ">Flagged<" not in body
+    assert "/admin/review" not in body

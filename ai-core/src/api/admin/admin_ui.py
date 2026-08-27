@@ -213,9 +213,15 @@ NAV = (
     # Conversations sits second because "what did people ask today" is the
     # question asked most often, and until 2026-08-21 the only way to answer
     # it was Flagged -> the `all` preset -> scroll and read timestamps.
+    #
+    # Flagged had its own entry here until 2026-08-27. It is the same page
+    # now -- Conversations grew the date range, the flag presets, the
+    # patron's rating and the classified intent -- so a second link would
+    # send two names to one destination and invite the reader to hunt for a
+    # difference that no longer exists. /admin/review still redirects, for
+    # the bookmarks.
     ("/admin/conversations", "Conversations", None),
     ("/admin/tickets/view", "Tickets", "tickets"),
-    ("/admin/review", "Flagged", "flagged"),
     ("/admin/corrections/view", "Corrections", None),
     ("/admin/cost", "Cost", None),
     # Corpus review sits beside Service because both are gates a colleague

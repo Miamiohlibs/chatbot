@@ -85,10 +85,11 @@ def render_admin_hub(admin_key: str, librarian_code: str,
     stats = (
         ui.stat_card(f"/admin/tickets/view{k}", tickets,
                      "staff tickets to work", needs=tickets > 0)
-        + ui.stat_card(f"/admin/review{k}", flagged,
-                       "flagged turns to review", needs=flagged > 0)
-        + ui.stat_card(f"/admin/review?filter=thumbs_up&key={ui.e(admin_key)}",
-                       praised, "thumbs-up to skim")
+        + ui.stat_card(f"/admin/conversations{k}{'&' if k else '?'}needs=1",
+                       flagged, "flagged turns to review", needs=flagged > 0)
+        + ui.stat_card(
+            f"/admin/conversations{k}{'&' if k else '?'}flag=thumbs_up",
+            praised, "thumbs-up to skim")
         + ui.stat_card(f"/admin/corrections/view{k}", corrections,
                        "corrections live now")
     )
