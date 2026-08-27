@@ -103,7 +103,19 @@ def _client(db):
 # --- filing: the ids are stored ------------------------------------------
 
 
-def _submit(db, **extra):
+def _submit(db, monkeypatch, **extra):
+    # Stub the mail. The submit handler sends a real alert email after
+    # writing the row, and this file did NOT stub it -- so every full-suite
+    # run posted three tickets and mailed the operator three times. They
+    # arrived as "correction ticket from Kevin / Where is the music
+    # library? / Amos Music Library.", which is this file's fixture data,
+    # and dozens landed before anybody connected the inbox to the test run.
+    #
+    # src/conftest.py now blocks SMTP suite-wide, so this is belt and
+    # braces rather than the only thing standing in the way.
+    from src.observability import alerting
+
+    monkeypatch.setattr(alerting, "send_alert_email", lambda *a, **kw: True)
     form = {
         "key": "x", "librarian_name": "Kevin", "librarian_email": "k@miamioh.edu",
         "question": "Where is the music library?",
@@ -113,20 +125,20 @@ def _submit(db, **extra):
     return _client(db).post("/librarian/ticket", data=form)
 
 
-def test_a_ticket_filed_from_a_conversation_records_it():
+def test_a_ticket_filed_from_a_conversation_records_it(monkeypatch):
     db = _DB()
-    r = _submit(db, conversation_id="c-42", message_id="m-7")
+    r = _submit(db, monkeypatch, conversation_id="c-42", message_id="m-7")
     assert r.status_code == 200
     assert db.created, "no ticket was written"
     assert db.created[0]["conversationId"] == "c-42"
     assert db.created[0]["messageId"] == "m-7"
 
 
-def test_a_ticket_filed_from_the_bare_form_stores_no_link():
+def test_a_ticket_filed_from_the_bare_form_stores_no_link(monkeypatch):
     """A librarian reporting what a patron told them at the desk has no
     conversation. Storing "" would make an unlinked ticket look linked."""
     db = _DB()
-    _submit(db)
+    _submit(db, monkeypatch)
     assert db.created[0]["conversationId"] is None
     assert db.created[0]["messageId"] is None
 
@@ -143,11 +155,11 @@ def test_the_form_prefills_and_carries_the_ids():
     assert "Where is the music library?" in r.text
 
 
-def test_a_validation_error_does_not_lose_the_link():
+def test_a_validation_error_does_not_lose_the_link(monkeypatch):
     """The round-trip that would quietly downgrade a linked ticket to an
     unlinked one for anyone who mistyped a field."""
     db = _DB()
-    r = _submit(db, conversation_id="c-42", message_id="m-7",
+    r = _submit(db, monkeypatch, conversation_id="c-42", message_id="m-7",
                 librarian_email="not-an-email")
     assert r.status_code == 422
     assert 'name="conversation_id" value="c-42"' in r.text.replace("'", '"')

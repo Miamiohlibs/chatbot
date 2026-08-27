@@ -60,3 +60,64 @@ def _isolate_prefix_registry():
 def _isolate_booking_ledger(tmp_path, monkeypatch):
     monkeypatch.setenv("BOOKING_QUOTA_PATH", str(tmp_path / "booking_quota.json"))
     yield
+
+@pytest.fixture(autouse=True)
+def _no_real_email(monkeypatch, request):
+    """A test can never send a real alert email.
+
+    WHY THIS EXISTS. src/api/admin/test_ticket_conversation_link.py posted
+    three tickets per run and did NOT stub send_alert_email, so every
+    full-suite run mailed the operator three times. They arrived as
+    "Chatbot correction ticket from Kevin / Where is the music library? /
+    Amos Music Library." -- that file's fixture data -- and there were
+    dozens before anybody connected the mail to the test run. The suite was
+    run more than a dozen times that day.
+
+    The old arrangement relied on every author remembering to monkeypatch
+    it. One file forgot and there was nothing between that and the
+    operator's inbox. Autouse, so forgetting is no longer possible.
+
+    The socket layer is patched, not just the wrapper: a test that reaches
+    for smtplib directly, or a helper that builds its own client, is
+    caught too. Raising rather than silently swallowing -- a test that
+    tries to send mail is a test with a bug in it, and it should say so
+    loudly instead of passing.
+
+    Opt out for the two tests that exist to check the sender itself:
+
+        @pytest.mark.allow_real_email
+    """
+    if request.node.get_closest_marker("allow_real_email") is not None:
+        return
+
+    import smtplib
+
+    def _blocked(*a, **kw):
+        raise AssertionError(
+            "a test tried to open an SMTP connection. Stub "
+            "send_alert_email (see test_ticket_router.py) instead of "
+            "mailing the operator -- this fired for real dozens of times "
+            "on 2026-08-27."
+        )
+
+    monkeypatch.setattr(smtplib, "SMTP", _blocked)
+    monkeypatch.setattr(smtplib, "SMTP_SSL", _blocked)
+
+    # And make the wrapper a no-op returning "sent", so the code paths that
+    # branch on its result still exercise the success branch.
+    try:
+        from src.observability import alerting
+
+        monkeypatch.setattr(alerting, "send_alert_email",
+                            lambda *a, **kw: True)
+    except Exception:  # noqa: BLE001 -- never break collection over this
+        pass
+
+
+def pytest_configure(config):
+    """Register the opt-out marker so --strict-markers stays usable."""
+    config.addinivalue_line(
+        "markers",
+        "allow_real_email: this test exercises the mail sender itself; the "
+        "suite-wide SMTP block is lifted for it.",
+    )
