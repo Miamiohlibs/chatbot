@@ -449,11 +449,52 @@ def _job_panel(key: str) -> str:
     return f"<div class='card'><h2>Get the newest pages</h2>{note}{fetch}</div>"
 
 
+def _exclusions_panel(key: str) -> str:
+    """What reviewers have excluded, and one click to undo each.
+
+    On the page, not in a file somebody has to know about. The original
+    objection to letting a form change the corpus was that the change
+    would outlive its conversation with nobody's name on it -- so every
+    row here carries the name, the date and the reason, and the undo is
+    next to it.
+    """
+    from scripts.etl import crawl_exclusions
+
+    rows = crawl_exclusions.load()
+    if not rows:
+        return ""
+    items = "".join(
+        f"<tr><td><code>{ui.e(e.get('url',''))}</code></td>"
+        f"<td class='dim'>{ui.e(e.get('by',''))}</td>"
+        f"<td class='dim'>{ui.e((e.get('at','') or '')[:10])}</td>"
+        f"<td>{ui.e(e.get('reason','') or '—')}</td>"
+        f"<td><form method='post' action='/admin/etl/include"
+        f"?key={ui.e(key)}' style='margin:0'>"
+        f"<input type='hidden' name='url' value='{ui.e(e.get('url',''))}'>"
+        f"<input type='email' name='email' required placeholder='your email' "
+        f"style='max-width:12rem;font-size:.85rem'>"
+        f"<input type='password' name='password' required "
+        f"placeholder='passphrase' style='max-width:10rem;font-size:.85rem'>"
+        f"<button type='submit' class='ghost'>put it back</button>"
+        f"</form></td></tr>"
+        for e in rows
+    )
+    return (
+        "<div class='card'><h2>Pages reviewers have excluded</h2>"
+        "<p class='hint'>These are skipped by the crawl. Putting one back "
+        "takes effect on the next fetch — nothing changes until somebody "
+        "fetches, reads the new diff and signs it.</p>"
+        "<table><tr><th>Page</th><th>By</th><th>When</th><th>Why</th>"
+        f"<th></th></tr>{items}</table></div>"
+    )
+
+
 def render_page(key: str, message: str = "", ok: str = "") -> str:
     diff = latest_diff()
     if diff is None:
         return ui.page("Corpus review",
                        _job_panel(key)
+                       + _exclusions_panel(key)
                        + "<p>No prepared diff is waiting — use the button "
                          "above to fetch the site's current pages.</p>",
                        current="/admin/etl", key=key)
@@ -560,8 +601,22 @@ def render_page(key: str, message: str = "", ok: str = "") -> str:
             "(optional)</label>"
             "<textarea id='urls' name='urls' rows='4' "
             "placeholder='https://www.lib.miamioh.edu/...'></textarea>"
+            "<div class='acts' style='margin-top:.8rem;display:flex;"
+            "gap:.5rem;flex-wrap:wrap'>"
             "<button type='submit' class='ghost'>Send back without "
             "approving</button>"
+            # The button that closes the loop. "Send back" records an
+            # objection for somebody else to act on; when there is no
+            # somebody else, that is a message to nobody. This one acts on
+            # it: the pages named above are skipped by the crawl from now
+            # on, and the next fetch produces a diff without them.
+            "<button type='submit' name='exclude' value='yes'>"
+            "Send back <b>and</b> stop crawling the pages I named</button>"
+            "</div>"
+            "<p class='hint'>Exclusions are listed at the top of this page "
+            "with your name on them, and putting a page back is one click. "
+            "Nothing changes for readers until somebody fetches a new "
+            "diff, reads it, and signs.</p>"
             "</form>"
         )
 
@@ -569,6 +624,7 @@ def render_page(key: str, message: str = "", ok: str = "") -> str:
         "Corpus review",
         banner
         + _job_panel(key)
+        + _exclusions_panel(key)
         + f"<h1>{ui.e(diff.name)}</h1>"
         + state
         + objection
@@ -730,7 +786,7 @@ def build_etl_approval_router(deps: dict):
     @router.post("/etl/reject", response_class=HTMLResponse)
     async def reject(request: Request, key: str = "", email: str = Form(""),
                      password: str = Form(""), reason: str = Form(""),
-                     urls: str = Form(""), diff_hash: str = Form(""),
+                     urls: str = Form(""), exclude: str = Form(""), diff_hash: str = Form(""),
                      diff_file: str = Form(""), _u=Depends(guard)):
         diff = latest_diff()
         if diff is None:
@@ -769,6 +825,48 @@ def build_etl_approval_router(deps: dict):
         _mail_rejection(diff, email=who, reason=reason, urls=named)
         logger.warning("corpus diff %s SENT BACK by %s (%d page(s) named)",
                        diff.name, who, len(named))
+
+        # The objection acts on itself, when they ask it to. Recording it
+        # and waiting for an operator is a message to nobody once the
+        # person who reads those notes has handed over.
+        if (exclude or "").strip() and named:
+            from scripts.etl import crawl_exclusions
+
+            added = crawl_exclusions.add(named, by=who, reason=reason)
+            msg = (f"Sent back, and {len(added)} page(s) will be skipped "
+                   f"from the next fetch onward."
+                   if added else
+                   "Sent back. Those pages were already excluded.")
+            return HTMLResponse(render_page(key, "", msg), headers=_NOINDEX)
         return RedirectResponse(f"/admin/etl?key={key}", status_code=303)
+
+    @router.post("/etl/include", response_class=HTMLResponse)
+    async def include(request: Request, key: str = "", url: str = Form(""),
+                      email: str = Form(""), password: str = Form(""),
+                      _u=Depends(guard)):
+        """Undo one exclusion. Behind the same passphrase as making one.
+
+        Deliberately as easy as excluding: a change that is hard to
+        reverse is one people hesitate to make, and hesitating is how a
+        page that should not be in the corpus stays in it.
+        """
+        why = check_approver(email, password)
+        if why:
+            logger.warning("corpus re-include REFUSED for %r: %s",
+                           (email or "").strip().lower(), why)
+            if not note_failed_attempt(attempt_key(request)):
+                return HTMLResponse(render_page(key, _THROTTLED),
+                                    status_code=429, headers=_NOINDEX)
+            return HTMLResponse(render_page(key, why), status_code=403,
+                                headers=_NOINDEX)
+        reset_attempts(attempt_key(request))
+
+        from scripts.etl import crawl_exclusions
+
+        who = (email or "").strip().lower()
+        ok = crawl_exclusions.remove(url, by=who)
+        note = (f"{url} will be collected again from the next fetch onward."
+                if ok else "That page was not on the exclusion list.")
+        return HTMLResponse(render_page(key, "", note), headers=_NOINDEX)
 
     return router

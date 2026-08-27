@@ -98,6 +98,23 @@ def _is_excluded(url: str) -> tuple[bool, Optional[str]]:
     for pattern in getattr(config, "EXCLUDE_URL_REGEXES", ()):
         if re.search(pattern, path):
             return True, f"regex={pattern}"
+
+    # Pages a REVIEWER excluded, from the console. Checked last, because
+    # the lists above are a maintainer's deliberate config and this one is
+    # a colleague acting on a diff they just read -- if they ever disagree,
+    # the config wins and nothing changes silently.
+    #
+    # Exact URLs only, by construction: see crawl_exclusions, where the
+    # reason a web form is not allowed to take a prefix is written down.
+    try:
+        from scripts.etl import crawl_exclusions
+
+        hit = crawl_exclusions.is_excluded(url)
+        if hit:
+            return True, f"reviewer={hit.get('by') or 'unknown'}"
+    except Exception:  # noqa: BLE001 -- a bad store must not stop a crawl
+        pass
+
     return False, None
 
 

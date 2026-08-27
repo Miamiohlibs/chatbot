@@ -428,3 +428,102 @@ def test_the_page_offers_the_fetch_button(client):
     body = client.get("/admin/etl").text
     assert "/admin/etl/fetch" in body
     assert "Fetch the latest site content" in body
+
+
+# --- acting on your own objection ----------------------------------------
+#
+# "Send back" recorded a note for an operator to act on. Once the person
+# who reads those notes hands over, that is a message to nobody. The
+# reviewer can now exclude the pages they named -- with their name, their
+# reason and a one-click undo, so the original objection to a form doing
+# this (an anonymous change outliving its conversation) still holds.
+
+
+@pytest.fixture
+def store(tmp_path, monkeypatch):
+    from scripts.etl import crawl_exclusions
+
+    monkeypatch.setattr(crawl_exclusions, "STORE_PATH",
+                        tmp_path / "crawl_exclusions.json")
+    return crawl_exclusions
+
+
+def _send_back(client, diffs, **extra):
+    form = {"email": "a@miamioh.edu", "password": "correct horse",
+            "reason": "the events guide goes stale every semester",
+            "urls": "https://www.lib.miamioh.edu/research/instruction/workshops",
+            "diff_hash": gate.hash_diff_file(diffs), "diff_file": diffs.name}
+    form.update(extra)
+    return client.post("/admin/etl/reject", data=form)
+
+
+def test_sending_back_alone_changes_nothing(client, diffs, store):
+    """The plain button keeps its old meaning. Somebody who wants to
+    object without changing the corpus still can."""
+    r = _send_back(client, diffs)
+    assert r.status_code in (200, 303)
+    assert store.load() == []
+
+
+def test_sending_back_with_exclude_stops_the_crawl_collecting_it(
+        client, diffs, store):
+    r = _send_back(client, diffs, exclude="yes")
+    assert r.status_code == 200
+    urls = [e["url"] for e in store.load()]
+    assert "https://www.lib.miamioh.edu/research/instruction/workshops" in urls
+
+
+def test_the_exclusion_carries_the_reviewer_and_the_reason(client, diffs,
+                                                           store):
+    _send_back(client, diffs, exclude="yes")
+    e = store.load()[0]
+    assert e["by"] == "a@miamioh.edu"
+    assert "goes stale" in e["reason"]
+
+
+def test_a_wrong_passphrase_excludes_nothing(client, diffs, store):
+    _send_back(client, diffs, exclude="yes", password="wrong")
+    assert store.load() == []
+
+
+def test_excluding_with_no_pages_named_records_nothing(client, diffs, store):
+    """The reason is required, the pages are not. Ticking exclude with an
+    empty list must not be read as "exclude everything"."""
+    _send_back(client, diffs, exclude="yes", urls="")
+    assert store.load() == []
+
+
+def test_putting_a_page_back_is_one_click(client, diffs, store):
+    _send_back(client, diffs, exclude="yes")
+    assert store.load()
+    r = client.post("/admin/etl/include", data={
+        "url": "https://www.lib.miamioh.edu/research/instruction/workshops",
+        "email": "b@miamioh.edu", "password": "correct horse"})
+    assert r.status_code == 200
+    assert store.load() == []
+
+
+def test_putting_a_page_back_needs_the_passphrase_too(client, diffs, store):
+    _send_back(client, diffs, exclude="yes")
+    client.post("/admin/etl/include", data={
+        "url": "https://www.lib.miamioh.edu/research/instruction/workshops",
+        "email": "b@miamioh.edu", "password": "wrong"})
+    assert store.load(), "a wrong passphrase put the page back anyway"
+
+
+def test_the_page_lists_what_has_been_excluded(client, diffs, store):
+    _send_back(client, diffs, exclude="yes")
+    body = client.get("/admin/etl").text
+    assert "Pages reviewers have excluded" in body
+    assert "a@miamioh.edu" in body
+    assert "goes stale" in body
+
+
+def test_the_page_says_nothing_changes_until_somebody_signs(client, diffs,
+                                                            store):
+    """An exclusion does not touch the live index. Somebody still has to
+    fetch, read the new diff and sign -- the gate is not bypassed."""
+    _send_back(client, diffs, exclude="yes")
+    body = client.get("/admin/etl").text
+    assert "nothing changes until somebody" in body.lower() or \
+           "next fetch" in body.lower()

@@ -48,10 +48,27 @@ Two sections are worth your time before anything else:
 Then either:
 
 - **Approve, and make it live** — you have read it and it should ship.
-- **Send back without approving** — something is wrong. Say what, and
-  name the pages if you can. Nothing is applied, and the note reaches the
-  maintainer. This is the right button when a page you need is being
-  dropped, or when something is being indexed that should not be.
+- **Send back without approving** — something is wrong, and you want it
+  looked at. Say what, and name the pages. Nothing is applied.
+
+- **Send back *and* stop crawling the pages I named** — for the common
+  case: a page is being indexed that should not be. Those pages are
+  skipped from the next fetch onward, with your name and your reason on
+  the record.
+
+  This does **not** change anything readers see on its own. Fetch again,
+  read the new diff without those pages, and sign — the same three steps
+  as always.
+
+  Everything you have excluded is listed at the top of the page, and
+  **putting a page back is one click**. It is meant to be easy to undo:
+  hesitating is how a page that should not be in the corpus stays in it.
+
+  One page at a time, by its full address. You cannot exclude a whole
+  section this way — `/use/` would quietly take a quarter of the corpus
+  with it, and a form is not a place to make a decision that big. If you
+  really do need a whole section gone, that is a conversation with
+  whoever maintains the crawl config.
 
 You have to tick the box saying you read it. That is deliberate: your name
 goes on the record, and it should only go on something you actually looked
