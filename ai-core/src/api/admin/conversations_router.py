@@ -25,7 +25,10 @@ from typing import Any
 from src.api.admin import admin_ui as ui
 from urllib.parse import quote
 
+import re as _re
+
 from src.api.admin.review_queries import (
+    MAX_DAY_SPAN,
     search_messages,
     BETA_START_LOCAL,
     LIBRARY_TZ,
@@ -51,6 +54,11 @@ def shift_day(day: str, delta: int) -> str:
         return today_local()
 
 
+_DATE_RE = _re.compile(r"^\d{4}-\d{2}-\d{2}$")
+"""A date input can be typed by hand. Anything that is not a date is read
+as "no range" rather than handed to the parser to raise on."""
+
+
 def build_conversations_router(deps: dict) -> Any:
     """deps: {db, guard}."""
     try:
@@ -69,16 +77,25 @@ def build_conversations_router(deps: dict) -> Any:
     @router.get("/admin/conversations", response_class=HTMLResponse)
     async def conversations(day: str = "", key: str = "", page: int = 1,
                             per: int = 50, source: str = "",
+                            to: str = "", needs: int = 0,
                             _g=Depends(guard)) -> Any:
         day = day or today_local()
         page = max(1, page)
         per = min(max(per, 10), 200)
         source = source if source in {t for t, _ in SOURCE_TAGS} else ""
+        # `to` makes this a range and `needs` narrows it to the turns
+        # something went wrong in -- together, the two things Flagged could
+        # do that this page could not.
+        to = to if _DATE_RE.match(to or "") else ""
+        needs_only = bool(needs)
         kq = f"&key={_e(key)}" if key else ""
         sq = f"&source={_e(source)}" if source else ""
+        rq = f"&to={_e(to)}" if to else ""
+        nq = "&needs=1" if needs_only else ""
         res = await list_conversations_on(db, day, limit=per,
                                           offset=(page - 1) * per,
-                                          source=source)
+                                          source=source, day_to=to,
+                                          needs_only=needs_only)
         rows, total = res["rows"], res["total"]
         days = await conversation_days(db)
 
@@ -229,7 +246,35 @@ def build_conversations_router(deps: dict) -> Any:
                 f"<td>{' '.join(flags)}</td></tr>"
             )
 
-        needs = sum(1 for r in rows if r["needs_look"])
+        # Range + "only what went wrong". Rendered as a form rather than
+        # links because two dates and a checkbox is a form; the rest of the
+        # page's filters are one click each and stay links.
+        range_bar = (
+            f"<form method='get' action='/admin/conversations' "
+            f"class='rangebar' style='margin:.5rem 0;display:flex;gap:.4rem;"
+            f"align-items:center;flex-wrap:wrap'>"
+            + (f"<input type='hidden' name='key' value='{_e(key)}'>" if key else "")
+            + (f"<input type='hidden' name='source' value='{_e(source)}'>"
+               if source else "")
+            + f"<label for='r-from' class='dim'>from</label>"
+            f"<input id='r-from' type='date' name='day' value='{_e(day)}'>"
+            f"<label for='r-to' class='dim'>to</label>"
+            f"<input id='r-to' type='date' name='to' value='{_e(to)}' "
+            f"placeholder='same day'>"
+            f"<label class='dim'><input type='checkbox' name='needs' value='1'"
+            f"{' checked' if needs_only else ''}> only what went wrong</label>"
+            f"<button type='submit'>Show</button>"
+            + (f" <a class='tag' href='/admin/conversations"
+               f"{('?key=' + _e(key)) if key else ''}'>clear</a>"
+               if (to or needs_only) else "")
+            + f"</form>"
+            + (f"<p class='dim'>Range clamped to {MAX_DAY_SPAN} days — the "
+               f"whole span is read and grouped in memory, so a wider one "
+               f"would be a scan nobody is waiting for.</p>"
+               if res.get("clamped") else "")
+        )
+
+        needs_count = sum(1 for r in rows if r["needs_look"])
         # The console had no keyword search anywhere. Conversations browse
         # one day at a time, Flagged filters by preset, tickets by status --
         # so "has anyone ever asked about Zotero" meant opening days one
@@ -256,8 +301,12 @@ def build_conversations_router(deps: dict) -> Any:
             + (f"<p class='dim'>13 August is shown from 6:00pm, when the "
                f"bot went live to the public.</p>"
                if day == BETA_START_LOCAL[:10] else "")
-            + f"<p class='dim'>{total} conversation(s) on this day"
-            + (f" &middot; <b>{needs}</b> on this page worth a look" if needs else "")
+            + range_bar
+            + f"<p class='dim'>{total} conversation(s) "
+            + ("in this range" if to else "on this day")
+            + (" that something went wrong in" if needs_only else "")
+            + (f" &middot; <b>{needs_count}</b> on this page worth a look"
+               if needs_count and not needs_only else "")
             + " &middot; <span title='A label is only shown when something in "
               "the transcript supports it. No label means nothing does — the "
               "system stores no identity, so “patron” is never asserted. "

@@ -452,10 +452,22 @@ SOURCE_TAGS = (
 )
 
 
+MAX_DAY_SPAN = 31
+"""Widest range the day list will read at once.
+
+The whole day's messages are pulled and grouped in Python, so a span is a
+scan. A month is enough to answer "what went wrong this term so far" and
+small enough that nobody waits; asking for more is clamped and SAID, not
+silently trimmed.
+"""
+
+
 async def list_conversations_on(db: Any, day: "str", *,
                                 limit: int = 50,
                                 offset: int = 0,
-                                source: str = "") -> dict:
+                                source: str = "",
+                                day_to: str = "",
+                                needs_only: bool = False) -> dict:
     """Every conversation that had a question on `day` (YYYY-MM-DD, Oxford time).
 
     WHY THIS EXISTS
@@ -488,7 +500,19 @@ async def list_conversations_on(db: Any, day: "str", *,
         tz = ZoneInfo(LIBRARY_TZ)
         y, m, d = (int(p) for p in str(day).split("-"))
         start_local = datetime(y, m, d, tzinfo=tz)
-        end_local = start_local + _td(days=1)
+
+        # A range, when one is asked for. `day_to` is INCLUSIVE -- an
+        # operator picking 1st to 7th means seven days, and an end-exclusive
+        # reading of that silently drops the day they were looking for.
+        end_day = str(day_to or day)
+        y2, m2, d2 = (int(p) for p in end_day.split("-"))
+        end_local = datetime(y2, m2, d2, tzinfo=tz) + _td(days=1)
+        if end_local <= start_local:
+            end_local = start_local + _td(days=1)
+        clamped = False
+        if (end_local - start_local).days > MAX_DAY_SPAN:
+            end_local = start_local + _td(days=MAX_DAY_SPAN)
+            clamped = True
         start = start_local.astimezone(timezone.utc)
         end = end_local.astimezone(timezone.utc)
 
@@ -498,11 +522,12 @@ async def list_conversations_on(db: Any, day: "str", *,
             tzinfo=tz).astimezone(timezone.utc)
         if end <= beta:
             return {"rows": [], "total": 0, "offset": offset, "limit": limit,
-                    "source_counts": {}, "before_beta": True}
+                    "source_counts": {}, "before_beta": True,
+                    "clamped": False}
         start = max(start, beta)
     except Exception:  # noqa: BLE001 -- a bad date must not 500 the page
         return {"rows": [], "total": 0, "offset": offset, "limit": limit,
-                "source_counts": {}}
+                "source_counts": {}, "clamped": False}
 
     try:
         msgs = await db.message.find_many(
@@ -511,7 +536,7 @@ async def list_conversations_on(db: Any, day: "str", *,
         )
     except Exception:  # noqa: BLE001
         return {"rows": [], "total": 0, "offset": offset, "limit": limit,
-                "source_counts": {}}
+                "source_counts": {}, "clamped": clamped}
 
     by_conv: dict = {}
     for m in msgs:
@@ -603,6 +628,16 @@ async def list_conversations_on(db: Any, day: "str", *,
         want = "unlabelled" if source == "patron" else source
         out = [v for v in out if v["source"]["tag"] == want]
 
+    # Only the ones something went wrong in. BEFORE total and paging: a
+    # filter applied after them produces a page count for rows the filter
+    # already threw away, which reads as a broken pager. This is the same
+    # set Flagged shows -- a refusal, a thumbs-down, or a low-confidence
+    # answer -- and having it here is what lets one view answer both "what
+    # happened today" and "what went wrong this week".
+    if needs_only:
+        out = [v for v in out
+               if v["refusals"] or v["thumbs_down"] or v["low_confidence"]]
+
     out.sort(key=lambda r: r["first_ts"] or datetime.min.replace(
         tzinfo=timezone.utc), reverse=True)
     total = len(out)
@@ -615,7 +650,7 @@ async def list_conversations_on(db: Any, day: "str", *,
         r["needs_look"] = bool(r["refusals"] or r["thumbs_down"]
                                or r["low_confidence"])
     return {"rows": out, "total": total, "offset": offset, "limit": limit,
-            "source_counts": source_counts}
+            "source_counts": source_counts, "clamped": clamped}
 
 
 async def conversation_days(db: Any, *, limit: int = 30) -> list[dict]:
