@@ -160,5 +160,9 @@ def test_a_database_failure_closes_nothing_rather_than_guessing():
 
 
 def test_only_testing_tags_are_swept():
-    assert TESTING_TAGS == {"local", "staff", "maybe-staff"}
+    # `local` stays alongside `bot`: it is what "bot" was called before
+    # 2026-08-27 and twelve conversations still carry it. Dropping it would
+    # quietly reclassify twelve known scripts as patron traffic, which is
+    # the direction that inflates every "real patron" number we report.
+    assert TESTING_TAGS == {"bot", "local", "staff", "maybe-staff"}
     assert "unlabelled" not in TESTING_TAGS

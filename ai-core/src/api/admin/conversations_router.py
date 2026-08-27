@@ -29,6 +29,7 @@ import re as _re
 
 from src.api.admin.review_queries import (
     MAX_DAY_SPAN,
+    canonical_source,
     attach_feedback,
     search_messages,
     BETA_START_LOCAL,
@@ -94,7 +95,12 @@ def build_conversations_router(deps: dict) -> Any:
         day = day or today_local()
         page = max(1, page)
         per = min(max(per, 10), 200)
-        source = source if source in {t for t, _ in SOURCE_TAGS} else ""
+        # The retired `local` is mapped onto `bot` inside
+        # list_conversations_on, so a bookmarked ?source=local still lands
+        # where it used to. Validated against the alias too, or the filter
+        # would be dropped before it ever got there.
+        source = (source if canonical_source(source)
+                  in {t for t, _ in SOURCE_TAGS} else "")
         # `to` makes this a range and `needs` narrows it to the turns
         # something went wrong in -- together, the two things Flagged could
         # do that this page could not.
@@ -211,7 +217,12 @@ def build_conversations_router(deps: dict) -> Any:
             return HTMLResponse(ui.page("Conversations", body,
                                         current="/admin/conversations", key=key))
 
-        _SRC_CLASS = {"staff": "thumbs_up", "local": "refusal",
+        _SRC_CLASS = {"staff": "thumbs_up", "bot": "refusal",
+                      # `local` is what "bot" was called before 2026-08-27.
+                      # Rows written then still carry it, and losing the
+                      # colour would make an old row look like a new kind
+                      # of thing.
+                      "local": "refusal",
                       "maybe-staff": "low_confidence",
                       "patron-confirmed": "thumbs_up"}
 
@@ -237,10 +248,15 @@ def build_conversations_router(deps: dict) -> Any:
             # trusting; these override everything, including the recorded
             # facts, because the reader can know things the data cannot
             # hold.
+            # B / S / P -- bot, staff, patron. They were S / T / P until
+            # 2026-08-27, where "S" meant script-local and "T" meant staff:
+            # the letters did not match their own words, and the reader had
+            # to hover to find out which was which.
             controls = (
                 "<span class='setsrcs'>"
-                + set_link(cid, "local", "S", "Mark as a script / local test")
-                + set_link(cid, "staff", "T", "Mark as staff testing")
+                + set_link(cid, "bot", "B", "Mark as a bot / script — not a "
+                                            "person")
+                + set_link(cid, "staff", "S", "Mark as staff testing")
                 + set_link(cid, "patron", "P", "Confirm this was a patron")
                 + (set_link(cid, "", "×", "Clear the manual verdict")
                    if src.get("manual") else "")
@@ -501,7 +517,7 @@ def build_conversations_router(deps: dict) -> Any:
 
         from src.api.admin.review_queries import MANUAL_LABELS
 
-        value = (set or "").strip().lower()
+        value = canonical_source(set or "")
         data: dict
         if value in MANUAL_LABELS:
             data = {"sourceOverride": value,

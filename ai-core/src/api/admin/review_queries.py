@@ -448,7 +448,7 @@ SOURCE_TAGS = (
     ("patron-confirmed", "Confirmed patron"),
     ("staff", "Staff test"),
     ("maybe-staff", "Possibly staff"),
-    ("local", "Local test"),
+    ("bot", "Bot / script"),
 )
 
 
@@ -636,8 +636,14 @@ async def list_conversations_on(db: Any, day: "str", *,
         source_counts[key] = source_counts.get(key, 0) + 1
 
     if source:
-        want = "unlabelled" if source == "patron" else source
-        out = [v for v in out if v["source"]["tag"] == want]
+        # Canonicalised HERE, not in the router: this is where the
+        # filtering happens, so every caller gets the alias -- a script, the
+        # eval, or an endpoint somebody adds later. Putting it one layer up
+        # meant ?source=local worked in a browser and silently returned
+        # nothing everywhere else.
+        want = canonical_source(source)
+        want = "unlabelled" if want == "patron" else want
+        out = [v for v in out if canonical_source(v["source"]["tag"]) == want]
 
     # Only the ones something went wrong in. BEFORE total and paging: a
     # filter applied after them produces a page count for rows the filter
@@ -1088,10 +1094,26 @@ def _known_staff_addresses() -> frozenset:
 
 
 MANUAL_LABELS = {
-    "local":  ("local test", "local"),
+    "bot":    ("bot", "bot"),
     "staff":  ("staff test", "staff"),
     "patron": ("patron", "patron-confirmed"),
 }
+
+MANUAL_ALIASES = {
+    # `local` was what "bot" was called until 2026-08-27, when the three
+    # buttons became B/S/P -- bot, staff, patron -- because the old S/T/P
+    # did not line up with its own words: "S" meant script-local and "T"
+    # meant staff. Twelve conversations carry the old value and any
+    # bookmarked ?source=local still names it, so it is accepted on READ
+    # for ever and never written again.
+    "local": "bot",
+}
+
+
+def canonical_source(value: str) -> str:
+    """The tag we store today for whatever a caller hands us."""
+    v = (value or "").strip().lower()
+    return MANUAL_ALIASES.get(v, v)
 
 
 def classify_source(conv: dict) -> dict:
@@ -1107,7 +1129,12 @@ def classify_source(conv: dict) -> dict:
     # ones. They can know things the data cannot hold -- that the colleague
     # at the next desk was the one testing, that a question came in by
     # phone and was typed in on somebody's behalf.
-    manual = (conv.get("source_override") or "").strip().lower()
+    # canonical_source, not a bare lower(): twelve conversations were
+    # labelled before `local` was renamed to `bot`, and if their override
+    # stops being recognised they fall back to the automatic rules -- a
+    # person's verdict silently overruled by a guess, which is the one
+    # thing this branch exists to prevent.
+    manual = canonical_source(conv.get("source_override") or "")
     if manual in MANUAL_LABELS:
         label, tag = MANUAL_LABELS[manual]
         who = conv.get("source_override_by") or "an operator"
@@ -1120,7 +1147,7 @@ def classify_source(conv: dict) -> dict:
                 "why": "Arrived through the staff-test link — recorded at "
                        "connection, not inferred."}
     if conv.get("has_dev_row"):
-        return {"label": "local test", "tag": "local",
+        return {"label": "bot", "tag": "bot",
                 "why": "Reached the server with no browser origin — a script."}
 
     qs = conv.get("questions") or []
@@ -1150,13 +1177,13 @@ def classify_source(conv: dict) -> dict:
     burst = conv.get("burst")
     if burst:
         if burst.get("by_pace"):
-            return {"label": "local test", "tag": "local",
+            return {"label": "bot", "tag": "bot",
                     "why": f"One of {burst['n']} conversations opened a "
                            f"median {burst['median_gap_s']:.1f}s apart. "
                            f"Nobody reads an answer, opens a new window and "
                            f"types that fast — this is a script."}
         if burst["scripted"]:
-            return {"label": "local test", "tag": "local",
+            return {"label": "bot", "tag": "bot",
                     "why": f"One of {burst['n']} conversations opened within "
                            f"{burst['span_s'] / 60:.0f} min, and one of them "
                            f"reached the server with no browser origin — the "
@@ -1180,14 +1207,14 @@ def classify_source(conv: dict) -> dict:
                        "conversation. Who is not recorded here."}
 
     if conv.get("is_echo"):
-        return {"label": "local test", "tag": "local",
+        return {"label": "bot", "tag": "bot",
                 "why": "Nothing in this conversation was asked first — every "
                        "question in it had already been put to the bot by "
                        "somebody else. A person originates at least one "
                        "question; a replay originates none."}
 
     if conv.get("is_replay"):
-        return {"label": "local test", "tag": "local",
+        return {"label": "bot", "tag": "bot",
                 "why": "This question was already asked, word for word, in an "
                        "earlier conversation. Forty characters of identical "
                        "text is a replay, not two people phrasing something "
@@ -1360,7 +1387,10 @@ async def sources_for_conversations(db: Any, conversation_ids: list) -> dict:
     return {v["conversation_id"]: classify_source(v) for v in rows}
 
 
-TESTING_TAGS = frozenset({"local", "staff", "maybe-staff"})
+TESTING_TAGS = frozenset({"bot", "local", "staff", "maybe-staff"})
+"""`local` stays in the set: rows written before the 2026-08-27
+rename still carry it, and dropping it would quietly reclassify
+twelve known scripts as patron traffic."""
 
 
 async def close_testing_rows(db: Any, *, filter_preset: str = "flagged",

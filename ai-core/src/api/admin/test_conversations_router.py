@@ -193,7 +193,7 @@ async def test_a_scripted_conversation_is_labelled_local_test():
     noon = dt.datetime(2026, 8, 21, 12, tzinfo=NY)
     db = _DB([_msg("scripted", noon, "user", "hi")], dev_convs=["scripted"])
     r = (await list_conversations_on(db, "2026-08-21"))["rows"][0]
-    assert r["source"]["label"] == "local test"
+    assert r["source"]["label"] == "bot"
     assert r["source"]["why"], "a label with no reason is a label nobody trusts"
 
 
@@ -279,7 +279,11 @@ def _mixed():
 @pytest.mark.asyncio
 async def test_each_source_filter_returns_only_that_group():
     db = _mixed()
-    for src, expect in (("staff", {"staff1"}), ("local", {"script1"}),
+    for src, expect in (("staff", {"staff1"}), ("bot", {"script1"}),
+                        # The retired name still filters to the same group:
+                        # ?source=local is in bookmarks and in every link
+                        # printed on the page before 2026-08-27.
+                        ("local", {"script1"}),
                         ("patron", {"plain1", "plain2"})):
         rows = (await list_conversations_on(db, "2026-08-21", source=src))["rows"]
         assert {r["conversation_id"] for r in rows} == expect, src
@@ -314,7 +318,7 @@ async def test_a_filtered_total_is_the_filtered_count_not_the_day_count():
 # The per-conversation rules could not see the commonest shape of testing:
 # separate one-question conversations opened seconds apart. On 17 August a
 # batch like that sat in the list with 27 rows unmarked and a handful marked
-# "local test" -- purely because only the turns that reached a model leave a
+# "bot" -- purely because only the turns that reached a model leave a
 # ModelTokenUsage row to read.
 
 
@@ -340,7 +344,7 @@ async def test_one_scripted_member_makes_the_whole_run_a_script():
     # same script, and only some of its turns happened to reach a model.
     db = _DB(_burst(6), dev_convs=["b3"])
     rows = (await list_conversations_on(db, "2026-08-21"))["rows"]
-    assert all(r["source"]["tag"] == "local" for r in rows)
+    assert all(r["source"]["tag"] == "bot" for r in rows)
     assert "no browser origin" in rows[0]["source"]["why"]
 
 
@@ -425,7 +429,7 @@ async def test_the_staff_link_still_outranks_every_inference():
 async def test_a_run_at_machine_speed_is_a_script_even_with_no_dev_flag():
     db = _DB(_burst(6, gap_s=2))          # 2s apart, no dev row anywhere
     rows = (await list_conversations_on(db, "2026-08-21"))["rows"]
-    assert all(r["source"]["tag"] == "local" for r in rows)
+    assert all(r["source"]["tag"] == "bot" for r in rows)
     assert "types that fast" in rows[0]["source"]["why"]
 
 
@@ -453,7 +457,7 @@ async def test_the_dev_flag_still_wins_when_the_pace_is_human():
     # being a fact because somebody put a sleep in the loop.
     db = _DB(_burst(6, gap_s=30), dev_convs=["b2"])
     rows = (await list_conversations_on(db, "2026-08-21"))["rows"]
-    assert all(r["source"]["tag"] == "local" for r in rows)
+    assert all(r["source"]["tag"] == "bot" for r in rows)
     assert "no browser origin" in rows[0]["source"]["why"]
 
 
@@ -476,7 +480,7 @@ async def test_a_scripted_replay_does_not_relabel_the_question_it_replayed():
     ], dev_convs=["replay"])
     rows = {r["conversation_id"]: r
             for r in (await list_conversations_on(db, "2026-08-21"))["rows"]}
-    assert rows["replay"]["source"]["tag"] == "local"
+    assert rows["replay"]["source"]["tag"] == "bot"
     assert rows["patron"]["source"]["tag"] == "unlabelled", \
         "the replay must not reach back and relabel what it replayed"
 
@@ -532,7 +536,7 @@ async def test_a_script_replaying_a_staff_question_is_still_a_script():
                  "I am a remote student, contact qum@miamioh.edu")
             for i in range(6)]
     rows = (await list_conversations_on(_DB(msgs), "2026-08-21"))["rows"]
-    assert all(r["source"]["tag"] == "local" for r in rows), \
+    assert all(r["source"]["tag"] == "bot" for r in rows), \
         [r["source"]["tag"] for r in rows]
 
 
@@ -586,7 +590,7 @@ async def test_a_long_verbatim_repeat_from_an_earlier_day_is_a_replay():
     db = _DB([_msg("original", earlier, "user", long_q),
               _msg("replay", today, "user", long_q)])
     r = (await list_conversations_on(db, "2026-08-21"))["rows"][0]
-    assert r["source"]["tag"] == "local"
+    assert r["source"]["tag"] == "bot"
     assert "word for word" in r["source"]["why"]
 
 
@@ -622,7 +626,7 @@ async def test_a_conversation_that_originates_nothing_is_a_replay():
     ])
     rows = {r["conversation_id"]: r
             for r in (await list_conversations_on(db, "2026-08-21"))["rows"]}
-    assert rows["echo"]["source"]["tag"] == "local"
+    assert rows["echo"]["source"]["tag"] == "bot"
     assert "asked first" in rows["echo"]["source"]["why"]
 
 

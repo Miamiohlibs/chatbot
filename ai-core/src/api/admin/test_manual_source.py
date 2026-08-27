@@ -23,7 +23,7 @@ NY = dt.timezone(dt.timedelta(hours=-4))
 
 
 @pytest.mark.parametrize("value,tag", [
-    ("local", "local"), ("staff", "staff"), ("patron", "patron-confirmed"),
+    ("bot", "bot"), ("staff", "staff"), ("patron", "patron-confirmed"),
 ])
 def test_each_verdict_is_honoured(value, tag):
     assert classify_source({"source_override": value})["tag"] == tag
@@ -44,7 +44,7 @@ def test_a_verdict_overrides_the_script_detector():
 
 
 def test_the_reason_says_it_was_a_person_and_who():
-    v = classify_source({"source_override": "local",
+    v = classify_source({"source_override": "bot",
                          "source_override_by": "qum"})
     assert v["manual"] is True
     assert "qum" in v["why"] and "by hand" in v["why"]
@@ -62,7 +62,7 @@ def test_an_unknown_value_is_ignored_rather_than_trusted():
 
 
 def test_the_three_choices_are_the_three_the_page_offers():
-    assert set(MANUAL_LABELS) == {"local", "staff", "patron"}
+    assert set(MANUAL_LABELS) == {"bot", "staff", "patron"}
 
 
 # --- the endpoint ----------------------------------------------------------
@@ -96,7 +96,7 @@ def client():
     return TestClient(app, raise_server_exceptions=False), db
 
 
-@pytest.mark.parametrize("value", ["local", "staff", "patron"])
+@pytest.mark.parametrize("value", ["bot", "staff", "patron"])
 def test_setting_a_verdict_records_it_with_who_and_when(client, value):
     c, db = client
     r = c.get(f"/admin/conversations/c-1/source?set={value}&day=2026-08-21",
