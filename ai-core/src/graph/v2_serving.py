@@ -301,6 +301,25 @@ async def handle_v2_message(
     # sync too -> runs in the executor just the same.
     loop = asyncio.get_running_loop()
     resp = await loop.run_in_executor(None, run_turn_fn, req, deps)
+
+    # Record which corrections fired. Nothing wrote ManualCorrection's
+    # fireCount, while the admin list rendered it -- so every rule read as
+    # "never fired" however often it did, and that reading nearly retired
+    # five working ones as dead weight. A counter that only ever says zero
+    # is worse than no counter: it looks like evidence.
+    #
+    # After the answer, never before it, and every failure swallowed: a
+    # telemetry write must not cost the turn the correction just improved.
+    fired = list(getattr(resp, "fired_corrections", None) or [])
+    if fired:
+        recorder = getattr(deps, "record_fired_corrections", None)
+        if callable(recorder):
+            try:
+                await loop.run_in_executor(None, recorder, fired)
+            except Exception:  # noqa: BLE001
+                logging.getLogger("v2_serving").warning(
+                    "recording fired corrections failed", exc_info=True)
+
     return turnresponse_to_wire(
         resp, message_id=message_id, conversation_id=conversation_id
     )
@@ -383,6 +402,7 @@ def build_v2_deps() -> OrchestratorDeps:
         # SPACES-backed -> pure/sync, no DB at request time, cannot be
         # silently disabled. Production serving MUST have this on.
         lookup_service_availability=build_service_guard(),
+        record_fired_corrections=_corrections_store.record_fired,
     )
 
 

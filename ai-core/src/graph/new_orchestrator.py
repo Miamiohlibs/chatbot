@@ -210,6 +210,15 @@ class OrchestratorDeps:
     Default no-op so tests don't need a DB; prod passes the real
     persistence function."""
 
+    record_fired_corrections: "Optional[Callable[[list[int]], int]]" = None
+    """Called AFTER the answer with the correction ids that fired.
+
+    Best-effort telemetry, and optional so every existing caller -- the
+    eval, inspect_turn, every test -- keeps working unchanged and simply
+    records nothing. Nothing wrote ManualCorrection.fireCount while the
+    admin list rendered it, so every rule read as "never fired" however
+    often it did."""
+
 
 # --- The main entry point ------------------------------------------------
 

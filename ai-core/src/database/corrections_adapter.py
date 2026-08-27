@@ -212,6 +212,63 @@ class PrismaCorrectionsStore:
         _invalidate_module_cache()
         return self.load_active()
 
+
+    def record_fired(self, fired_int_ids: "list[int]") -> int:
+        """Bump `fireCount` for the corrections that fired on a turn.
+
+        NOTHING WROTE THIS COLUMN. The admin list rendered it, so every
+        correction read as "never fired" no matter how often it did --
+        and that reading nearly retired five working rules as dead
+        weight. A counter that only ever says zero is worse than no
+        counter: it looks like evidence.
+
+        Best-effort by design. A failed increment must not cost the turn
+        the correction already improved, so every error is swallowed and
+        logged. Returns how many rows were bumped, for tests and logs.
+
+        The int ids come from `_uuid_to_int`, which is one-way, so the
+        mapping is rebuilt from the active rows rather than inverted.
+        That is a second query on a turn that fired a correction --
+        rare, and cheaper than carrying the uuid through a type change
+        that ripples into TurnResponse.
+        """
+        wanted = {int(i) for i in (fired_int_ids or [])}
+        if not wanted:
+            return 0
+        try:
+            return int(_run_async(self._arecord_fired(wanted)))
+        except Exception:  # noqa: BLE001 -- telemetry must never break a turn
+            logger.warning("could not record fired corrections %s", wanted,
+                           exc_info=True)
+            return 0
+
+    async def _arecord_fired(self, wanted: "set[int]") -> int:
+        from prisma import Prisma
+
+        client = self.client if self._injected else Prisma()
+        opened = False
+        if not self._injected:
+            await client.connect()
+            opened = True
+        elif hasattr(client, "is_connected") and not client.is_connected():
+            await client.connect()
+        try:
+            rows = await client.manualcorrection.find_many(
+                where={"active": True})
+            bumped = 0
+            for r in rows:
+                if _uuid_to_int(r.id) not in wanted:
+                    continue
+                await client.manualcorrection.update(
+                    where={"id": r.id},
+                    data={"fireCount": int(getattr(r, "fireCount", 0) or 0) + 1},
+                )
+                bumped += 1
+            return bumped
+        finally:
+            if opened:
+                await client.disconnect()
+
     async def _aload_active(self) -> list[ManualCorrection]:
         if self._injected:
             client = self.client
