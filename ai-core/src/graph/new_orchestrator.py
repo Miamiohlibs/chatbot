@@ -2910,6 +2910,21 @@ _LIBRARIAN_WORD = (
 _SUBJECT_WORD = (
     r"(?:subject|subjekt|subjct|subect|sujbect|subjet)"
 )
+_LIBRARY_WORD = (
+    # The BUILDING, not the person. `_LIBRARIAN_WORD` above was made
+    # forgiving and this was not, so "who is in charge of the lirbary"
+    # missed the dean answer entirely and fell through to the subject
+    # path, which replied that Miami has no subject librarian for "library
+    # leadership". The same student typed it correctly a minute later and
+    # got the Dean's name (live, 2026-08-27 11:04 and 11:06 -- the two
+    # turns are one conversation).
+    #
+    # `librar\w+` already covers library/libraries/librarian, so the
+    # alternatives here are only the slips it cannot reach: the r/b
+    # transposition, the dropped r, and the extra e.
+    r"(?:librar\w+|lirbar\w+|libary|libarys|libaries|librray|librrary|"
+    r"liberary|libraray|libarary)"
+)
 """`subject` and its realistic slips. "hoo is my subjekt libarian" missed even
 after `who` and `librarian` were made tolerant, because the misspelled word in
 the MIDDLE blocked the optional qualifier group -- every word in the phrase has
@@ -5942,9 +5957,32 @@ _COMPLAINT_EXCLUDE_RE = re.compile(
 # Operator's instruction 2026-07-30: answer the dean, never the salary. Names
 # come from the Librarian table (Jerome Conley, Dean & University Librarian),
 # so a leadership change needs no code edit -- only the ROLE is hardcoded here.
+# Who leads the organisation. Three verb phrases were not enough: of eight
+# natural ways to ask this, seven missed -- "who leads the library", "who
+# manages the library", "who is the library director", "who is the head
+# librarian". Each one fell through to the subject path and was told Miami
+# has no subject librarian for whatever the agent made of it.
+#
+# Widened by VERB, not by loosening the noun. The library word still has to
+# be there (or "dean" / "university librarian"), and the negative lookahead
+# keeps "who manages the library WEBSITE" and "the library ACCOUNT" out --
+# those have owners who are not the Dean.
+_NOT_THE_ORGANISATION = (
+    r"(?!\s*(?:website|site|account|card|catalog|catalogue|app|system|"
+    r"page|guide|hours|building|instagram|twitter|facebook))"
+)
 _DEAN_RE = re.compile(
-    r"\b(dean|university\s+librarian|head\s+of\s+the\s+librar\w+"
-    r"|who\s+runs\s+the\s+librar\w+|in\s+charge\s+of\s+the\s+librar\w+)\b",
+    r"\b(dean"
+    r"|university\s+" + _LIBRARIAN_WORD
+    + r"|head\s+" + _LIBRARIAN_WORD
+    + r"|(?:head|boss|director|leader)\s+of\s+the\s+" + _LIBRARY_WORD
+    + _NOT_THE_ORGANISATION
+    + r"|(?:runs|leads|manages|oversees|directs|heads)\s+the\s+"
+    + _LIBRARY_WORD + _NOT_THE_ORGANISATION
+    + r"|in\s+charge\s+of\s+the\s+" + _LIBRARY_WORD
+    + _NOT_THE_ORGANISATION
+    + r"|" + _LIBRARY_WORD + r"\s+(?:director|dean)"
+    + r"|led\s+by)\b",
     re.IGNORECASE,
 )
 _SALARY_RE = re.compile(

@@ -5954,3 +5954,101 @@ class TestBorrowedElsewherePrefetch:
                                  "loan-periods-ohiolink-ill",
                       chunk_id="c-x", text="…")]
         assert self._ev("return an OhioLINK book", already) == already
+
+
+# --- a typo must not change the answer -----------------------------------
+#
+# Live, 2026-08-27, one conversation, two minutes apart:
+#
+#   11:04  "who is in charge of the lirbary"
+#          -> "Miami doesn't have a subject librarian listed for
+#              'library leadership' specifically."
+#   11:06  "who is in charge of the library"
+#          -> "Miami University Libraries is led by Jerome Conley, Dean and
+#              University Librarian."
+#
+# The same student, the same question, and the transposed r/b was the whole
+# difference. _LIBRARIAN_WORD had been made forgiving after "hoo is my
+# subjekt libarian"; the word for the BUILDING never was, so the dean
+# matcher missed and the turn fell through to the subject path -- which
+# then asserted that "library leadership" is a subject nobody covers.
+
+
+class TestTheDeanMatcherToleratesTypos:
+    @pytest.mark.parametrize("q", [
+        "who is in charge of the lirbary",
+        "who is in charge of the libary",
+        "who runs the librray",
+        "who is the head of the liberary",
+        "who is the university libarian",
+    ])
+    def test_a_misspelling_still_reaches_the_dean_answer(self, q):
+        from src.graph.new_orchestrator import _DEAN_RE
+
+        assert _DEAN_RE.search(q), q
+
+    @pytest.mark.parametrize("q", [
+        "who is in charge of the library",
+        "who runs the library",
+        "who is the dean",
+        "who is the university librarian",
+    ])
+    def test_the_correct_spellings_are_unaffected(self, q):
+        from src.graph.new_orchestrator import _DEAN_RE
+
+        assert _DEAN_RE.search(q), q
+
+    @pytest.mark.parametrize("q", [
+        "where is the library",
+        "how many libraries are there",
+        "what time does the library close",
+        "is the library open on Sunday",
+    ])
+    def test_it_does_not_swallow_every_question_with_library_in_it(self, q):
+        """Widening a matcher is how one answer starts taking questions
+        that are not its own -- the find-help menu did exactly that with
+        26 gold cases."""
+        from src.graph.new_orchestrator import _DEAN_RE
+
+        assert not _DEAN_RE.search(q), q
+
+
+class TestTheDeanMatcherKnowsTheOrdinaryPhrasings:
+    """Three verb phrases were not enough.
+
+    Of eight natural ways to ask who leads the library, SEVEN missed --
+    "who leads the library", "who manages the library", "who is the
+    library director", "who is the head librarian". Each fell through to
+    the subject path and was told Miami has no subject librarian for
+    whatever the agent made of the question.
+    """
+
+    @pytest.mark.parametrize("q", [
+        "who is the boss of the library",
+        "who manages the library",
+        "who is the director of the libraries",
+        "who leads the library",
+        "who is the library director",
+        "who is the head librarian",
+        "who oversees the library",
+        "the library is led by whom",
+    ])
+    def test_it_reaches_the_dean_answer(self, q):
+        from src.graph.new_orchestrator import _DEAN_RE
+
+        assert _DEAN_RE.search(q), q
+
+    @pytest.mark.parametrize("q", [
+        "who manages the library website",
+        "how do I manage my library account",
+        "where is my library card",
+        "who runs the library instagram",
+    ])
+    def test_it_leaves_the_things_the_dean_does_not_own(self, q):
+        """The website, the account, the card and the social accounts have
+        owners who are not the Dean. Widening by verb is safe; widening
+        the noun is how one answer starts taking questions that are not
+        its own."""
+        from src.graph.new_orchestrator import _DEAN_RE
+
+        assert not _DEAN_RE.search(q), q
