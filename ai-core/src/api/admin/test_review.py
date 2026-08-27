@@ -245,9 +245,13 @@ def test_html_and_json_401_without_token() -> None:
 
 def test_html_and_json_ok_with_token() -> None:
     c = _client("s3cret")
-    r = c.get("/admin/review?key=s3cret")
-    # renamed to match the nav label in the 2026-07-28 redesign
-    assert r.status_code == 200 and "Flagged conversations" in r.text
+    # The HTML list moved to /admin/conversations (2026-08-27); this URL
+    # still answers, as a redirect, because it is in bookmarks. Not
+    # followed here: the conversations router is not mounted on this test
+    # app, so following would 404 on a route that exists in production.
+    r = c.get("/admin/review?key=s3cret", follow_redirects=False)
+    assert r.status_code == 307
+    # The JSON API is unchanged -- it has consumers that are not a browser.
     rj = c.get("/admin/reviews", headers={"X-Admin-Token": "s3cret"})
     assert rj.status_code == 200 and "results" in rj.json()
 
@@ -352,30 +356,61 @@ if __name__ == "__main__":
     sys.exit(main())
 
 
-def test_review_list_renders_thumbs_up_and_star_rating() -> None:
+def test_the_flagged_list_now_redirects_to_conversations() -> None:
+    """Flagged listed MESSAGES by preset and dropped them once marked
+    handled. The conversations view could do neither -- until it grew a
+    date range, an "only what went wrong" filter, the same flag presets,
+    the patron's rating and the classified intent inline.
+
+    What is left of the difference is the mark-handled queue, and NOBODY
+    EVER USED IT: reviewedAt is null on all 3,096 assistant messages ever
+    logged, which is why 318 rows sat in a queue that never shrank.
+
+    A redirect, not a deletion: this URL is in browser history and in
+    bookmarks, and a 404 reads as the console being broken. The
+    capabilities themselves are asserted on the conversations page --
+    see test_conversation_range.py and test_merged_view.py.
+    """
     from fastapi import FastAPI
-    """Positive ratings and patron star ratings had no surface at all
-    before 2026-07-27 -- the data existed but the list couldn't show it."""
-    db = _StubDB(
-        msgs=[_msg(id="m9", isPositiveRated=True, conversationId="c1")],
-        fb_many=[SimpleNamespace(conversationId="c1", rating=5,
-                                 userComment="great answer")],
-    )
+    from starlette.testclient import TestClient
+
+    db = _StubDB(msgs=[_msg(id="m9", isPositiveRated=True, conversationId="c1")])
     guard = make_token_guard("s3cret")
     app = FastAPI()
     app.include_router(build_review_view_router(
         {"db": db, "guard": guard, "require_librarian": guard}))
-    from starlette.testclient import TestClient
-    c = TestClient(app, raise_server_exceptions=False)
-    r = c.get("/admin/review?filter=thumbs_up&key=s3cret")
-    assert r.status_code == 200
-    assert "thumbs-up" in r.text
-    assert "5/5" in r.text                    # star rating projected in
-    assert "great answer" in r.text           # patron comment visible
-    assert "thumbs_up" in r.text              # filter tab present
-    assert "mark reviewed" in r.text          # triage action present
-    assert ">view<" in r.text                 # link relabeled from "open"
+    c = TestClient(app, raise_server_exceptions=False, follow_redirects=False)
 
+    r = c.get("/admin/review?filter=thumbs_up&key=s3cret")
+    assert r.status_code == 307
+    assert "/admin/conversations" in r.headers["location"]
+    assert "flag=thumbs_up" in r.headers["location"]
+
+    # The default preset is the union of the three bad signals, which is
+    # what needs=1 means on the other page.
+    r2 = c.get("/admin/review?key=s3cret")
+    assert "needs=1" in r2.headers["location"]
+
+    # And it must span the beta, not land on today alone -- a preset that
+    # covered all time becoming a single day would read as "nothing here".
+    assert "day=2026-08-13" in r2.headers["location"]
+    assert "to=" in r2.headers["location"]
+
+
+def test_the_transcript_page_is_not_redirected() -> None:
+    """/admin/review/{id} is the transcript, and tickets, search and every
+    list row link into it. Only the LIST moved."""
+    from fastapi import FastAPI
+    from starlette.testclient import TestClient
+
+    db = _StubDB(msgs=[_msg(id="m1", conversationId="c1")])
+    g = make_token_guard("k")
+    app = FastAPI()
+    app.include_router(build_review_view_router(
+        {"db": db, "guard": g, "require_librarian": g}))
+    r = TestClient(app, raise_server_exceptions=False,
+                   follow_redirects=False).get("/admin/review/c1?key=k")
+    assert r.status_code != 307
 
 def test_review_mark_updates_and_redirects_back_to_filter() -> None:
     from fastapi import FastAPI
@@ -443,28 +478,6 @@ def test_tools_used_summary_falls_back_for_pre_v2_conversations() -> None:
     )
     d = _run(conversation_detail(db, "c1"))
     assert d["tools_used_summary"] == ["search_website"]
-
-
-def test_the_flagged_list_shows_what_the_bot_classified_the_question_as() -> None:
-    """Every assistant message carries an intent -- 1,204 of 1,204 in
-    August -- and none of it was rendered, so triaging the queue meant
-    opening a conversation to find out what the bot thought it was being
-    asked."""
-    from fastapi import FastAPI
-    from starlette.testclient import TestClient
-
-    db = _StubDB(msgs=[_msg(id="m1", type="assistant", intent="room_booking",
-                            scopeCampus="middletown",
-                            scopeLibrary="gardner_harvey",
-                            isPositiveRated=False)])
-    g = make_token_guard("k")
-    app = FastAPI()
-    app.include_router(build_review_view_router(
-        {"db": db, "guard": g, "require_librarian": g}))
-    body = TestClient(app).get("/admin/review?key=k").text
-
-    assert "tag intent" in body
-    assert "room_booking" in body
 
 
 def test_the_conversation_page_shows_the_whole_decision_not_just_the_text() -> None:

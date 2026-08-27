@@ -125,10 +125,13 @@ def render_admin_hub(admin_key: str, librarian_code: str,
               "progress → done; each links to the corrections tool.",
               ui.action(f"/admin/tickets/view{k}", "Open",
                         primary=tickets > 0))
-        + _card("Flagged conversations",
-                "Thumbs-down, refusals and low-confidence turns, with the "
-                "patron's star rating and comment inline.",
-                ui.action(f"/admin/review{k}", "Open", primary=flagged > 0))
+        + _card("What went wrong",
+                "Refusals, thumbs-down and low-confidence turns across a "
+                "date range, with the patron's rating and what the bot "
+                "classified the question as.",
+                ui.action(f"/admin/conversations{k}"
+                          f"{'&' if k else '?'}needs=1",
+                          "Open", primary=flagged > 0))
         + _card("Manual corrections",
                 "Suppress, replace, pin or blacklist a source. Takes "
                 "effect on the next message — no deploy.",

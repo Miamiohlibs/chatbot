@@ -467,7 +467,8 @@ async def list_conversations_on(db: Any, day: "str", *,
                                 offset: int = 0,
                                 source: str = "",
                                 day_to: str = "",
-                                needs_only: bool = False) -> dict:
+                                needs_only: bool = False,
+                                flag: str = "") -> dict:
     """Every conversation that had a question on `day` (YYYY-MM-DD, Oxford time).
 
     WHY THIS EXISTS
@@ -523,11 +524,12 @@ async def list_conversations_on(db: Any, day: "str", *,
         if end <= beta:
             return {"rows": [], "total": 0, "offset": offset, "limit": limit,
                     "source_counts": {}, "before_beta": True,
-                    "clamped": False}
+                    "clamped": False, "flag_counts": {}}
         start = max(start, beta)
     except Exception:  # noqa: BLE001 -- a bad date must not 500 the page
         return {"rows": [], "total": 0, "offset": offset, "limit": limit,
-                "source_counts": {}, "clamped": False}
+                "source_counts": {}, "clamped": False,
+                "flag_counts": {}}
 
     try:
         msgs = await db.message.find_many(
@@ -536,7 +538,8 @@ async def list_conversations_on(db: Any, day: "str", *,
         )
     except Exception:  # noqa: BLE001
         return {"rows": [], "total": 0, "offset": offset, "limit": limit,
-                "source_counts": {}, "clamped": clamped}
+                "source_counts": {}, "clamped": clamped,
+                "flag_counts": {}}
 
     by_conv: dict = {}
     for m in msgs:
@@ -548,6 +551,11 @@ async def list_conversations_on(db: Any, day: "str", *,
             "questions": [], "question_times": [], "turns": 0,
             "refusals": 0, "thumbs_down": 0, "thumbs_up": 0,
             "low_confidence": 0, "has_dev_row": False,
+            # What the bot thought it was being asked. Every assistant
+            # message carries one and none of it was rendered here, so
+            # triaging meant opening a conversation to find out. Flagged
+            # showed it; this list has to as well or the merge loses it.
+            "intents": [],
         })
         ts = getattr(m, "timestamp", None)
         if slot["first_ts"] is None:
@@ -566,6 +574,9 @@ async def list_conversations_on(db: Any, day: "str", *,
                 slot["thumbs_up"] += 1
             if getattr(m, "confidence", "") == "low":
                 slot["low_confidence"] += 1
+            _in = (getattr(m, "intent", "") or "").strip()
+            if _in and _in not in slot["intents"]:
+                slot["intents"].append(_in)
 
     out = [v for v in by_conv.values() if v["questions"]]
 
@@ -634,9 +645,30 @@ async def list_conversations_on(db: Any, day: "str", *,
     # set Flagged shows -- a refusal, a thumbs-down, or a low-confidence
     # answer -- and having it here is what lets one view answer both "what
     # happened today" and "what went wrong this week".
+    # Counted BEFORE the flag filter, for the same reason the source
+    # counts are: a badge has to say how many that filter will show, not
+    # how many are left after it ran.
+    flag_counts = {
+        "refusal": sum(1 for v in out if v["refusals"]),
+        "thumbs_down": sum(1 for v in out if v["thumbs_down"]),
+        "thumbs_up": sum(1 for v in out if v["thumbs_up"]),
+        "low_confidence": sum(1 for v in out if v["low_confidence"]),
+    }
+
     if needs_only:
         out = [v for v in out
                if v["refusals"] or v["thumbs_down"] or v["low_confidence"]]
+
+    # One flag type at a time -- the three reasons a turn lands in the
+    # "worth a look" set, asked for separately. These are what /admin/review
+    # offered as presets; having them here is what lets one page answer both
+    # "what happened today" and "show me the refusals this week".
+    if flag in ("refusal", "thumbs_down", "low_confidence"):
+        key = {"refusal": "refusals", "thumbs_down": "thumbs_down",
+               "low_confidence": "low_confidence"}[flag]
+        out = [v for v in out if v[key]]
+    elif flag == "thumbs_up":
+        out = [v for v in out if v["thumbs_up"]]
 
     out.sort(key=lambda r: r["first_ts"] or datetime.min.replace(
         tzinfo=timezone.utc), reverse=True)
@@ -650,7 +682,8 @@ async def list_conversations_on(db: Any, day: "str", *,
         r["needs_look"] = bool(r["refusals"] or r["thumbs_down"]
                                or r["low_confidence"])
     return {"rows": out, "total": total, "offset": offset, "limit": limit,
-            "source_counts": source_counts, "clamped": clamped}
+            "source_counts": source_counts, "clamped": clamped,
+            "flag_counts": flag_counts}
 
 
 async def conversation_days(db: Any, *, limit: int = 30) -> list[dict]:

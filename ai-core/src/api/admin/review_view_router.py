@@ -32,6 +32,7 @@ from src.api.admin import admin_ui as ui
 
 logger = logging.getLogger(__name__)
 from src.api.admin.review_queries import (
+    BETA_START_LOCAL,
     close_testing_rows,
     count_flagged,
     FILTERS,
@@ -91,7 +92,10 @@ def build_review_view_router(deps: dict) -> Any:
     """`deps` = {"db": prisma, "guard": token-dependency}."""
     try:
         from fastapi import APIRouter, Depends  # type: ignore
-        from fastapi.responses import HTMLResponse  # type: ignore
+        from fastapi.responses import (  # type: ignore
+            HTMLResponse,
+            RedirectResponse,
+        )
     except ImportError:
         class _P:
             prefix = "/admin/review"
@@ -125,141 +129,50 @@ def build_review_view_router(deps: dict) -> Any:
         key: str = "",
         _g=Depends(guard),
     ) -> Any:
-        counts = await dashboard_counts(db)
-        page, per, offset = ui.page_bounds(page, per)
-        rows = await list_flagged(db, filter_preset=filter, limit=per,
-                                  offset=offset)
-        total = await count_flagged(db, filter_preset=filter)
-        # Patron star ratings live on the conversation, so project them
-        # onto the message rows -- otherwise "who rated us" is invisible
-        # from the list (operator report 2026-07-27).
-        rows = await attach_feedback(db, rows)
-        _kq = ("&key=" + _e(key)) if key else ""
-        _filter_class = {
-            "flagged": "flagged",
-            "thumbs_down": "down",
-            "thumbs_up": "up",
-            "refusal": "refuse",
-            "low_confidence": "low-conf",
-            "rated": "rated",
-            "reviewed": "done",
-            "all": "all",
-        }
-        opts = "".join(
-            f"<a class='tag {_filter_class.get(f, f)}"
-            f"{' active' if f == filter else ''}'"
-            f" href='/admin/review?filter={f}{_kq}'>{_e(f)}</a>"
-            for f in FILTERS
-        )
-        trs = []
-        for r in rows:
-            cid = r.get("conversation_id") or ""
-            mid = r.get("message_id") or ""
-            flags = []
-            # The classifier's verdict, first, so the row reads "the bot
-            # took this as X -- and here is what went wrong with it". It
-            # was recorded on every turn already (1,204 of 1,204 August
-            # assistant messages carry one) and simply never shown, so
-            # working the queue meant opening a conversation to find out
-            # what the bot thought it was being asked.
-            if r.get("intent"):
-                scope_bits = " / ".join(
-                    x for x in (r.get("scope_campus"), r.get("scope_library"))
-                    if x
-                )
-                title = f"classified intent{f' — scope {scope_bits}' if scope_bits else ''}"
-                flags.append(
-                    f"<span class='tag intent' title='{_e(title)}'>"
-                    f"{_e(r.get('intent'))}</span>")
-            if r.get("is_positive_rated") is False:
-                flags.append("<span class='tag down'>&#128078; thumbs-down</span>")
-            elif r.get("is_positive_rated") is True:
-                flags.append("<span class='tag up'>&#128077; thumbs-up</span>")
-            if r.get("was_refusal"):
-                flags.append(
-                    f"<span class='tag refuse'>refusal:"
-                    f"{_e(r.get('refusal_trigger'))}</span>")
-            if r.get("confidence") == "low":
-                flags.append("<span class='tag low-conf'>low-conf</span>")
-            fr = r.get("feedback_rating")
-            if fr is not None:
-                stars = "&#9733;" * max(0, min(int(fr), 5))
-                cmt = (r.get("feedback_comment") or "").strip()
-                flags.append(
-                    f"<span class='tag rated' title='{_e(cmt)}'>"
-                    f"{stars} {_e(str(fr))}/5"
-                    f"{' &#128172;' if cmt else ''}</span>")
-            if r.get("reviewed_at"):
-                flags.append("<span class='tag done'>reviewed</span>")
-            link = f"/admin/review/{_e(cid)}" + (f"?key={_e(key)}" if key else "")
-            # Triage action, inline so the queue can be worked from the
-            # list. Returns to the current filter view.
-            act_label, act_q = (
-                ("undo", "&undo=1") if r.get("reviewed_at")
-                else ("mark reviewed", "")
-            )
-            act = (
-                f"<a class='act' href='/admin/review/mark/{_e(mid)}"
-                f"?filter={_e(filter)}{_kq}{act_q}'>{act_label}</a>"
-                if mid else ""
-            )
-            cmt_row = (
-                f"<br><small class='cmt'>&#128172; "
-                f"{_e((r.get('feedback_comment') or '')[:160])}</small>"
-                if (r.get("feedback_comment") or "").strip() else ""
-            )
-            trs.append(
-                f"<tr><td>{_e(r.get('time'))}</td>"
-                f"<td>{_e(r.get('role'))}</td>"
-                f"<td>{_e(r.get('preview'))}{cmt_row}</td>"
-                f"<td>{' '.join(flags)}</td>"
-                f"<td><a href='{link}'>view</a><br>{act}<br>"
-                f"<small>{_e(cid)}</small></td></tr>"
-            )
-        _scope_note = (
-            "" if filter in ("reviewed", "all")
-            else " &mdash; unreviewed only"
-        )
-        _pager = ui.pager("/admin/review", page=page, per=per, total=total,
-                          key=key, extra=f"&filter={_e(filter)}")
+        """Redirect to the conversations view, which now does this.
 
-        # How much of this queue is our own testing. Shown before anything
-        # is closed, because a bulk write the operator cannot see the shape
-        # of first is a bulk write they cannot judge.
-        sweep = ""
-        if filter == "flagged" and total:
-            preview = await close_testing_rows(db, dry_run=True)
-            if preview["closed"]:
-                bits = ", ".join(f"{n} {t.replace('-', ' ')}"
-                                 for t, n in sorted(preview["by_tag"].items()))
-                sweep = (
-                    f"<div class='note' style='margin:.8rem 0'>"
-                    f"<b>{preview['closed']} of these {total} came from "
-                    f"testing</b> ({bits}). A flagged turn is meant to say a "
-                    f"patron may have had a bad experience; one from our own "
-                    f"scripted run says nothing of the kind, and leaving them "
-                    f"here buries the {preview['kept']} that might be real."
-                    f"<div class='acts' style='margin-top:.6rem'>"
-                    + ui.action(
-                        f"/admin/review/close-testing?{_kq_plain(key)}",
-                        f"Close all {preview['closed']}", primary=True)
-                    + "</div></div>"
-                )
-        body = (
-            f"<h1>Flagged conversations</h1>"
-            f"<p class='lede'>{total} row(s) &middot; filter: "
-            f"{_e(filter)}{_scope_note}. Patron star ratings and comments "
-            f"show inline; marking a row reviewed drops it out of the "
-            f"working views.</p><div class='filter-bar'>{opts}</div>"
-            f"{sweep}{_pager}"
-            f"<table><tr><th>time</th><th>role</th><th>preview</th>"
-            f"<th>flags</th><th>conversation</th></tr>"
-            f"{''.join(trs) or '<tr><td colspan=5>none</td></tr>'}"
-            f"</table>{_pager}"
-        )
-        return HTMLResponse(_page("Flagged conversations", body,
-                                  current="/admin/review", key=key,
-                                  counts=counts))
+        Flagged listed MESSAGES matching a preset and dropped them once
+        marked handled. The conversations view could not do either -- until
+        it grew a date range, a "only what went wrong" filter, the same
+        flag presets and the patron's rating inline. What is left of the
+        difference is the mark-handled queue, and NOBODY EVER USED IT:
+        reviewedAt is null on all 3,096 assistant messages ever logged,
+        which is why 318 rows sat in a queue that never shrank.
+
+        Kept as a redirect rather than deleted: this URL is in browser
+        history, in bookmarks, and in the hub cards of anyone who has the
+        page open. A 404 would read as the console being broken.
+
+        /admin/review/{conversation_id} is NOT affected -- that is the
+        transcript view, and tickets, search and every list link into it.
+        """
+        _map = {
+            "refusal": "refusal",
+            "thumbs_down": "thumbs_down",
+            "thumbs_up": "thumbs_up",
+            "low_confidence": "low_confidence",
+        }
+        params = []
+        if key:
+            params.append(f"key={_e(key)}")
+        if filter in _map:
+            params.append(f"flag={_map[filter]}")
+        elif filter not in ("all", "reviewed", "rated"):
+            # "flagged" -- the default preset -- is the union of the three
+            # bad signals, which is exactly what needs=1 means here.
+            params.append("needs=1")
+        # A preset spanning all time becomes a range ending today; the
+        # conversations view is day-anchored and would otherwise land on
+        # today alone and look empty by comparison.
+        # Imported here, not at module scope: conversations_router imports
+        # from this package too, and a top-level import between the two
+        # closes the cycle.
+        from src.api.admin.conversations_router import today_local
+
+        params.append(f"day={_e(BETA_START_LOCAL[:10])}")
+        params.append(f"to={_e(today_local())}")
+        target = "/admin/conversations?" + "&".join(params)
+        return RedirectResponse(target, status_code=307)
 
     @router.get("/admin/review/close-testing", response_class=HTMLResponse)
     async def close_testing(key: str = "", _g=Depends(guard)) -> Any:

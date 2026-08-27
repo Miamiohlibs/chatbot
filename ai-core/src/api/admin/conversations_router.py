@@ -29,6 +29,7 @@ import re as _re
 
 from src.api.admin.review_queries import (
     MAX_DAY_SPAN,
+    attach_feedback,
     search_messages,
     BETA_START_LOCAL,
     LIBRARY_TZ,
@@ -54,6 +55,17 @@ def shift_day(day: str, delta: int) -> str:
         return today_local()
 
 
+# The three reasons a turn is worth a look, plus the one positive signal.
+# These were /admin/review's presets. Bringing them here is what made that
+# page redundant -- see the note on the redirect below.
+_FLAG_TAGS = (
+    ("refusal", "refused"),
+    ("thumbs_down", "thumbs-down"),
+    ("low_confidence", "low confidence"),
+    ("thumbs_up", "thumbs-up"),
+)
+_FLAG_TAGS_BY_VALUE = {v for v, _ in _FLAG_TAGS}
+
 _DATE_RE = _re.compile(r"^\d{4}-\d{2}-\d{2}$")
 """A date input can be typed by hand. Anything that is not a date is read
 as "no range" rather than handed to the parser to raise on."""
@@ -77,7 +89,7 @@ def build_conversations_router(deps: dict) -> Any:
     @router.get("/admin/conversations", response_class=HTMLResponse)
     async def conversations(day: str = "", key: str = "", page: int = 1,
                             per: int = 50, source: str = "",
-                            to: str = "", needs: int = 0,
+                            to: str = "", needs: int = 0, flag: str = "",
                             _g=Depends(guard)) -> Any:
         day = day or today_local()
         page = max(1, page)
@@ -88,14 +100,18 @@ def build_conversations_router(deps: dict) -> Any:
         # do that this page could not.
         to = to if _DATE_RE.match(to or "") else ""
         needs_only = bool(needs)
+        flag = flag if flag in _FLAG_TAGS_BY_VALUE else ""
         kq = f"&key={_e(key)}" if key else ""
         sq = f"&source={_e(source)}" if source else ""
         rq = f"&to={_e(to)}" if to else ""
         nq = "&needs=1" if needs_only else ""
+        fq = f"&flag={_e(flag)}" if flag else ""
         res = await list_conversations_on(db, day, limit=per,
                                           offset=(page - 1) * per,
                                           source=source, day_to=to,
-                                          needs_only=needs_only)
+                                          needs_only=needs_only, flag=flag)
+        rows = await attach_feedback(db, res["rows"])
+        res["rows"] = rows
         rows, total = res["rows"], res["total"]
         days = await conversation_days(db)
 
@@ -127,6 +143,22 @@ def build_conversations_router(deps: dict) -> Any:
             + (f" <span class='dim'>{counts[t]}</span>" if counts.get(t) else "")
             + "</a>"
             for t, label in SOURCE_TAGS
+        )
+
+        # The flag bar carries the range and the source with it -- losing
+        # them on a filter click is how a filtered view silently becomes an
+        # unfiltered one.
+        fcounts = res.get("flag_counts") or {}
+        _carry = f"day={_e(day)}{rq}{sq}{nq}{kq}"
+        flag_bar = " ".join(
+            [f"<a class='tag{'' if flag else ' active'}' "
+             f"href='/admin/conversations?{_carry}'>any</a>"]
+            + [f"<a class='tag{' active' if t == flag else ''}' "
+               f"href='/admin/conversations?{_carry}&flag={t}'>{_e(label)}"
+               + (f" <span class='dim'>{fcounts[t]}</span>"
+                  if fcounts.get(t) else "")
+               + "</a>"
+               for t, label in _FLAG_TAGS]
         )
 
         recent = " ".join(
@@ -233,6 +265,23 @@ def build_conversations_router(deps: dict) -> Any:
                 flags.append(f"<span class='tag thumbs_up'>{r['thumbs_up']} 👍</span>")
             if r["low_confidence"]:
                 flags.append("<span class='tag low_confidence'>low confidence</span>")
+            # The patron's own verdict, which /admin/review showed inline and
+            # this page did not. It is the only signal here that comes from
+            # the person who was actually helped or not.
+            # Numeric, not five glyphs: "2/5" is instantly a bad rating
+            # and "★★" needs counting against a scale you have to assume.
+            _stars = r.get("feedback_rating")
+            if _stars:
+                flags.append(f"<span class='tag' title='patron rating'>"
+                             f"{int(_stars)}/5</span>")
+            _cmt = (r.get("feedback_comment") or "").strip()
+            if _cmt:
+                flags.append(f"<span class='tag' title='{_e(_cmt)}'>"
+                             f"💬 {_e(_cmt[:40])}"
+                             f"{'…' if len(_cmt) > 40 else ''}</span>")
+            for _in in (r.get("intents") or [])[:3]:
+                flags.append(f"<span class='tag intent' title='what the bot "
+                             f"classified this as'>{_e(_in)}</span>")
             more = (f" <span class='dim'>+{r['asked'] - 1} more</span>"
                     if r["asked"] > 1 else "")
             href = (f"/admin/review/{_e(r['conversation_id'])}"
@@ -298,6 +347,7 @@ def build_conversations_router(deps: dict) -> Any:
             f"{search_box}"
             f"<div style='margin:.6rem 0'>{nav}</div>"
             f"<div class='filter-bar'>{source_bar}</div>"
+            f"<div class='filter-bar'>{flag_bar}</div>"
             + (f"<p class='dim'>13 August is shown from 6:00pm, when the "
                f"bot went live to the public.</p>"
                if day == BETA_START_LOCAL[:10] else "")
