@@ -422,6 +422,55 @@ def _libguide_lib_to_dict(lib_entry: dict) -> dict:
     }
 
 
+
+def _title_key(text: "Optional[str]") -> str:
+    """A job title reduced to comparable words.
+
+    Punctuation and the filler that a question carries but a title does
+    not -- "the", "our", "a" -- are dropped, so "who is the web services
+    librarian" and "Web Services Librarian" reduce to the same thing.
+    """
+    import re as _re
+
+    t = _re.sub(r"[^a-z0-9 ]+", " ", (text or "").lower())
+    drop = {"the", "our", "a", "an", "of", "for", "and", "is", "who", "s"}
+    return " ".join(w for w in t.split() if w not in drop)
+
+
+async def _q_by_title(client, wanted: str, camp) -> list[dict]:
+    """Everyone whose job title matches `wanted`.
+
+    Filtered in PYTHON for the same reason _q_by_name is: the
+    roster is ~75 rows, and Prisma's `contains` cannot handle the
+    punctuation these titles carry -- "Director, Regional Campus
+    Library", "Head, Advise & Instruct Department", "Senior Library
+    Technician (Circulation - Morning / Reserves)".
+
+    A title can be held by several people (five Library
+    Associates, two Web Services Librarians). All of them come
+    back; naming one and hiding the others would be a worse answer
+    than naming none.
+    """
+    where: dict = {"isActive": True}
+    if camp:
+        where["campus"] = camp
+    rows = await client.librarian.find_many(where=where)
+    want = _title_key(wanted)
+    if not want:
+        return []
+    exact = [r for r in rows if _title_key(getattr(r, "title", "")) == want]
+    if exact:
+        return [_librarian_dict(r) for r in exact]
+    # Then containment, so "web services librarian" finds "Web
+    # Services Librarian" and "acquisitions" finds "Acquisitions
+    # Librarian". Both directions: the question may be longer than
+    # the title or shorter than it.
+    near = [r for r in rows
+            if (k := _title_key(getattr(r, "title", "")))
+            and (want in k or k in want)]
+    return [_librarian_dict(r) for r in near]
+
+
 def _make_lookup_librarian() -> Callable[[dict], list[dict]]:
     """Subject/name librarian lookup.
 
@@ -498,6 +547,7 @@ def _make_lookup_librarian() -> Callable[[dict], list[dict]]:
     def lookup(filters: dict) -> list[dict]:
         name = (filters.get("name") or "").strip()
         subject = (filters.get("subject") or "").strip()
+        title = (filters.get("title") or "").strip()
         campus_raw = (filters.get("campus") or "").strip().lower()
         campus = _CAMPUS_DB.get(campus_raw)
         resolved = _resolve_subject_terms(subject, name)
@@ -648,6 +698,25 @@ def _make_lookup_librarian() -> Callable[[dict], list[dict]]:
             rows = _lookup_by_subject_via_libguides(subject, campus, api_state)
             if rows:
                 return _with_guides(rows)
+
+        # TITLE PATH. "Who is the web services librarian?" was answered
+        # "Miami doesn't have a subject librarian listed for 'Web
+        # Services'" -- about a colleague whose job title is exactly that
+        # and who is in the roster with an email and a desk phone. Everyone
+        # on the staff page should be findable, and not being a subject
+        # liaison is not a reason to be unfindable. Raised by the web team
+        # 2026-08-27.
+        #
+        # Placed HERE, after the helpers this function defines, rather than
+        # at the top of it: `_order_for_scope` and `_q_by_title` are not
+        # bound until execution reaches their `def`, and calling them
+        # earlier raised UnboundLocalError on every title lookup. The unit
+        # tests stub this backend, so only a run against the real roster
+        # showed it.
+        if title and not name and not subject:
+            hits = _db(lambda c: _q_by_title(c, title, campus))
+            if hits:
+                return _order_for_scope(hits)
 
         # (2) Alias / course-code resolution, for wording the API cannot
         # match on its own ("chem", "orgo", "BIO 203").

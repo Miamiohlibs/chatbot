@@ -1755,7 +1755,8 @@ def _run_turn(
 
     if classification.intent in ("subject_librarian", "research_consultation"):
         _liaison = _subject_liaison_short_circuit(
-            agent_outcome, scope, _campus_head(deps, scope.campus))
+            agent_outcome, scope, _campus_head(deps, scope.campus),
+            lambda asked: _staff_by_title(deps, asked, scope.campus or ""))
         if _liaison is None:
             # The agent may simply not have looked. Do it ourselves rather
             # than refuse a question whose answer is one lookup away.
@@ -7760,9 +7761,70 @@ def _campus_head(deps: "OrchestratorDeps", campus: str) -> "Optional[dict]":
     return None
 
 
+
+def _staff_by_title(deps: "OrchestratorDeps", asked: str,
+                    campus: str = "") -> "Optional[tuple[str, list[dict]]]":
+    """Answer "who is the <job title>?" from the staff roster.
+
+    "Who is the web services librarian?" was answered "Miami doesn't have
+    a subject librarian listed for 'Web Services'" -- about a colleague
+    whose job title is exactly that and who is in the roster with an
+    email and a desk phone. Everyone on the staff page should be
+    findable, and not being a subject liaison is not a reason to be
+    unfindable. Raised by the web team 2026-08-27.
+
+    Runs BEFORE the no-such-subject refusal, and returns None the moment
+    nothing matches, so a genuine subject question is untouched.
+    """
+    if not (asked or "").strip():
+        return None
+    try:
+        from src.agent.tool_registry import ToolCall
+
+        res = deps.tool_registry.dispatch(ToolCall(
+            id="staff-by-title", name="lookup_librarian",
+            arguments={"title": asked, "campus": campus or ""}))
+    except Exception:  # noqa: BLE001 -- never break a turn over a lookup
+        log.warning("title lookup failed for %r", asked, exc_info=True)
+        return None
+    if res is None or res.error or not res.data:
+        return None
+    data = res.data
+    rows = data.get("librarians") if isinstance(data, dict) else data
+    rows = [r for r in (rows or []) if isinstance(r, dict) and r.get("email")]
+    if not rows:
+        return None
+
+    # More than three people share some titles (five Library Associates).
+    # Naming all five in a sentence is a list, not an answer; name the
+    # first three and say how many there are.
+    def _one(r: dict) -> str:
+        phone = str(r.get("phone") or "").strip()
+        contact = f"{r['email']}, {phone}" if phone else r["email"]
+        where = f" at {r['campus']}" if r.get("campus") else ""
+        return f"{r['name']}{where} ({contact})"
+
+    shown = rows[:3]
+    listed = "; ".join(_one(r) for r in shown)
+    title_text = str(shown[0].get("title") or asked).strip()
+    if len(rows) == 1:
+        body = f"{title_text} is {listed}"
+    else:
+        body = f"{len(rows)} people hold that title: {listed}"
+        if len(rows) > len(shown):
+            body += f", and {len(rows) - len(shown)} more"
+    return (
+        f"{body} [1]. Source: Libraries staff directory.",
+        [{"n": 1, "url": _STAFF_DIRECTORY_URL,
+          "snippet": "; ".join(f"{r['name']} — {r.get('title') or ''}"
+                               for r in shown)}],
+    )
+
+
 def _subject_liaison_short_circuit(
     agent_outcome: "AgentOutcome", scope: "Scope",
     campus_head: "Optional[dict]" = None,
+    title_lookup: "Optional[Callable[[str], Optional[tuple]]]" = None,
 ) -> "Optional[tuple[str, list[dict]]]":
     """Deterministic answer for "who is the librarian for <subject>?".
 
@@ -7822,6 +7884,14 @@ def _subject_liaison_short_circuit(
         # fall through to the synth as before -- "none exists" would be
         # false there.
         if subject_asked and rows_before_filter == 0:
+            # Before saying nobody covers it: is it a JOB TITLE? "Web
+            # services librarian" and "acquisitions librarian" are real
+            # people on the staff page, and telling somebody there is no
+            # subject librarian for them is both wrong and a slight on a
+            # colleague who is right there in the roster.
+            by_title = title_lookup(subject_asked) if title_lookup else None
+            if by_title is not None:
+                return by_title
             return (
                 f"Miami doesn't have a subject librarian listed for "
                 f"\"{subject_asked}\" specifically. The subject liaisons "
