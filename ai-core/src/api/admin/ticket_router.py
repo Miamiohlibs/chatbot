@@ -117,7 +117,17 @@ def ticket_email_body(t: dict) -> str:
 # --- HTML rendering (zero-dependency, same approach as review_view) -------
 
 def render_form(key: str, values: dict | None = None,
-                errors: list[str] | None = None) -> str:
+                errors: list[str] | None = None,
+                conversation_id: str = "", message_id: str = "") -> str:
+    """The staff report form.
+
+    conversation_id / message_id ride hidden when the form was opened from
+    a conversation ("Report this answer"). They are what turns the ticket
+    from a description of a turn into a pointer at it -- see the note on
+    ticket_detail, which until now had to GUESS which conversation a ticket
+    came from by matching the librarian's typing against every question
+    ever asked.
+    """
     v = values or {}
     err_html = ""
     if errors:
@@ -145,6 +155,9 @@ def render_form(key: str, values: dict | None = None,
         f"{err_html}"
         "<div class='card'><form method='post'>"
         f"<input type='hidden' name='key' value='{ui.e(key)}'>"
+        f"<input type='hidden' name='conversation_id' "
+        f"value='{ui.e(conversation_id)}'>"
+        f"<input type='hidden' name='message_id' value='{ui.e(message_id)}'>"
         f"{''.join(rows)}"
         "<div style='margin-top:1.2rem'>"
         "<button type='submit'>Submit report</button></div>"
@@ -201,6 +214,10 @@ _LEGACY_STATUS = {"reviewed": "in_progress"}
 # queue. Status is the obvious axis; the other two are the ones that make a
 # ticket harder to act on, and both were invisible before -- you had to read
 # every card to find them.
+
+_PREFILL_MAX = 4000
+"""Cap on a prefilled field. The values arrive in a URL the librarian
+could edit; the DB columns are unbounded but the form is not a paste bin."""
 
 TICKET_TAGS = (
     ("", "All"),
@@ -425,7 +442,20 @@ def build_ticket_router(deps: dict):
     @router.get("/librarian/ticket", response_class=HTMLResponse)
     async def ticket_form(request: Request):
         key = await librarian_guard(request)
-        return HTMLResponse(render_form(key))
+        q = request.query_params
+        # Prefill when the form was opened from a conversation. The three
+        # text fields save the librarian retyping what is already on
+        # screen; the ids are what make the ticket point back.
+        prefill = {
+            k: (q.get(k) or "")[:_PREFILL_MAX]
+            for k in ("question", "bot_answer")
+            if q.get(k)
+        }
+        return HTMLResponse(render_form(
+            key, prefill or None,
+            conversation_id=(q.get("conversation_id") or "")[:64],
+            message_id=(q.get("message_id") or "")[:64],
+        ))
 
     @router.post("/librarian/ticket", response_class=HTMLResponse)
     async def ticket_submit(request: Request):
@@ -433,7 +463,14 @@ def build_ticket_router(deps: dict):
         form = dict(await request.form())
         clean, errors = validate_ticket(form)
         if errors:
-            return HTMLResponse(render_form(key, clean, errors), status_code=422)
+            # Carry the ids through the error round-trip. Dropping them
+            # here would silently downgrade the ticket to an unlinked one
+            # for anyone who mistyped a field.
+            return HTMLResponse(render_form(
+                key, clean, errors,
+                conversation_id=(form.get("conversation_id") or "")[:64],
+                message_id=(form.get("message_id") or "")[:64],
+            ), status_code=422)
 
         row = await db.correctionticket.create(data={
             "librarianName": clean["librarian_name"],
@@ -442,6 +479,12 @@ def build_ticket_router(deps: dict):
             "botAnswer": clean["bot_answer"],
             "expectedAnswer": clean["expected_answer"],
             "sourceUrl": clean["source_url"],
+            # Empty string, not None: an id that is present but blank and
+            # an id that was never sent are the same thing here, and one
+            # shape is easier to read than two.
+            "conversationId": (str(form.get("conversation_id") or ""))[:64]
+            or None,
+            "messageId": (str(form.get("message_id") or ""))[:64] or None,
         })
 
         # Email AFTER the row is durable; a mail failure must not lose
@@ -545,11 +588,25 @@ def build_ticket_router(deps: dict):
                 "librarian paraphrased what the patron typed.</p>"
             )
 
-        # --- the transcript, if the exact question is in one ---
+        # --- the transcript ---
+        #
+        # A ticket filed from a conversation carries its id, so use it. The
+        # 0.99-overlap match below is what this had to do before the column
+        # existed: reconstruct the link by comparing the librarian's typing
+        # against every question ever asked. That finds nothing whenever
+        # they paraphrased, and silently finds the WRONG conversation when
+        # two patrons typed the same sentence. Kept as the fallback,
+        # because tickets legitimately arrive without a conversation --
+        # every ticket filed before 2026-08-27, and anything reported from
+        # the desk.
         convo_html = ""
+        stored_cid = str(getattr(t, "conversationId", "") or "").strip()
         exact = next((a for a in asks if a["overlap"] >= 0.99), None)
-        if exact and exact["conversation_id"]:
-            d = await conversation_detail(db, exact["conversation_id"])
+        cid = stored_cid or (exact or {}).get("conversation_id") or ""
+        linked = "recorded when the ticket was filed" if stored_cid else (
+            "matched by wording, so check it is the right one")
+        if cid:
+            d = await conversation_detail(db, cid)
             if d:
                 turns = "".join(
                     f"<div class='turn {ui.e(m.get('type', ''))}'>"
@@ -559,8 +616,19 @@ def build_ticket_router(deps: dict):
                 )
                 convo_html = (
                     f"<h2>The conversation it came from</h2>"
+                    f"<p class='dim'>Link {ui.e(linked)}.</p>"
                     f"<div class='transcript'>{turns}</div>"
-                    f"{ui.action(f'/admin/review/' + ui.e(exact['conversation_id']) + kq_amp, 'Full detail →', ghost=True)}"
+                    f"{ui.action('/admin/review/' + ui.e(cid) + kq_amp, 'Full detail →', ghost=True)}"
+                )
+            elif stored_cid:
+                # The id is on the ticket but the conversation is gone.
+                # Say so: a missing section reads as "there was no chat",
+                # which is a different and wrong fact.
+                convo_html = (
+                    f"<h2>The conversation it came from</h2>"
+                    f"<p class='dim'>Recorded as "
+                    f"<code>{ui.e(stored_cid)}</code>, but that conversation "
+                    f"is no longer held.</p>"
                 )
 
         # --- correction form, prefilled ---

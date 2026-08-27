@@ -102,6 +102,20 @@ def build_review_view_router(deps: dict) -> Any:
     db = deps["db"]
     guard = deps["guard"]
 
+    # The librarian ticket form is gated by its own shared code, so the
+    # "Report this answer" link has to carry it. That is not an escalation:
+    # this page is already behind the admin guard, and anyone who can read
+    # it can take the bot out of service, write corrections and read every
+    # conversation held. The ticket code buys only the right to file a
+    # ticket. Read at request time, not import time, so setting it does not
+    # need a restart -- and when it is unset the link simply does not
+    # render rather than producing a 401 the operator cannot explain.
+    import os as _os
+
+    def _librarian_code() -> str:
+        return (deps.get("librarian_code")
+                or _os.getenv("LIBRARIAN_TICKET_CODE", "")).strip()
+
     @router.get("/admin/review", response_class=HTMLResponse)
     async def review_list(
         filter: str = "flagged",
@@ -303,6 +317,7 @@ def build_review_view_router(deps: dict) -> Any:
         _g=Depends(guard),
     ) -> Any:
         d = await conversation_detail(db, conversation_id)
+        lib_code = _librarian_code()
         back = "/admin/review" + (f"?key={_e(key)}" if key else "")
         if d is None:
             return HTMLResponse(
@@ -400,6 +415,43 @@ def build_review_view_router(deps: dict) -> Any:
                            f"{_e(_mu)}</span>")
             return "".join(out)
 
+        def _report_link(m: dict, prev_user: str) -> str:
+            """One click from a wrong answer to a ticket that points back.
+
+            Until 2026-08-27 a ticket carried only the librarian's typed
+            copy of the question and the answer, and the ticket page had to
+            GUESS which conversation it came from by matching that typing
+            against every question ever asked -- finding nothing whenever
+            they paraphrased, and the wrong conversation when two patrons
+            typed the same sentence. One ticket exists in the table, which
+            is what a path nobody can walk looks like.
+
+            Prefills what is already on screen and carries the ids, so the
+            link is recorded rather than reconstructed.
+            """
+            if m.get("role") != "assistant":
+                return ""
+            from urllib.parse import urlencode
+
+            qs = urlencode({
+                "key": lib_code,
+                "conversation_id": conversation_id,
+                "message_id": m.get("id") or "",
+                "question": (prev_user or "")[:1000],
+                "bot_answer": (m.get("content") or "")[:2000],
+            })
+            return (f"<a class='btn ghost' href='/librarian/ticket?{qs}' "
+                    f"target='_blank' rel='noopener'>Report this answer</a>")
+
+        # The patron line each assistant turn is answering, so the report
+        # form can prefill the question without the librarian retyping it.
+        _prev_user: list = []
+        _last = ""
+        for _m in d["messages"]:
+            _prev_user.append(_last)
+            if _m.get("role") == "user":
+                _last = _m.get("content") or ""
+
         msgs = "".join(
             f"<div class='msg'>"
             f"<div class='msg-hd'>"
@@ -411,8 +463,11 @@ def build_review_view_router(deps: dict) -> Any:
                else "")
             + ("<span class='tag down'>thumbs-down</span>"
                if m['is_positive_rated'] is False else "")
-            + f"</div><pre>{_e(m['content'])}</pre>{_links(m)}{_sources(m)}</div>"
-            for m in d["messages"]
+            + f"</div><pre>{_e(m['content'])}</pre>{_links(m)}{_sources(m)}"
+            + (f"<div class='acts'>{_report_link(m, pu)}</div>"
+               if lib_code else "")
+            + "</div>"
+            for m, pu in zip(d["messages"], _prev_user)
         )
         toks = "".join(
             f"<tr><td>{_e(t['model'])}</td><td>{_e(t['call_site'])}</td>"

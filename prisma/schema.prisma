@@ -549,6 +549,15 @@ model CorrectionTicket {
   reviewedAt     DateTime?
   emailSent      Boolean   @default(false) // whether the operator alert email went out
 
+  // Where the ticket came from, when it came from a chat. Nullable: a
+  // librarian can report something a patron told them at the desk, and
+  // every ticket filed before 2026-08-27 predates the link. No relation
+  // declared -- conversations are prunable, tickets are the durable record
+  // of what went wrong, and neither cascade nor restrict is right.
+  conversationId String?
+  messageId      String?
+
   @@index([status])
   @@index([createdAt])
+  @@index([conversationId])
 }
