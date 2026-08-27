@@ -424,7 +424,22 @@ def run(
                 )
 
         if doc.rejection_reason:
-            report.extraction_rejects.append((canon_url, doc.rejection_reason))
+            # A page whose whole body is "Redirecting…" is not a failure --
+            # it is an alias, and it declares its destination in its own
+            # `canonical` / `meta refresh`. extract() already resolved that
+            # into doc.redirect_to; the report just never showed it, so
+            # /use/borrow/ill, /use/borrow/policies, /research/find/databases
+            # and /research/instruction/course-reserves appeared as
+            # `too_short` in EVERY run. Their content IS indexed, under the
+            # LibGuides URLs they point at. A recurring line for something
+            # that is not wrong trains the reader to skim the report, which
+            # is how a real failure gets missed.
+            if doc.redirect_to:
+                report.extraction_rejects.append(
+                    (canon_url, f"alias_of:{doc.redirect_to}"))
+            else:
+                report.extraction_rejects.append(
+                    (canon_url, doc.rejection_reason))
             continue
         report.extracted_doc_count += 1
 
@@ -588,6 +603,72 @@ def _extra_documents() -> "list[tuple[extract.ExtractedDoc, classify.DocMetadata
     return docs
 
 
+
+# --- promote helpers -----------------------------------------------------
+
+ENV_FILE_PATH = Path("/opt/chatbot/.env")
+"""Where the serving collection is configured. A constant here rather than
+in config.py because config.py is imported by the serving process too, and
+the ETL is the only thing that has any business WRITING this file."""
+
+
+def _collection_exists(name: str) -> bool:
+    """True when Weaviate actually holds `name`.
+
+    Checked before promotion because pointing serving at a collection that
+    is not there takes the bot down, and the failure then looks like a
+    Weaviate outage rather than a bad promotion -- which is the sort of
+    misdirection that costs an evening.
+    """
+    try:
+        from src.utils.weaviate_client import get_weaviate_client
+
+        client = get_weaviate_client()
+        if client is None:
+            return False
+        try:
+            return bool(client.collections.exists(name))
+        finally:
+            try:
+                client.close()
+            except Exception:  # noqa: BLE001
+                pass
+    except Exception:  # noqa: BLE001
+        logger.warning("could not verify collection %s exists", name,
+                       exc_info=True)
+        return False
+
+
+def _set_env_collection(env_path: "Path", collection: str) -> "Path":
+    """Point WEAVIATE_CHUNK_COLLECTION at `collection`, keeping a backup.
+
+    Rewrites the one line and leaves every other byte alone -- this file
+    holds credentials the operator set by hand, and a rewrite that
+    normalises quoting or ordering would be a nasty surprise. The backup is
+    named the way the operator's own pre-change backups are.
+    """
+    import shutil
+
+    text = env_path.read_text(encoding="utf-8")
+    stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%d%H%M%S")
+    backup = env_path.with_name(env_path.name + f".bak-pre-promote-{stamp}")
+    shutil.copy2(env_path, backup)
+
+    out, seen = [], False
+    for line in text.splitlines(keepends=True):
+        if line.startswith("WEAVIATE_CHUNK_COLLECTION="):
+            out.append(f"WEAVIATE_CHUNK_COLLECTION={collection}\n")
+            seen = True
+        else:
+            out.append(line)
+    if not seen:
+        if out and not out[-1].endswith("\n"):
+            out.append("\n")
+        out.append(f"WEAVIATE_CHUNK_COLLECTION={collection}\n")
+    env_path.write_text("".join(out), encoding="utf-8")
+    return backup
+
+
 def _setup_logging(verbose: bool) -> None:
     """Wire up root logging for CLI runs.
 
@@ -616,13 +697,17 @@ def main() -> int:
     )
     parser.add_argument(
         "--phase",
-        choices=("prepare", "apply"),
+        choices=("prepare", "apply", "promote"),
         default=None,
         help=(
             "Two-phase gated invocation. `prepare` runs the pipeline in "
             "dry-run mode and writes a diff + unsigned approval template. "
             "A librarian then signs the approval. `apply` verifies the "
-            "signed approval and runs the pipeline for real."
+            "signed approval and runs the pipeline for real. `promote` "
+            "points the serving config at the collection `apply` wrote and "
+            "RECORDS that it did -- promotion used to be a hand-edit of "
+            ".env, so the .applied marker said `promoted: no` for as long "
+            "as the collection served."
         ),
     )
     parser.add_argument(
@@ -645,6 +730,79 @@ def main() -> int:
 
     _setup_logging(args.verbose)
     t0 = time.time()
+
+
+    # --- PROMOTE phase: point serving at the applied collection, on the
+    #     record. Separate from apply on purpose -- apply writes a new
+    #     collection without disturbing the one answering patrons, and the
+    #     switch is a decision somebody makes afterwards. What was missing
+    #     is that the decision left no trace: .applied kept saying
+    #     `promoted: no` while that collection was the live one, and this
+    #     file is the ONLY on-disk record of which collection a cleanup
+    #     script must not sweep up.
+    if args.phase == "promote":
+        diff_path = args.diff or gate.find_latest_applied_diff()
+        if diff_path is None:
+            logger.error("no applied diff found in %s.", config.DIFF_REPORT_DIR)
+            return 2
+        diff_path = Path(diff_path)
+        if not diff_path.exists() and not diff_path.is_absolute():
+            cand = Path(config.DIFF_REPORT_DIR) / diff_path.name
+            if cand.exists():
+                diff_path = cand
+        marker = diff_path.with_suffix(".applied")
+        if not marker.exists():
+            logger.error("%s has no .applied marker -- run `--phase apply` "
+                         "first.", diff_path)
+            return 2
+        collection = ""
+        for ln in marker.read_text(encoding="utf-8").splitlines():
+            if ln.startswith("collection:"):
+                collection = ln.split(":", 1)[1].strip()
+        if not collection:
+            logger.error("%s names no collection.", marker)
+            return 2
+
+        # Refuse to promote something that is not there. Pointing serving at
+        # a missing collection takes the bot down, and the failure would
+        # look like a Weaviate outage rather than a bad promotion.
+        if not _collection_exists(collection):
+            logger.error("collection %s does not exist in Weaviate. Refusing "
+                         "to promote.", collection)
+            return 3
+
+        env_path = ENV_FILE_PATH
+
+        # Check BOTH writes are possible before doing EITHER. Found the hard
+        # way on the first run of this: .env was rewritten and then
+        # mark_promoted raised PermissionError on a root-owned marker,
+        # leaving exactly the state this command exists to prevent --
+        # promoted, unrecorded. The collection name happened to be
+        # unchanged that time, so nothing broke; it would not always be.
+        for target in (env_path, diff_path.with_suffix(".applied")):
+            if not os.access(target, os.W_OK):
+                logger.error("cannot write %s -- refusing to promote "
+                             "half-way. Run with the right permissions.",
+                             target)
+                return 3
+
+        try:
+            written = _set_env_collection(env_path, collection)
+        except Exception as e:  # noqa: BLE001
+            logger.error("could not update %s: %s", env_path, e)
+            return 3
+        try:
+            gate.mark_promoted(diff_path, collection,
+                               dt.datetime.now(dt.timezone.utc))
+        except Exception as e:  # noqa: BLE001
+            logger.error(
+                "PROMOTED %s but could not record it in the marker: %s. "
+                "Fix the marker by hand -- it is the only on-disk record "
+                "of which collection must not be swept up.", collection, e)
+            return 3
+        logger.info("promoted %s (backup: %s). RESTART the service for it to "
+                    "take effect.", collection, written)
+        return 0
 
     # --- APPLY phase: verify the gate, then run the destructive pipeline.
     if args.phase == "apply":

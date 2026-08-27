@@ -275,3 +275,65 @@ def mark_applied(diff_path: Path, token: ApprovalToken, applied_at: dt.datetime,
                  f"# from it yet -- that is expected, not a sign it is junk.\n")
     marker.write_text(body, encoding="utf-8")
     return marker
+
+def mark_promoted(diff_path: "Path", collection: str,
+                  promoted_at: "dt.datetime") -> "Path":
+    """Record that the applied collection is now the one being served.
+
+    `mark_applied` writes `promoted: no`, which is true at the moment it is
+    written and stops being true the instant somebody points
+    WEAVIATE_CHUNK_COLLECTION at the collection. Nothing updated it, so the
+    marker for the live corpus said `promoted: no` for as long as it
+    served -- and this file is the ONLY on-disk record of which collection
+    must not be swept up by a cleanup script. A record that is wrong in the
+    reassuring direction is worse than no record: the 2026-07-29 incident
+    was a cleanup deleting a collection because disk said it was not in use.
+    """
+    marker = diff_path.with_suffix(".applied")
+    if not marker.exists():
+        raise FileNotFoundError(f"no .applied marker beside {diff_path}")
+    body = marker.read_text(encoding="utf-8")
+    stamp = promoted_at.isoformat(timespec="seconds")
+    if "promoted:" in body:
+        # Drop the `promoted: no` explainer too. Left in place it sits
+        # directly under a timestamp saying the opposite, and a file that
+        # argues with itself is read as unreliable rather than as current.
+        kept = [ln for ln in body.splitlines()
+                if "`promoted: no` means nothing serves" not in ln
+                and "from it yet -- that is expected" not in ln
+                and "# awaiting promotion." not in ln]
+        body = "\n".join(
+            (f"promoted: {stamp}" if ln.startswith("promoted:") else ln)
+            for ln in kept
+        ) + "\n"
+    else:
+        body += f"collection: {collection}\npromoted: {stamp}\n"
+    marker.write_text(body, encoding="utf-8")
+    return marker
+
+
+def promoted_collection(diff_path: "Path") -> "Optional[str]":
+    """The collection this diff promoted, or None if it never was."""
+    marker = diff_path.with_suffix(".applied")
+    if not marker.exists():
+        return None
+    coll = None
+    promoted = False
+    for ln in marker.read_text(encoding="utf-8").splitlines():
+        if ln.startswith("collection:"):
+            coll = ln.split(":", 1)[1].strip()
+        elif ln.startswith("promoted:"):
+            promoted = ln.split(":", 1)[1].strip() not in ("", "no")
+    return coll if promoted else None
+
+def find_latest_applied_diff() -> "Optional[Path]":
+    """The most recent diff that HAS been applied. Used by `--phase promote`,
+    which acts on something already written rather than something pending."""
+    diff_dir = Path(config.DIFF_REPORT_DIR)
+    if not diff_dir.exists():
+        return None
+    applied = [md for md in diff_dir.glob("*.md")
+               if md.with_suffix(".applied").exists()]
+    if not applied:
+        return None
+    return max(applied, key=lambda p: p.with_suffix(".applied").stat().st_mtime)

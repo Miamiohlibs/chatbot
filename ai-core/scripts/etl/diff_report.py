@@ -257,19 +257,40 @@ def render_markdown(report: DiffReport) -> str:
         lines.append("")
 
     if report.extraction_rejects:
+        # Aliases first and separately. A page that is only "Redirecting…"
+        # declares where it went; that is a fact about the site, not a
+        # failure to read it, and listing it under ❌ every run is noise
+        # that teaches the reader to skim.
+        aliases = [(u, r.split(":", 1)[1])
+                   for u, r in report.extraction_rejects
+                   if r.startswith("alias_of:")]
+        if aliases:
+            lines.append("## ↪️ Aliases (not failures)")
+            lines.append("")
+            lines.append("These pages hold no text of their own -- they "
+                         "redirect. The destination is indexed under its "
+                         "own URL.")
+            lines.append("")
+            for url, dest in sorted(aliases):
+                lines.append(f"- {url} → {dest}")
+            lines.append("")
+
         # Group by reason so the librarian can see patterns.
         by_reason: dict[str, list[str]] = {}
         for url, reason in report.extraction_rejects:
+            if reason.startswith("alias_of:"):
+                continue
             by_reason.setdefault(reason, []).append(url)
-        lines.append("## ❌ Extraction rejects")
-        lines.append("")
-        for reason, urls in sorted(by_reason.items()):
-            lines.append(f"### {reason} ({len(urls)})")
-            for url in urls[:10]:
-                lines.append(f"- {url}")
-            if len(urls) > 10:
-                lines.append(f"- ... and {len(urls) - 10} more")
+        if by_reason:
+            lines.append("## ❌ Extraction rejects")
             lines.append("")
+            for reason, urls in sorted(by_reason.items()):
+                lines.append(f"### {reason} ({len(urls)})")
+                for url in urls[:10]:
+                    lines.append(f"- {url}")
+                if len(urls) > 10:
+                    lines.append(f"- ... and {len(urls) - 10} more")
+                lines.append("")
 
     if report.rejected_urls:
         # These are URLs the EXCLUDE list filtered out -- usually news/events.

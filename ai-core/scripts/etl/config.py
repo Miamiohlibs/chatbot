@@ -213,6 +213,14 @@ EXCLUDE_URL_PREFIXES: Final[tuple[str, ...]] = (
     # excluding at CRAWL time does. Doing it here also stops us paying to
     # embed pages the serving layer would discard anyway.
     #
+    # A link the site still carries and the operator says is not ours:
+    # /research/find/books/ 404s and has done through every diff since at
+    # least 2026-08-25. Excluding it at crawl time is the only thing that
+    # stops it being fetched, failing, and being reported again next run --
+    # a recurring line in the report for a page nobody is going to fix
+    # trains the reader to skim the report, which is how a real failure
+    # gets missed. Operator ruling 2026-08-27.
+    "/research/find/books",
     # COVID-era "library healthy" guidance, superseded.
     "/libraryhealthy",
     # The Amos Music Library CLOSED Sept 2023. The music LIBRARIAN still
