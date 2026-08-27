@@ -95,3 +95,63 @@ class TestDescribeLibcalDay:
         assert describe_libcal_day(
             {"status": "text", "text": "9am-4pm by appt"}
         )[0] == "text"
+
+
+# --- the day must not vanish ---------------------------------------------
+#
+# Declining the impossible interval was only half the job. _collapse_week
+# dropped any day carrying the not-posted marker, which was harmless while
+# nothing produced one -- and stopped being harmless the moment
+# describe_libcal_day started producing them. Special Collections' Friday
+# disappeared, leaving "open Monday-Thursday ...; closed Saturday and
+# Sunday" with a hole. Stating a wrong time was the first bug; hiding that
+# we have no time is a quieter second one, and the test that caught the
+# first would never have caught this.
+
+
+def _week(friday: str) -> str:
+    return "\n".join([
+        "Monday (2026-08-24): 8:00am to 4:00pm",
+        "Tuesday (2026-08-25): 8:00am to 4:00pm",
+        "Wednesday (2026-08-26): 8:00am to 4:00pm",
+        "Thursday (2026-08-27): 8:00am to 4:00pm",
+        f"Friday (2026-08-28): {friday}",
+        "Saturday (2026-08-29): Closed",
+        "Sunday (2026-08-30): Closed",
+    ])
+
+
+class TestUnpostedDaysAreNamed:
+    def test_the_declined_day_is_still_mentioned(self):
+        from src.graph.new_orchestrator import _collapse_week
+
+        out = _collapse_week(_week("Hours not posted"))
+        assert "Friday" in out, out
+        assert "aren't posted" in out
+
+    def test_a_normal_week_is_unchanged(self):
+        from src.graph.new_orchestrator import _collapse_week
+
+        out = _collapse_week(_week("8:00am to 4:00pm"))
+        assert out == "Monday-Friday, 8:00am to 4:00pm; closed Saturday and Sunday"
+
+    def test_a_week_with_nothing_posted_still_says_so(self):
+        from src.graph.new_orchestrator import _collapse_week
+
+        out = _collapse_week(
+            "Monday (2026-08-24): Hours not posted\n"
+            "Tuesday (2026-08-25): Hours not posted"
+        )
+        assert out and "Monday" in out and "Tuesday" in out
+
+    def test_weekday_names_keep_their_capitals(self):
+        """str.capitalize() lower-cases everything after the first letter,
+        so a library shut all week rendered as "Closed saturday and
+        sunday". Pre-existing; only reachable when there are no open days,
+        which is why it survived."""
+        from src.graph.new_orchestrator import _collapse_week
+
+        out = _collapse_week(
+            "Saturday (2026-08-29): Closed\nSunday (2026-08-30): Closed"
+        )
+        assert out == "Closed Saturday and Sunday"

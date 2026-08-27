@@ -25,6 +25,7 @@ mode (LLM picks the wrong campus) is exactly the failure mode we're trying
 to engineer out. Keep it deterministic.
 """
 
+import re
 from dataclasses import dataclass
 from typing import Literal, Optional
 from urllib.parse import urlparse
@@ -173,6 +174,47 @@ def resolve_session_origin(origin_url: Optional[str]) -> Optional[Campus]:
 
 
 
+# A comparison does not have to name the campuses. "Is ILL faster at Oxford
+# or the regionals?" names one side by a group word, and "Can I print at any
+# library?" names none at all -- both are questions about more than one
+# campus, and both retrieved one.
+#
+# THE BOUNDARY THAT MATTERS: "Tell me about the regional library" (singular,
+# no comparison) must still ask WHICH ONE rather than answering about both.
+# Gold xc_regional_unspecified expects a clarify, so a group word cannot be
+# allowed to blanket-trigger a comparison -- only the plural/every-of forms
+# below count, and the bare singular deliberately does not appear here.
+_REGIONALS_RE = re.compile(
+    r"\b(the\s+)?regionals\b"
+    r"|\bregional\s+(campuses|libraries)\b"
+    r"|\bboth\s+regionals?\b",
+    re.IGNORECASE,
+)
+_EVERY_CAMPUS_RE = re.compile(
+    r"\b(any|each|every|all|which|whichever)\s+"
+    r"(campus|campuses|librar(y|ies)|location|locations)\b"
+    r"|\ball\s+(three\s+)?campuses\b"
+    r"|\bacross\s+campuses\b",
+    # NOT a bare "campus library": "where is the campus library" means the
+    # one on MY campus, not all of them. "WHICH campus library" is already
+    # caught by the determiner list above, which is what makes it a
+    # comparison.
+    re.IGNORECASE,
+)
+
+_REGIONAL_CAMPUSES: "tuple[Campus, ...]" = ("hamilton", "middletown")
+_ALL_CAMPUSES: "tuple[Campus, ...]" = ("oxford", "hamilton", "middletown")
+
+
+def _group_campuses(hay: str) -> "tuple[Campus, ...]":
+    """Campuses named by a GROUP word rather than by name."""
+    if _EVERY_CAMPUS_RE.search(hay):
+        return _ALL_CAMPUSES
+    if _REGIONALS_RE.search(hay):
+        return _REGIONAL_CAMPUSES
+    return ()
+
+
 def campuses_named(user_message: str) -> "tuple[Campus, ...]":
     """Every campus the message names, in the order they appear.
 
@@ -205,6 +247,13 @@ def campuses_named(user_message: str) -> "tuple[Campus, ...]":
 
     out: list = []
     for _pos, campus in sorted(found):
+        if campus not in out:
+            out.append(campus)
+
+    # Group words come AFTER the named ones, so "Oxford or the regionals"
+    # keeps Oxford primary -- the patron led with it. A group word alone
+    # ("can I print at any library?") supplies the whole list.
+    for campus in _group_campuses(hay):
         if campus not in out:
             out.append(campus)
     return tuple(out)

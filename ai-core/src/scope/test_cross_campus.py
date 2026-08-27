@@ -79,6 +79,51 @@ class TestResolveScope:
         assert dup.all_campuses == ("oxford", "middletown")
 
 
+class TestGroupWords:
+    """A comparison does not have to name the campuses.
+
+    Three gold cases ask about more than one campus without naming two:
+    "Is ILL faster at Oxford or the regionals?", "Can I print at any
+    library?", "Which campus library has the best silent study floor?" --
+    all three retrieved one campus and could not answer.
+    """
+
+    def test_the_regionals_means_both_of_them(self):
+        assert campuses_named("do the regional campuses have a makerspace") == (
+            "hamilton",
+            "middletown",
+        )
+
+    def test_a_named_campus_plus_a_group_word(self):
+        """The named one stays first -- the patron led with it."""
+        got = campuses_named("Is ILL faster at Oxford or the regionals?")
+        assert got[0] == "oxford"
+        assert set(got) == {"oxford", "hamilton", "middletown"}
+
+    def test_any_library_means_all_of_them(self):
+        assert set(campuses_named("Can I print at any library?")) == {
+            "oxford", "hamilton", "middletown",
+        }
+
+    def test_which_campus_library_is_a_comparison(self):
+        assert len(campuses_named(
+            "Which campus library has the best silent study floor?"
+        )) == 3
+
+    def test_the_singular_regional_library_still_needs_clarifying(self):
+        """The boundary that matters. Gold xc_regional_unspecified expects
+        a CLARIFY -- 'regional' alone is ambiguous between Hamilton and
+        Middletown, and answering about both instead of asking which would
+        turn a good refusal into a worse answer."""
+        assert campuses_named("Tell me about the regional library.") == ()
+
+    def test_a_bare_campus_library_is_not_a_comparison(self):
+        """"where is the campus library" means the one on MY campus. Only
+        a determiner -- which / any / every -- makes it a comparison."""
+        assert campuses_named("where is the campus library") == ()
+        assert campuses_named("the campus library hours") == ()
+
+
 # --- Layer 2: retrieval must reach both campuses -------------------------
 
 from src.retrieval.scope_filter import (  # noqa: E402

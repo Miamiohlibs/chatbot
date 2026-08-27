@@ -8184,6 +8184,18 @@ def _week_rows(hours_text: str) -> "list[tuple[str, str, str]]":
     return out
 
 
+
+def _sentence_case(text: str) -> str:
+    """Upper-case the first letter and leave the rest alone.
+
+    str.capitalize() lower-cases everything after it, so a week with no
+    open days rendered as "Closed saturday and sunday" -- weekday names
+    are proper nouns and the only reason nobody caught it is that the
+    branch fires only when a library is shut all week.
+    """
+    return text[:1].upper() + text[1:] if text else text
+
+
 def _collapse_week(hours_text: str) -> "Optional[str]":
     """"Monday-Friday, 9am-4pm by appointment; closed Saturday and Sunday".
 
@@ -8215,20 +8227,34 @@ def _collapse_week(hours_text: str) -> "Optional[str]":
             return f"{days[0]} and {days[1]}"
         return f"{days[0]}-{days[-1]}"
 
-    open_parts, closed_days = [], []
+    open_parts, closed_days, unposted_days = [], [], []
     for key, days, shown in groups:
         if _HOURS_NOT_POSTED_MARKER in key:
+            # NAME the day; do not drop it. Skipping was harmless while
+            # nothing carried this marker, and stopped being harmless the
+            # moment describe_libcal_day started declining impossible
+            # intervals: Special Collections' Friday vanished, leaving
+            # "open Monday-Thursday ...; closed Saturday and Sunday" with a
+            # hole where Friday should be. A reader cannot tell a day we
+            # could not read from a day we forgot -- and "closed Saturday
+            # and Sunday" invites reading the gap as open. Stating a wrong
+            # time was the first bug; hiding that we have no time is a
+            # quieter second one.
+            unposted_days.extend(days)
             continue
         if "closed" in key:
             closed_days.extend(days)
             continue
         open_parts.append(f"{_span(days)}, {shown}")
-    if not open_parts and not closed_days:
+    if not open_parts and not closed_days and not unposted_days:
         return None
     text = "; ".join(open_parts) if open_parts else ""
     if closed_days:
         tail = f"closed {_span(closed_days)}"
-        text = f"{text}; {tail}" if text else tail.capitalize()
+        text = f"{text}; {tail}" if text else _sentence_case(tail)
+    if unposted_days:
+        tail = f"hours for {_span(unposted_days)} aren't posted"
+        text = f"{text}; {tail}" if text else _sentence_case(tail)
     return text
 
 
