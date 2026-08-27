@@ -159,6 +159,47 @@ library that obtained it); it is OhioLINK that has two published answers.
 
 ---
 
+## 3c. The four-layer cross-campus fix is necessary but not sufficient (2026-08-27)
+
+Adding the first two-campus gold cases immediately showed the next layer.
+`xc3_laptop_loan_king_vs_gh` still comes back a refusal, and the reason is
+not scope, retrieval, or the citation guard -- all three now work, and the
+Oxford tech-checkout FAQ carrying the loan period is right there in the
+refusal's own "closest pages" list. The kNN routes the question to
+**location_directions**:
+
+    location_directions 0.634   <- chosen
+    tech_checkout       0.600
+    margin              0.034
+
+A sentence with two building names in it reads as "where is X" to the
+classifier, and the agent then self-flags rather than answering.
+
+NOT fixed, deliberately. The designed remedy is exemplars, and a 0.034
+margin would flip on a handful -- but the honest asking frequency is one or
+two organic questions (see the correction below), and tuning a 5.5k-exemplar
+classifier on that is how you overfit. The gold case is left failing on
+purpose: it documents the behaviour we want and will show the day someone
+works on the classifier.
+
+Worth knowing: an earlier local A/B said this fix worked end to end. That
+test called resolve_scope, search_kb and synthesize DIRECTLY and never went
+through the classifier, which is exactly why it missed this. A verification
+that skips a layer cannot speak for that layer.
+
+**A correction that belongs in the record.** Commit messages c274b64,
+45206ec and 9b58a61, and comments in resolver.py and post_processor.py, said
+this comparison was "asked seven times during the beta". That was never
+checked. Of nine askings in the Message table: three predate the 08-13 18:00
+beta window, four fall inside a single two-minute burst across four fresh
+conversations whose ids also carry a second two-campus question -- one person
+running test questions -- and one is a staff-origin probe from building the
+fix. One or two are organic. The DEFECT was real and measured before and
+after; the FREQUENCY was asserted without looking, which is the same trap as
+trap 1 below.
+
+---
+
 ## 4. Not started
 
 - Re-run all 206 against production after the current commits deploy.

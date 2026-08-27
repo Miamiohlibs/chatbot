@@ -537,7 +537,13 @@ def process_synthesizer_output(
         # construction: "is the laptop loan different at King and
         # Gardner-Harvey" resolved to Middletown, and every Oxford chunk --
         # the half we could actually answer -- was thrown out as a scope
-        # violation. Asked seven times during the beta.
+        # violation.
+        #
+        # (An earlier version of this comment said the question was asked
+        # seven times during the beta. That count was not checked and is
+        # wrong -- one or two askings are organic, the rest predate the
+        # beta window or are one burst of test traffic. The defect stands
+        # on the before/after measurement, not on the count.)
         #
         # Only campuses the PATRON named are admitted. This is not a
         # loosening of the guard: a citation from a campus nobody mentioned

@@ -75,7 +75,14 @@ class Scope:
     Gardner-Harvey Library?" names two buildings on two campuses. A single
     `campus` cannot hold that, so the longest alias won and the answer came
     back about Middletown alone -- with a liaison directory link that has
-    nothing to do with laptops. Asked seven times during the beta.
+    nothing to do with laptops.
+
+    Frequency corrected 2026-08-27: earlier notes here and in the commit
+    messages said this was asked seven times during the beta. Of nine
+    askings on record, three predate the beta window, four are one
+    two-minute burst of test questions, and one is a staff probe from
+    building this fix -- one or two are organic. The defect was measured
+    before and after; the frequency was asserted without checking.
 
     Empty for the ordinary single-campus turn, so nothing downstream
     changes shape unless a question really did name more than one place.
