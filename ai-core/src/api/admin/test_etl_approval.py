@@ -319,3 +319,112 @@ def test_the_key_guards_looking_and_the_passphrase_guards_signing(keyed, diffs):
                    data=_form(diffs, password="wrong"))
     assert r.status_code == 403
     assert not gate.verify_gate(diffs).proceed
+
+
+# --- the one-click path: fetch, sign, live -------------------------------
+#
+# The web team update the site on Saturdays and used to wait for Monday's
+# cron, then for somebody with shell access. These are about the ways a
+# button like that goes wrong -- starting work nobody authorised, and
+# showing a green page over a corpus nobody rebuilt.
+
+
+@pytest.fixture(autouse=True)
+def _no_real_etl(monkeypatch):
+    """Nothing in this file may actually crawl the site or embed anything.
+
+    An accidental real run here would put 410 requests on our own web
+    server and spend money, from a unit test.
+    """
+    from src.api.admin import etl_jobs
+
+    etl_jobs.reset_for_tests()
+    started: list = []
+    monkeypatch.setattr(
+        etl_jobs, "start",
+        lambda phase, *, started_by: (started.append((phase, started_by)),
+                                      (True, f"{phase} started"))[1])
+    monkeypatch.setattr(R, "_started_for_tests", started, raising=False)
+    yield started
+    etl_jobs.reset_for_tests()
+
+
+def test_fetch_starts_a_prepare(client, _no_real_etl):
+    r = client.post("/admin/etl/fetch",
+                    data={"email": "a@miamioh.edu",
+                          "password": "correct horse"})
+    assert r.status_code in (200, 303)
+    assert _no_real_etl == [("prepare", "a@miamioh.edu")]
+
+
+def test_fetch_refuses_a_wrong_passphrase_and_starts_nothing(
+        client, _no_real_etl):
+    """A crawl is cheap but it is not free, and it replaces the diff
+    whoever else is mid-review is reading."""
+    r = client.post("/admin/etl/fetch",
+                    data={"email": "a@miamioh.edu", "password": "wrong"})
+    assert r.status_code == 403
+    assert _no_real_etl == []
+
+
+def test_fetch_refuses_somebody_not_on_the_approver_list(client, _no_real_etl):
+    r = client.post("/admin/etl/fetch",
+                    data={"email": "stranger@example.com",
+                          "password": "correct horse"})
+    assert r.status_code == 403
+    assert _no_real_etl == []
+
+
+def test_approving_starts_the_rebuild(client, diffs, _no_real_etl):
+    """Signing is what makes it live now. The whole point of the ask."""
+    r = client.post("/admin/etl/approve", data={
+        "email": "a@miamioh.edu", "password": "correct horse", "ack": "yes",
+        "diff_hash": gate.hash_diff_file(diffs), "diff_file": diffs.name,
+    })
+    assert r.status_code in (200, 303)
+    assert ("apply", "a@miamioh.edu") in _no_real_etl
+
+
+def test_a_refused_signature_starts_no_rebuild(client, diffs, _no_real_etl):
+    client.post("/admin/etl/approve", data={
+        "email": "a@miamioh.edu", "password": "wrong", "ack": "yes",
+        "diff_hash": gate.hash_diff_file(diffs), "diff_file": diffs.name,
+    })
+    assert _no_real_etl == []
+
+
+def test_signing_without_reading_starts_no_rebuild(client, diffs,
+                                                   _no_real_etl):
+    """The tick box is the gate. Seven minutes of slower answers for a
+    diff nobody read is worse than no button at all."""
+    client.post("/admin/etl/approve", data={
+        "email": "a@miamioh.edu", "password": "correct horse", "ack": "",
+        "diff_hash": gate.hash_diff_file(diffs), "diff_file": diffs.name,
+    })
+    assert _no_real_etl == []
+
+
+def test_a_stale_diff_starts_no_rebuild(client, diffs, _no_real_etl):
+    """If a prepare ran while the page was open, the signature would be
+    on content the signer never saw -- and the rebuild would be of it."""
+    client.post("/admin/etl/approve", data={
+        "email": "a@miamioh.edu", "password": "correct horse", "ack": "yes",
+        "diff_hash": "stale-hash", "diff_file": diffs.name,
+    })
+    assert _no_real_etl == []
+
+
+def test_the_page_says_what_approving_costs(client):
+    """Seven minutes, and answers at 25 seconds instead of 7. Measured
+    figures, on the button, before it is pressed -- hiding them would make
+    this feel free."""
+    body = client.get("/admin/etl").text
+    assert "seven minutes" in body
+    assert "25 seconds" in body
+    assert "keeps answering" in body
+
+
+def test_the_page_offers_the_fetch_button(client):
+    body = client.get("/admin/etl").text
+    assert "/admin/etl/fetch" in body
+    assert "Fetch the latest site content" in body

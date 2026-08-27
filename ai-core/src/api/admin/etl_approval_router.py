@@ -52,6 +52,7 @@ from typing import Optional
 
 from scripts.etl import gate
 from src.api.admin import admin_ui as ui
+from src.api.admin.review_queries import local_ts
 from src.api.admin.killswitch_router import (
     attempt_key,
     note_failed_attempt,
@@ -389,12 +390,72 @@ def _md_table_rows(block: str) -> str:
     return "".join(rows)
 
 
+def _job_panel(key: str) -> str:
+    """The fetch button, and whatever is running or last ran.
+
+    Both live above the diff because both are things you do BEFORE reading
+    it: pull the site's latest, or find out why the diff in front of you is
+    three days old.
+    """
+    from src.api.admin import etl_jobs
+
+    job = etl_jobs.current()
+    running = etl_jobs.is_running()
+
+    if job is not None:
+        when = local_ts(job.started_at)
+        if job.running:
+            note = (f"<p class='warn'><b>{ui.e(job.phase)} is running</b> — "
+                    f"started {ui.e(when)} by {ui.e(job.started_by)}, "
+                    f"{job.elapsed_s}s so far. "
+                    + ("Answers are slower than usual while this runs; it "
+                       "finishes on its own."
+                       if job.phase == "apply" else "")
+                    + " Reload this page for progress.</p>")
+        elif job.ok and not job.error:
+            extra = (f" The bot is answering from "
+                     f"<code>{ui.e(job.promoted_collection)}</code> as of now."
+                     if job.promoted_collection else "")
+            note = (f"<p class='good'>{ui.e(job.phase)} finished in "
+                    f"{job.elapsed_s}s.{extra}</p>")
+        else:
+            # The output, not just "it failed". A failure whose reason is on
+            # the box and not on the screen is a failure somebody guesses at.
+            tail = (job.error or job.output or "")[-1500:]
+            note = (f"<p class='warn'><b>{ui.e(job.phase)} failed</b> after "
+                    f"{job.elapsed_s}s.</p>"
+                    f"<pre class='joblog'>{ui.e(tail)}</pre>")
+    else:
+        note = ""
+
+    disabled = " disabled" if running else ""
+    fetch = (
+        "<form method='post' action='/admin/etl/fetch"
+        f"?key={ui.e(key)}' style='margin:.5rem 0'>"
+        "<label for='f_email'>Your Miami email</label>"
+        "<input type='email' id='f_email' name='email' required "
+        "autocomplete='username' style='max-width:22rem'>"
+        "<label for='f_password'>Approval passphrase</label>"
+        "<input type='password' id='f_password' name='password' required "
+        "autocomplete='current-password' style='max-width:22rem'>"
+        f"<div class='acts' style='margin-top:.6rem'>"
+        f"<button type='submit'{disabled}>Fetch the latest site content"
+        f"</button></div>"
+        "<p class='hint'>Re-crawls our own public site and writes a fresh "
+        "diff for you to read. Under a minute, no cost, and it changes "
+        "nothing the bot is answering from.</p>"
+        "</form>"
+    )
+    return f"<div class='card'><h2>Get the newest pages</h2>{note}{fetch}</div>"
+
+
 def render_page(key: str, message: str = "", ok: str = "") -> str:
     diff = latest_diff()
     if diff is None:
         return ui.page("Corpus review",
-                       "<p>No prepared diff is waiting. Run "
-                       "<code>--phase prepare</code> first.</p>",
+                       _job_panel(key)
+                       + "<p>No prepared diff is waiting — use the button "
+                         "above to fetch the site's current pages.</p>",
                        current="/admin/etl", key=key)
 
     decision = gate.verify_gate(diff)
@@ -457,7 +518,25 @@ def render_page(key: str, message: str = "", ok: str = "") -> str:
             "<label class='ack'><input type='checkbox' name='ack' value='yes' "
             "required> I have read the diff above and approve promoting it "
             "to the live index.</label>"
-            "<button type='submit'>Approve this diff</button>"
+            # What pressing this actually does, before it is pressed. The
+            # seven minutes and the 25 seconds are measured, not estimated
+            # -- docs/AWS-CAPACITY-REQUEST.md. Hiding them would make this
+            # button feel free, and it is not.
+            "<div class='warnbox' style='margin:.6rem 0'>"
+            "<b>Approving rebuilds the index straight away.</b>"
+            "<ul>"
+            "<li>It takes about <b>seven minutes</b>.</li>"
+            "<li>While it runs, answers slow from about 7 seconds to about "
+            "<b>25 seconds</b>. The bot keeps answering, and keeps "
+            "answering correctly — from the OLD pages until the rebuild "
+            "lands.</li>"
+            "<li>When it finishes the bot switches over by itself. No "
+            "restart, nothing to run on the server.</li>"
+            "</ul>"
+            "<p class='hint'>If right now is a bad moment, come back and "
+            "approve later — the diff waits.</p>"
+            "</div>"
+            "<button type='submit'>Approve, and make it live</button>"
             "</form>"
             "<h2>Or send it back</h2>"
             "<p class='hint'>If something here should not be indexed, or a "
@@ -489,6 +568,7 @@ def render_page(key: str, message: str = "", ok: str = "") -> str:
     return ui.page(
         "Corpus review",
         banner
+        + _job_panel(key)
         + f"<h1>{ui.e(diff.name)}</h1>"
         + state
         + objection
@@ -595,7 +675,57 @@ def build_etl_approval_router(deps: dict):
                 status_code=500, headers=_NOINDEX)
 
         logger.warning("corpus diff %s APPROVED by %s", diff.name, who)
+
+        # SIGNING MEANS LIVE. The web team update the site on Saturdays and
+        # this used to leave them waiting for somebody with shell access to
+        # run the apply and hand-edit .env. The apply runs here, capped, and
+        # promotes itself when it finishes -- see etl_jobs.
+        from src.api.admin import etl_jobs
+
+        started, why_not = etl_jobs.start("apply", started_by=who)
+        if not started:
+            # The signature stands either way: it is written to disk and the
+            # gate accepts it. Only the automatic apply did not begin, and
+            # saying so is better than a green page over a corpus nobody
+            # rebuilt.
+            logger.warning("apply did not auto-start after approval: %s",
+                           why_not)
+            return HTMLResponse(
+                render_page(key, f"Signed — but the rebuild did not start: "
+                                 f"{why_not}"),
+                headers=_NOINDEX)
         return RedirectResponse(f"/admin/etl?key={key}&ok=1", status_code=303)
+
+    @router.post("/etl/fetch", response_class=HTMLResponse)
+    async def fetch(request: Request, key: str = "", email: str = Form(""),
+                    password: str = Form(""), _u=Depends(guard)):
+        """Re-crawl the site and write a fresh diff.
+
+        Behind the same passphrase as signing. It spends nothing and
+        changes nothing the bot answers from -- but it does put ~410
+        requests on our own web server, and it replaces the diff anyone
+        else is currently reading, so it is not anonymous.
+        """
+        why = check_approver(email, password)
+        if why:
+            logger.warning("corpus fetch REFUSED for %r: %s",
+                           (email or "").strip().lower(), why)
+            if not note_failed_attempt(attempt_key(request)):
+                return HTMLResponse(render_page(key, _THROTTLED),
+                                    status_code=429, headers=_NOINDEX)
+            return HTMLResponse(render_page(key, why), status_code=403,
+                                headers=_NOINDEX)
+        reset_attempts(attempt_key(request))
+
+        from src.api.admin import etl_jobs
+
+        who = (email or "").strip().lower()
+        started, msg = etl_jobs.start("prepare", started_by=who)
+        if not started:
+            return HTMLResponse(render_page(key, msg), status_code=409,
+                                headers=_NOINDEX)
+        logger.warning("corpus fetch started by %s", who)
+        return RedirectResponse(f"/admin/etl?key={key}", status_code=303)
 
     @router.post("/etl/reject", response_class=HTMLResponse)
     async def reject(request: Request, key: str = "", email: str = Form(""),
