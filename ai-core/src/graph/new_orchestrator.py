@@ -1745,7 +1745,8 @@ def _run_turn(
             )
 
     if classification.intent in ("subject_librarian", "research_consultation"):
-        _liaison = _subject_liaison_short_circuit(agent_outcome, scope)
+        _liaison = _subject_liaison_short_circuit(
+            agent_outcome, scope, _campus_head(deps, scope.campus))
         if _liaison is None:
             # The agent may simply not have looked. Do it ourselves rather
             # than refuse a question whose answer is one lookup away.
@@ -1812,6 +1813,8 @@ def _run_turn(
     # hoping a 1,460-character page ranks for one word inside it.
     if _EQUIPMENT_ASK_RE.search(request.user_message or ""):
         evidence = _ensure_tech_checkout_evidence(evidence, deps)
+        evidence = _ensure_borrowed_elsewhere_evidence(
+            evidence, request.user_message, deps)
 
     # Bare "What are the hours?" -- no library named anywhere in the
     # message. The scope resolver returns campus without a library, the
@@ -7696,8 +7699,61 @@ def _liaison_lookup_when_agent_skipped(
     )
 
 
+
+_REGIONAL_CAMPUSES_WITH_A_HEAD = ("hamilton", "middletown")
+"""Campuses where a subject gap should hand the student their own library's
+director. NOT Oxford: it carries seventy-odd liaisons, so a gap there means
+the subject genuinely is not covered by anyone, and naming the Dean would
+send a student to the wrong door."""
+
+
+def _campus_head(deps: "OrchestratorDeps", campus: str) -> "Optional[dict]":
+    """The director of a regional campus library, or None.
+
+    Read from the roster rather than held in a list here. A hand-kept copy
+    of who runs a library is the same mistake the subject mapping already
+    made once -- it drifted eleven subjects behind the liaisons page before
+    anyone noticed, silently and in one direction.
+    """
+    c = (campus or "").lower()
+    if c not in _REGIONAL_CAMPUSES_WITH_A_HEAD:
+        return None
+    try:
+        from src.agent.tool_registry import ToolCall
+
+        res = deps.tool_registry.dispatch(ToolCall(
+            id="campus-head", name="lookup_librarian",
+            arguments={"campus": c}))
+    except Exception:  # noqa: BLE001 -- never break a turn over a courtesy
+        log.warning("campus-head lookup failed for %r", c, exc_info=True)
+        return None
+    if res is None or res.error or not res.data:
+        return None
+    # The backend answers {"librarians": [...]}, the same shape the subject
+    # path reads a few lines below. A bare list is accepted too so a test
+    # double or a future backend does not silently return nobody.
+    data = res.data
+    if isinstance(data, dict):
+        rows = data.get("librarians") or []
+    elif isinstance(data, list):
+        rows = data
+    else:
+        rows = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        title = str(row.get("title") or "").strip().lower()
+        # "Assistant Director" is a different person from "Director", and
+        # handing a student the deputy when the director is listed is the
+        # kind of small wrongness that costs trust.
+        if title.startswith("director") and row.get("email"):
+            return row
+    return None
+
+
 def _subject_liaison_short_circuit(
-    agent_outcome: "AgentOutcome", scope: "Scope"
+    agent_outcome: "AgentOutcome", scope: "Scope",
+    campus_head: "Optional[dict]" = None,
 ) -> "Optional[tuple[str, list[dict]]]":
     """Deterministic answer for "who is the librarian for <subject>?".
 
@@ -7823,6 +7879,18 @@ def _subject_liaison_short_circuit(
         answer = (f"There isn't a librarian based at {campus_label} listed "
                   f"for this subject. {lead} {contacts}, who {verb} "
                   f"students on every campus [1].")
+        # Give them somebody on their own campus as well. A student at
+        # Hamilton asking about history is told, correctly, that Oxford's
+        # historian covers them -- and left with nobody local to walk to.
+        # Their own library's director is a real answer to "who do I talk
+        # to here", and is the operator's ruling of 2026-08-27.
+        if campus_head and campus_head.get("email"):
+            _hp = str(campus_head.get("phone") or "").strip()
+            _hc = (f"{campus_head['email']}, {_hp}" if _hp
+                   else campus_head["email"])
+            answer += (f" For help at {campus_label} itself, "
+                       f"{campus_head['name']} directs the library there "
+                       f"({_hc}).")
     citations = [{
         "n": 1,
         "url": str(liaisons[0].get("profile_url") or _LIAISONS_URL),
@@ -8985,6 +9053,83 @@ def _fetch_tech_checkout_chunks() -> list[dict]:
     except Exception:  # noqa: BLE001 -- a lookup must never break the turn
         log.warning("tech-checkout fetch failed", exc_info=True)
         return []
+
+
+
+_OHIOLINK_POLICY_URL = (
+    "https://libguides.lib.miamioh.edu/mul-circulation-policies/"
+    "loan-periods-ohiolink-ill"
+)
+
+_BORROWED_ELSEWHERE_RE = re.compile(
+    r"\b(ohiolink|search\s*ohio|searchohio|interlibrary\s+loan|\bill\b)\b",
+    re.IGNORECASE,
+)
+
+
+def _ensure_borrowed_elsewhere_evidence(
+    evidence: list["EvidenceChunk"], message: str, deps: "OrchestratorDeps"
+) -> list["EvidenceChunk"]:
+    """Put the OhioLINK / SearchOhio / ILL policy page in front of the
+    synthesizer when the question is about one of those programs.
+
+    "Where do I return an OhioLINK book?" did not retrieve that page AT ALL
+    -- ten hits, none of them it. What ranked first was the FAQ titled
+    "Where on campus can I return library books?", which is about MIAMI
+    UNIVERSITY LIBRARY books and says so in its first sentence, and the
+    answer generalised it: "any library location in Oxford". The policy
+    page says OhioLINK items go back to the bookdrop at the library they
+    were borrowed FROM. Three runs, three times the permissive version.
+
+    A `pin` correction cannot fix this -- pins boost, they do not inject,
+    by deliberate design, so pinning a chunk retrieval never returns is a
+    no-op. The page has to be put there.
+
+    Same shape and same failure-tolerance as the tech-checkout prefetch
+    above: on any error, return the evidence untouched.
+    """
+    if not _BORROWED_ELSEWHERE_RE.search(message or ""):
+        return evidence
+    if any(_OHIOLINK_POLICY_URL.rstrip("/") in (getattr(c, "source_url", "") or "")
+           for c in evidence):
+        return evidence
+    try:
+        import os as _os
+
+        from weaviate.classes.query import Filter
+
+        from src.synthesis.corrections import EvidenceChunk as _EC
+        from src.utils.weaviate_client import get_weaviate_client
+
+        client = get_weaviate_client()
+        if client is None:
+            return evidence
+        # Not closed: process-wide singleton. See _fetch_tech_checkout_chunks.
+        col = client.collections.get(
+            _os.getenv("WEAVIATE_CHUNK_COLLECTION", "Chunk_current"))
+        res = col.query.fetch_objects(
+            filters=Filter.by_property("source_url").equal(
+                _OHIOLINK_POLICY_URL),
+            limit=3,
+            return_properties=["chunk_id", "source_url", "text", "campus",
+                               "library", "topic"],
+        )
+        extra = [
+            _EC(chunk_id=str(pr.get("chunk_id") or "ohiolink-policy"),
+                source_url=str(pr.get("source_url") or _OHIOLINK_POLICY_URL),
+                text=str(pr.get("text") or ""),
+                campus=pr.get("campus"), library=pr.get("library"),
+                topic=pr.get("topic"), score=1.0)
+            for pr in (dict(o.properties or {}) for o in res.objects)
+            if (pr.get("text") or "").strip()
+        ]
+        if extra:
+            log.info("prefetched OhioLINK/ILL policy evidence (%d chunk(s))",
+                     len(extra))
+        return extra + evidence
+    except Exception:  # noqa: BLE001 -- prefetch must never break the turn
+        log.warning("OhioLINK policy prefetch failed", exc_info=True)
+        return evidence
 
 
 def _tech_checkout_short_circuit(message: str) -> "Optional[tuple[str, list[dict]]]":

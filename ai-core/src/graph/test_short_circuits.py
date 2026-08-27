@@ -5788,3 +5788,169 @@ def test_it_still_points_at_a_page_rather_than_guessing():
     r = _long_period("What are Wertz Library's summer hours?", library="wertz")
     assert r.agent_stopped_reason == "point_to_url"
     assert r.citations and r.citations[0]["url"]
+
+
+# --- a regional student gets somebody on their own campus ----------------
+#
+# "Who is the history librarian at Hamilton?" answered, correctly, that
+# nobody at Hamilton covers history and that Oxford's Jenny Presnell
+# supports every campus -- and left the student with nobody local to walk
+# to. The live liaisons page really does give Hamilton only two liaisons
+# (Mark Shores, Krista McDonald) and neither carries History, so the
+# preference logic cannot invent one. Their own library's director can be
+# named instead. Operator ruling 2026-08-27.
+
+
+def _head(name="Krista McDonald", title="Director, Regional Campus Library",
+          email="mcdonak@miamioh.edu", phone="(513) 785-3100"):
+    return {"name": name, "title": title, "email": email, "phone": phone,
+            "campus": "Hamilton"}
+
+
+class TestCampusHeadFallback:
+    def _answer(self, head):
+        from types import SimpleNamespace as NS
+
+        from src.graph.new_orchestrator import _subject_liaison_short_circuit
+
+        call = NS(id="c1", name="lookup_librarian",
+                  arguments={"subject": "History", "campus": "hamilton"})
+        res = NS(call_id="c1", name="lookup_librarian", error=None,
+                 data={"librarians": [{
+                     "name": "Jenny Presnell",
+                     "email": "presnejl@miamioh.edu",
+                     "phone": "(513) 529-3937", "campus": "Oxford",
+                     "profile_url":
+                         "https://www.lib.miamioh.edu/about/organization/liaisons/",
+                 }]})
+        outcome = NS(turns=[NS(tool_calls=[call], tool_results=[res])])
+        scope = NS(campus="hamilton", library=None)
+        return _subject_liaison_short_circuit(outcome, scope, head)
+
+    def test_the_local_director_is_named(self):
+        out = self._answer(_head())
+        assert out is not None
+        answer = out[0]
+        assert "Krista McDonald" in answer
+        assert "mcdonak@miamioh.edu" in answer
+
+    def test_the_subject_specialist_is_still_named(self):
+        """The director is an addition, not a replacement. The person who
+        actually knows the subject is still the right one to consult."""
+        answer = self._answer(_head())[0]
+        assert "Jenny Presnell" in answer
+        assert "isn't a librarian based at Hamilton" in answer
+
+    def test_no_head_means_the_answer_is_what_it_was(self):
+        """Every campus without a director on record, and any turn where
+        the lookup failed. A courtesy must not become a dependency."""
+        answer = self._answer(None)[0]
+        assert "Jenny Presnell" in answer
+        assert "directs the library" not in answer
+
+
+class TestWhoCountsAsTheHead:
+    def _lookup(self, rows):
+        from types import SimpleNamespace as NS
+
+        from src.graph.new_orchestrator import _campus_head
+
+        deps = NS(tool_registry=NS(dispatch=lambda call: NS(
+            error=None, data={"librarians": rows})))
+        return _campus_head(deps, "hamilton")
+
+    def test_the_director_wins_over_the_assistant_director(self):
+        """Handing a student the deputy when the director is listed is the
+        kind of small wrongness that costs trust."""
+        got = self._lookup([
+            {"name": "Mark Shores", "title": "Assistant Director",
+             "email": "shoresml@miamioh.edu"},
+            {"name": "Krista McDonald",
+             "title": "Director, Regional Campus Library",
+             "email": "mcdonak@miamioh.edu"},
+        ])
+        assert got and got["name"] == "Krista McDonald"
+
+    def test_oxford_has_no_campus_head_for_this_purpose(self):
+        """Oxford carries seventy-odd liaisons, so a subject gap there
+        means the subject is genuinely uncovered. Naming the Dean would
+        send a student to the wrong door."""
+        from types import SimpleNamespace as NS
+
+        from src.graph.new_orchestrator import _campus_head
+
+        deps = NS(tool_registry=NS(dispatch=lambda call: NS(
+            error=None, data={"librarians": [
+                {"name": "Jerome Conley",
+                 "title": "Dean & University Librarian",
+                 "email": "conleyjs@miamioh.edu"}]})))
+        assert _campus_head(deps, "oxford") is None
+
+    def test_a_roster_with_no_director_returns_none(self):
+        assert self._lookup([
+            {"name": "Samantha Young", "title": "Senior Library Assistant",
+             "email": "youngsr3@miamioh.edu"}]) is None
+
+    def test_a_failed_lookup_does_not_break_the_turn(self):
+        from types import SimpleNamespace as NS
+
+        from src.graph.new_orchestrator import _campus_head
+
+        def _boom(call):
+            raise RuntimeError("registry is down")
+
+        deps = NS(tool_registry=NS(dispatch=_boom))
+        assert _campus_head(deps, "hamilton") is None
+
+
+# --- the page that holds the answer has to be IN the evidence ------------
+#
+# "Where do I return an OhioLINK book?" retrieved ten chunks and none of
+# them was the OhioLINK/ILL policy page. What ranked first was the FAQ
+# titled "Where on campus can I return library books?" -- correct, and
+# about MIAMI UNIVERSITY LIBRARY books, which it says in its first
+# sentence. The answer generalised it to OhioLINK three runs out of three.
+#
+# A `pin` correction cannot fix this: pins boost, they do not inject, by
+# deliberate design, so pinning a chunk retrieval never returns is a no-op.
+# That was tried first and changed nothing.
+
+
+class TestBorrowedElsewherePrefetch:
+    def _ev(self, message, existing=()):
+        from src.graph.new_orchestrator import (
+            _ensure_borrowed_elsewhere_evidence,
+        )
+
+        return _ensure_borrowed_elsewhere_evidence(list(existing), message,
+                                                   None)
+
+    @pytest.mark.parametrize("q", [
+        "Where do I return an OhioLINK book?",
+        "how do I renew a SearchOhio item",
+        "when will my interlibrary loan arrive",
+        "where do I return an ILL book",
+    ])
+    def test_it_fetches_for_the_programs_it_is_for(self, q):
+        urls = [c.source_url for c in self._ev(q)]
+        assert any("loan-periods-ohiolink-ill" in u for u in urls), q
+
+    @pytest.mark.parametrize("q", [
+        "what time does King close",
+        "where do I return a library book",
+        "how do I book a study room",
+    ])
+    def test_it_stays_out_of_every_other_turn(self, q):
+        """The prefetch is a Weaviate round-trip. Paying it on questions
+        that have nothing to do with borrowing elsewhere would be a cost
+        on every turn for the benefit of a few."""
+        assert self._ev(q) == []
+
+    def test_it_does_not_duplicate_what_retrieval_already_found(self):
+        from types import SimpleNamespace as NS
+
+        already = [NS(source_url="https://libguides.lib.miamioh.edu/"
+                                 "mul-circulation-policies/"
+                                 "loan-periods-ohiolink-ill",
+                      chunk_id="c-x", text="…")]
+        assert self._ev("return an OhioLINK book", already) == already
