@@ -200,6 +200,44 @@ trap 1 below.
 
 ---
 
+## 3d. Operator rulings that must not be "fixed" again (2026-08-27)
+
+**A deterministic answer does not need a citation for a standing contact.**
+Three eval cases lose points for it — svc_wifi, print_wifi_password,
+fs_archivist_email — all of them short-circuit answers whose template ends
+with "call (513) 529-4141 and someone at the desk can help". The judge
+calls that uncited, and it is; the number is also true, useful, and the
+reason somebody gets helped. Operator ruling: leave it. Removing a working
+phone number to satisfy a judge rule is optimising the metric against the
+patron. Those three verdicts should be read as noise, not as defects.
+
+**The kNN misroute on two-campus comparisons stays unfixed.** "Is the loan
+period for laptops different at King and Gardner-Harvey" routes to
+location_directions (0.634) over tech_checkout (0.600). Measured demand:
+across the whole beta, non-staff traffic contains ELEVEN messages naming two
+campuses, and they are three distinct questions repeated —
+"If I am located in Middletown and I need a book that is in King Library"
+(x5, and it already answers correctly), the laptop comparison (x5, mostly
+one person's test sweep), and "is there parking at Rentschler" (x1). Tuning
+a 5,500-exemplar classifier on that, at a margin of 0.034, is overfitting.
+Gold case xc3_laptop_loan_king_vs_gh is left red as documentation.
+
+**OhioLINK returns follow the circulation-policies page**, not the Home
+Delivery pages: back to the bookdrop at the library it was borrowed from.
+Implemented as two chunk suppressions plus a prefetch of the policy page,
+and the suppressions expire on purpose — the underlying problem is that the
+site says two things, and when the stopgap lapses the wrong answer returns,
+which is the reminder.
+
+**Running scripts as `qum` cannot use Prisma right now.** The client
+resolves a query-engine name (`...debian-openssl-3.5.x`) that is not what
+was downloaded (`...linux-arm64-openssl-3.0.x`). Under the service's own
+environment it resolves and the service is healthy, so this is not a
+production risk — but ad-hoc verification scripts need
+`sudo -n env HOME=/root DATABASE_URL=... .venv/bin/python`, or psql.
+
+---
+
 ## 4. Not started
 
 - Re-run all 206 against production after the current commits deploy.
@@ -208,9 +246,14 @@ trap 1 below.
   word "librarian" and does not know "supports". Found 2026-08-26, not fixed
   — one phrasing, and widening an intent matcher is how the find-help menu
   started taking questions that were not its.
-- The five corrections that never fire — either fix their matching or retire
-  them; a mechanism that has never worked is worse than none, because it
-  looks like coverage.
+- ~~The five corrections that never fire~~ — **WRONG, corrected 2026-08-27.**
+  Nothing had ever written `ManualCorrection.fireCount`; only the admin list
+  read it. Every rule showed 0 however often it fired. Two suppressions
+  created that day demonstrably worked — the wording they suppress vanished
+  from the answer, three runs out of three — and their count was 0 like
+  everything else. The counter is wired now; whether those five earn their
+  keep can be answered in a week, once the column means something. Deleting
+  them earlier would have been deleting on the strength of a bug.
 
 
 ---
