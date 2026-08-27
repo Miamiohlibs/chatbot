@@ -363,3 +363,58 @@ def test_charging_the_gerund_is_not_a_charger():
               "is the library charging for printing now",
               "do you have a charging policy"):
         assert not re.search(pat, q, re.IGNORECASE), q
+
+
+# --- a device the page never names is not a "yes" ------------------------
+#
+# Production, 2026-08-27 03:02: "Do you have iPhone chargers I can borrow?"
+# -> "Yes — the libraries' equipment checkout list includes **Chargers (Mac,
+# PC, assorted phones)**". The page has no "iPhone" in it and promises
+# nothing about one; "assorted phones" is a category, and the student walks
+# over believing a cable that fits theirs is waiting.
+#
+# Synthesizer rule 16 forbids exactly this and could not reach it: this path
+# answers deterministically and never calls the model. The rule was measured
+# 3/3 overclaiming before and 0/5 after -- on the SYNTHESIZER. The
+# measurement never touched the path production actually used for this
+# question, which is the same verification gap that hid the cross-campus
+# classifier misroute earlier the same day.
+
+class TestDeviceNamesThePageNeverMentions:
+    @pytest.mark.parametrize("q", [
+        "Do you have iPhone chargers I can borrow?",
+        "can I borrow a Samsung charger",
+        "do you lend iPad chargers",
+        "can I check out an Android cable",
+    ])
+    def test_it_hands_the_turn_back_instead_of_answering(self, q):
+        from src.graph.tech_checkout import tech_checkout_answer
+
+        assert tech_checkout_answer(q, PAGE) is None, (
+            "answering from the category promises a fit the page does not"
+        )
+
+    @pytest.mark.parametrize("q", [
+        "do you lend Chromebooks",
+        "can I borrow an iPad",
+    ])
+    def test_a_device_the_matched_entry_does_name_still_answers(self, q):
+        """The guard fires on absence FROM THE MATCHED ENTRY, not on the
+        word. Losing these would trade one overclaim for a refusal on
+        something the page really does list."""
+        from src.graph.tech_checkout import tech_checkout_answer
+
+        out = tech_checkout_answer(q, PAGE)
+        assert out is not None and out[0]
+
+    @pytest.mark.parametrize("q", [
+        "do you have chargers",
+        "do you lend graphing calculators",
+        "can I borrow a mouse",
+    ])
+    def test_an_unqualified_question_is_untouched(self, q):
+        """Nobody asked about a specific device, so there is no gap to
+        name and the direct answer is the right one."""
+        from src.graph.tech_checkout import tech_checkout_answer
+
+        assert tech_checkout_answer(q, PAGE) is not None

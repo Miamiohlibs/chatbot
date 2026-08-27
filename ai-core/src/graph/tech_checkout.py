@@ -228,7 +228,25 @@ def looks_like_equipment_question(message: str) -> bool:
 # interfaces, these questions become answerable with no code change.
 _INTERFACE_RE = re.compile(
     r"\b(hdmi|vga|display\s*port|dvi|thunderbolt|lightning|usb-?c|"
-    r"cat-?[56]e?|aux\s*cord|3\.5\s*mm|firewire|micro-?usb)\b",
+    r"cat-?[56]e?|aux\s*cord|3\.5\s*mm|firewire|micro-?usb"
+    # DEVICE NAMES, not just connectors. The page lists "Chargers (Mac, PC,
+    # assorted phones)" -- a category. "Do you have iPhone chargers I can
+    # borrow?" carried no connector word, so this guard stayed quiet,
+    # _match_item matched the word "chargers", and the answer opened "Yes --
+    # the equipment checkout list includes Chargers". The page has no
+    # "iPhone" in it and promises nothing about one.
+    #
+    # Synthesizer rule 16 forbids exactly this, and could not reach it:
+    # tech_checkout answers deterministically and never calls the model. Two
+    # paths, one rule, and only one of them had it.
+    #
+    # Naming a device here is not a refusal. It hands the turn to the normal
+    # path, where the page's own wording still gets stated and the gap gets
+    # named. And it only fires when the page never mentions the word, so
+    # "Mac", "PC" and "MacBook" -- which the page does name -- are unaffected.
+    r"|iphone|ipad|android|samsung|galaxy|pixel|kindle"
+    r"|macbook|chromebook|thinkpad|surface\s*(pro|laptop)?"
+    r"|nintendo|playstation|xbox)\b",
     re.IGNORECASE,
 )
 
@@ -238,6 +256,31 @@ def _asks_for_something_the_page_never_names(message: str, page: str) -> bool:
     if not m:
         return False
     return m.group(0).lower().replace(" ", "") not in (page or "").lower().replace(" ", "")
+
+
+def _qualifier_missing_from(message: str, *texts: str) -> "Optional[str]":
+    """The device or connector the question names, if the MATCHED entry
+    does not name it. None when there is nothing to check.
+
+    Scoped to the entry rather than the whole page, which is the difference
+    between the two failures this exists for. "Do you lend iPad chargers?"
+    finds "iPad" somewhere on the page -- in the tablet list -- and a
+    page-wide check therefore stays quiet, matches the word "chargers", and
+    answers "Yes, Chargers (Mac, PC, assorted phones)". The charger line
+    says nothing about iPads. What matters is whether the thing we are
+    about to point at mentions what they asked for.
+
+    "Can I borrow an iPad" is unaffected: the entry it matches IS the iPad
+    one, so the qualifier is present and the answer stands.
+    """
+    m = _INTERFACE_RE.search(message or "")
+    if not m:
+        return None
+    want = m.group(0).lower().replace(" ", "").replace("-", "")
+    for t in texts:
+        if want in (t or "").lower().replace(" ", "").replace("-", ""):
+            return None
+    return m.group(0)
 
 
 def _match_item(message: str, cats: Dict[str, List[str]]) -> Optional[Tuple[str, str]]:
@@ -294,6 +337,26 @@ def tech_checkout_answer(
     if hit is None:
         return None
     _asked, entry = hit
+
+    # The question named a device or a connector, and the entry we are about
+    # to point at does not mention it. Answering here would turn a category
+    # into a promise -- "Yes, we have Chargers (Mac, PC, assorted phones)"
+    # to someone who asked for an iPhone cable. Hand the turn back: the
+    # normal path states the page's own wording AND names the gap
+    # (synthesizer rule 16), which is the honest version of this answer.
+    #
+    # Checked against everything the answer will actually SHOW -- the entry,
+    # its category, and the sibling items the answer lists -- not against
+    # the whole page. "Can I borrow an iPad" matches the CATEGORY "Laptops
+    # & Tablets" through a synonym, and the answer goes on to name "iPad
+    # Pros and Apple Pencils" underneath it, so the iPad is genuinely
+    # promised and the answer stands. "iPad chargers" matches "Chargers
+    # (Mac, PC, assorted phones)", whose siblings are disc drives and card
+    # readers -- nothing there is an iPad anything.
+    _parent = next((c for c, items in cats.items() if entry in items), "")
+    _shown = [entry, _parent, *(cats.get(_parent or entry) or [])]
+    if _qualifier_missing_from(m, *_shown) is not None:
+        return None
 
     # Name the parent category when the hit is a sub-item, so "Graphing"
     # reads as "Graphing calculator" and not as a bare word. Rule 12b: a word
