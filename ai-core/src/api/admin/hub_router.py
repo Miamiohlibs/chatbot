@@ -107,7 +107,12 @@ def render_admin_hub(admin_key: str, librarian_code: str,
         _card("Conversations by day",
               "Every conversation for one day, newest first, with the "
               "turns worth opening marked. Oxford time.",
-              ui.action(f"/admin/conversations{k}", "Today", primary=True)),
+              ui.action(f"/admin/conversations{k}", "Today", primary=True))
+        + _card("Search",
+                "One word across every conversation held — what patrons "
+                "typed, what the bot said, or both. Browsing a day at a "
+                "time was the only way to find anything before.",
+                ui.action(f"/admin/search{k}", "Open")),
     )
 
     # 1. The path a wrong answer travels: someone reports it -> you read

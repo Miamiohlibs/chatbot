@@ -1344,3 +1344,106 @@ async def close_testing_rows(db: Any, *, filter_preset: str = "flagged",
 
     return {"closed": len(hits), "kept": kept, "by_tag": dict(tally),
             "dry_run": dry_run}
+
+
+SEARCH_SCAN_CAP = 4000
+"""How many matching messages to pull before grouping.
+
+The table holds ~6,200 messages and grows by a few hundred a week, so a
+`contains` scan is measured in milliseconds and a tsvector index would be
+machinery for a problem nobody has. This cap exists so that stops being
+true quietly rather than loudly: cross it and the page SAYS it truncated,
+instead of showing a confident partial answer.
+"""
+
+SEARCH_MIN_LEN = 2
+
+
+async def search_messages(
+    db: Any,
+    query: str,
+    *,
+    who: str = "any",
+    limit: int = 50,
+    offset: int = 0,
+) -> dict:
+    """Conversations containing `query`, newest first.
+
+    WHY THIS EXISTS
+        There was no keyword search anywhere in the console. Conversations
+        are browsable one day at a time, Flagged filters by preset, tickets
+        filter by status -- so "has anyone ever asked about Zotero" meant
+        opening days one after another and reading. Every question about
+        what patrons actually ask was gated behind that.
+
+    `who` narrows to what the PATRON typed or what the BOT said. Both are
+    real questions and they are not the same one: "did anyone ask about
+    interlibrary loan" and "did we ever tell someone the wrong loan period"
+    need different halves of the transcript.
+
+    Returns one row per CONVERSATION, not per message, because ten hits in
+    one chat is one thing to read, not ten. `hits` says how many matched
+    inside it and `snippet` is the first match, so the row can be judged
+    without opening it.
+    """
+    q = (query or "").strip()
+    if len(q) < SEARCH_MIN_LEN:
+        return {"rows": [], "total": 0, "offset": offset, "limit": limit,
+                "truncated": False, "query": q}
+
+    where: dict = {"content": {"contains": q, "mode": "insensitive"}}
+    if who == "patron":
+        where["type"] = "user"
+    elif who == "bot":
+        where["type"] = "assistant"
+
+    try:
+        msgs = await db.message.find_many(
+            where=where,
+            order={"timestamp": "desc"},
+            take=SEARCH_SCAN_CAP,
+        )
+    except Exception:  # noqa: BLE001 -- a search must not 500 the console
+        logger.exception("search_messages failed for %r", q)
+        return {"rows": [], "total": 0, "offset": offset, "limit": limit,
+                "truncated": False, "query": q, "error": True}
+
+    truncated = len(msgs) >= SEARCH_SCAN_CAP
+    if truncated:
+        logger.warning("search hit the %d-message scan cap for %r",
+                       SEARCH_SCAN_CAP, q)
+
+    grouped: dict = {}
+    for m in msgs:
+        cid = getattr(m, "conversationId", None)
+        if not cid:
+            continue
+        row = grouped.get(cid)
+        if row is None:
+            row = grouped[cid] = {
+                "conversation_id": cid,
+                "when": local_ts(getattr(m, "timestamp", None)),
+                "_ts": getattr(m, "timestamp", None),
+                "hits": 0,
+                "snippet": "",
+                "snippet_from": "",
+            }
+        row["hits"] += 1
+        if not row["snippet"]:
+            row["snippet"] = (getattr(m, "content", "") or "")[:300]
+            row["snippet_from"] = (
+                "patron" if getattr(m, "type", "") == "user" else "chatbot")
+
+    rows = sorted(grouped.values(),
+                  key=lambda r: (r["_ts"] is None, r["_ts"]), reverse=True)
+    for r in rows:
+        r.pop("_ts", None)
+    total = len(rows)
+    return {
+        "rows": rows[offset:offset + limit],
+        "total": total,
+        "offset": offset,
+        "limit": limit,
+        "truncated": truncated,
+        "query": q,
+    }

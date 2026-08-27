@@ -23,7 +23,10 @@ import html
 from typing import Any
 
 from src.api.admin import admin_ui as ui
+from urllib.parse import quote
+
 from src.api.admin.review_queries import (
+    search_messages,
     BETA_START_LOCAL,
     LIBRARY_TZ,
     SOURCE_TAGS,
@@ -227,8 +230,27 @@ def build_conversations_router(deps: dict) -> Any:
             )
 
         needs = sum(1 for r in rows if r["needs_look"])
+        # The console had no keyword search anywhere. Conversations browse
+        # one day at a time, Flagged filters by preset, tickets by status --
+        # so "has anyone ever asked about Zotero" meant opening days one
+        # after another and reading them. The box goes here because this is
+        # the page an operator is already on when the question occurs.
+        search_box = (
+            f"<form method='get' action='/admin/search' class='searchbar' "
+            f"style='margin:.6rem 0;display:flex;gap:.4rem;flex-wrap:wrap'>"
+            + (f"<input type='hidden' name='key' value='{_e(key)}'>" if key else "")
+            + f"<input type='search' name='q' placeholder='Search every "
+              f"conversation…' aria-label='Search conversations' "
+              f"style='flex:1;min-width:14rem'>"
+              f"<select name='who' aria-label='Whose words'>"
+              f"<option value='any'>anyone</option>"
+              f"<option value='patron'>what patrons typed</option>"
+              f"<option value='bot'>what the bot said</option></select>"
+              f"<button type='submit'>Search</button></form>"
+        )
         body = (
             f"<h1>Conversations</h1>"
+            f"{search_box}"
             f"<div style='margin:.6rem 0'>{nav}</div>"
             f"<div class='filter-bar'>{source_bar}</div>"
             + (f"<p class='dim'>13 August is shown from 6:00pm, when the "
@@ -265,6 +287,99 @@ def build_conversations_router(deps: dict) -> Any:
         )
         return HTMLResponse(ui.page("Conversations",
                                     f"<div class='convs'>{body}</div>",
+                                    current="/admin/conversations", key=key))
+
+
+    @router.get("/admin/search", response_class=HTMLResponse)
+    async def search(q: str = "", who: str = "any", key: str = "",
+                     page: int = 1, per: int = 50,
+                     _g=Depends(guard)) -> Any:
+        """Keyword search across every conversation held.
+
+        One row per CONVERSATION, not per matching message: ten hits in one
+        chat is one thing to read, not ten.
+        """
+        who = who if who in {"any", "patron", "bot"} else "any"
+        page = max(1, page)
+        per = min(max(per, 10), 200)
+        kq = f"&key={_e(key)}" if key else ""
+        res = await search_messages(db, q, who=who, limit=per,
+                                    offset=(page - 1) * per)
+        rows, total = res["rows"], res["total"]
+
+        who_bar = "".join(
+            (f"<b class='tag'>{_e(label)}</b>" if who == value else
+             f"<a class='tag' href='/admin/search?q={quote(res['query'])}"
+             f"&who={value}{kq}'>{_e(label)}</a>")
+            for value, label in (("any", "anyone"),
+                                 ("patron", "what patrons typed"),
+                                 ("bot", "what the bot said"))
+        )
+
+        form = (
+            f"<form method='get' action='/admin/search' "
+            f"style='margin:.6rem 0;display:flex;gap:.4rem;flex-wrap:wrap'>"
+            + (f"<input type='hidden' name='key' value='{_e(key)}'>" if key else "")
+            + f"<input type='hidden' name='who' value='{_e(who)}'>"
+            f"<input type='search' name='q' value='{_e(res['query'])}' "
+            f"placeholder='Search every conversation…' "
+            f"aria-label='Search conversations' style='flex:1;min-width:14rem'>"
+            f"<button type='submit'>Search</button></form>"
+        )
+
+        if res.get("error"):
+            note = ("<div class='card attn'>The search could not run. The "
+                    "console log has the reason.</div>")
+        elif not res["query"]:
+            note = ("<p class='dim'>Type at least two characters. Matching is "
+                    "plain substring, case-insensitive — no wildcards, no "
+                    "operators.</p>")
+        elif not rows:
+            note = (f"<p class='dim'>Nothing matches "
+                    f"<b>{_e(res['query'])}</b>. Only conversations still "
+                    f"held are searched.</p>")
+        else:
+            note = (f"<p class='dim'>{total} conversation(s) contain "
+                    f"<b>{_e(res['query'])}</b>."
+                    + (" <b>Truncated</b> — more matched than this page can "
+                       "reach, so narrow the words rather than reading on."
+                       if res["truncated"] else "")
+                    + "</p>")
+
+        def row(r: dict) -> str:
+            more = (f" <span class='dim'>+{r['hits'] - 1} more in this "
+                    f"chat</span>" if r["hits"] > 1 else "")
+            return (
+                f"<tr><td class='dim' style='white-space:nowrap'>"
+                f"{_e(r['when'])}</td>"
+                f"<td><a href='/admin/review/{_e(r['conversation_id'])}"
+                f"{('?key=' + _e(key)) if key else ''}'>{_e(r['snippet'])}</a>"
+                f"{more}</td>"
+                f"<td class='dim'>{_e(r['snippet_from'])}</td></tr>"
+            )
+
+        pages = max(1, -(-total // per))
+        pager = ""
+        if pages > 1:
+            bits = []
+            if page > 1:
+                bits.append(f"<a class='tag' href='/admin/search?"
+                            f"q={quote(res['query'])}&who={who}&page={page - 1}"
+                            f"{kq}'>&larr; previous</a>")
+            bits.append(f"<span class='dim'>page {page} of {pages}</span>")
+            if page < pages:
+                bits.append(f"<a class='tag' href='/admin/search?"
+                            f"q={quote(res['query'])}&who={who}&page={page + 1}"
+                            f"{kq}'>next &rarr;</a>")
+            pager = f"<div style='margin:.6rem 0'>{' '.join(bits)}</div>"
+
+        table = ("" if not rows else
+                 f"<table><tr><th>When</th><th>Match</th><th>Said by</th></tr>"
+                 + "".join(row(r) for r in rows) + "</table>")
+        body = (f"<h1>Search</h1>{form}"
+                f"<div class='filter-bar'>{who_bar}</div>"
+                f"{note}{pager}{table}{pager}")
+        return HTMLResponse(ui.page("Search", body,
                                     current="/admin/conversations", key=key))
 
     @router.get("/admin/conversations/{conversation_id}/source",
