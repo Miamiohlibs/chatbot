@@ -6108,12 +6108,47 @@ def _special_collections_campus_answer(
     )
 
 
+
+def _also_typo_fixed(message: str) -> "tuple[str, ...]":
+    """The message as typed, and -- if it differs -- with mistypings fixed.
+
+    Matchers test BOTH. The corrected form can only ever ADD a match, so
+    nothing that routed correctly before can stop routing because of this;
+    and the text a patron actually typed is what gets logged, quoted and
+    answered, because a bot that silently rewrites the question is one
+    nobody can debug.
+
+    See src/router/typos: swaps only, measured against every word real
+    patrons have typed.
+    """
+    raw = message or ""
+    try:
+        from src.router.typos import normalise
+
+        fixed = normalise(raw)
+    except Exception:  # noqa: BLE001 -- never break routing over spelling
+        return (raw,)
+    return (raw,) if fixed == raw else (raw, fixed)
+
+
+def _matches_any(pattern, message: str) -> bool:
+    """True when `pattern` matches the message as typed OR as corrected."""
+    return any(pattern.search(v) for v in _also_typo_fixed(message))
+
+
 def _dean_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
     """Name the dean from the roster; decline the salary without dodging."""
     m = message or ""
-    if not _DEAN_RE.search(m):
+    # Matched against the message as typed AND as corrected. "who is in
+    # charge of the lirbary" missed this answer entirely and was told
+    # Miami has no subject librarian for "library leadership"; the same
+    # student spelled it right two minutes later and got the Dean.
+    if not _matches_any(_DEAN_RE, m):
         return None
     # "who is my dean's librarian" style asks belong to the liaison flow.
+    # Checked on the RAW text only: this one exists to hand a turn away,
+    # and a correction must not be able to trigger a hand-off the reader
+    # did not ask for.
     if _LIBRARIAN_IS_MINE_RE.search(m):
         return None
     salary = bool(_SALARY_RE.search(m))
