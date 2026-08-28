@@ -411,7 +411,7 @@ def _job_panel(key: str) -> str:
                     + ("Answers are slower than usual while this runs; it "
                        "finishes on its own."
                        if job.phase == "apply" else "")
-                    + " Reload this page for progress.</p>")
+                    + " This page updates itself.</p>")
         elif job.ok and not job.error:
             extra = (f" The bot is answering from "
                      f"<code>{ui.e(job.promoted_collection)}</code> as of now."
@@ -491,13 +491,19 @@ def _exclusions_panel(key: str) -> str:
 
 def render_page(key: str, message: str = "", ok: str = "") -> str:
     diff = latest_diff()
+    from src.api.admin import etl_jobs as _jobs
+
+    # Reload itself only while something is running. A page that refreshes
+    # for ever fights the reader who is trying to read a diff on it.
+    _busy = 5 if _jobs.is_running() else 0
+
     if diff is None:
         return ui.page("Corpus review",
                        _job_panel(key)
                        + _exclusions_panel(key)
                        + "<p>No prepared diff is waiting — use the button "
                          "above to fetch the site's current pages.</p>",
-                       current="/admin/etl", key=key)
+                       current="/admin/etl", key=key, refresh_s=_busy)
 
     decision = gate.verify_gate(diff)
     token = decision.token
@@ -637,7 +643,7 @@ def render_page(key: str, message: str = "", ok: str = "") -> str:
         + form
         + "<h2>Full diff</h2>"
         + f"<div class='md'>{render_markdown(body)}</div>",
-        current="/admin/etl", key=key,
+        current="/admin/etl", key=key, refresh_s=_busy,
     )
 
 
@@ -781,7 +787,15 @@ def build_etl_approval_router(deps: dict):
             return HTMLResponse(render_page(key, msg), status_code=409,
                                 headers=_NOINDEX)
         logger.warning("corpus fetch started by %s", who)
-        return RedirectResponse(f"/admin/etl?key={key}", status_code=303)
+        # Say so, rather than redirecting to a page that looks unchanged.
+        # A 303 here left the reader with a small grey line as the only
+        # sign anything had happened, and the reasonable conclusion from
+        # that is that the button is broken.
+        return HTMLResponse(
+            render_page(key, "", "Fetching the site now — about a minute. "
+                               "This page updates itself, and the new diff "
+                               "appears below when it is ready."),
+            headers=_NOINDEX)
 
     @router.post("/etl/reject", response_class=HTMLResponse)
     async def reject(request: Request, key: str = "", email: str = Form(""),

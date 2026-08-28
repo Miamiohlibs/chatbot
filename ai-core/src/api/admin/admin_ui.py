@@ -105,7 +105,7 @@ p.sub{color:var(--muted);font-size:.88rem;margin:-.35rem 0 .75rem}
 .pill.open{background:var(--open-bg);color:var(--open)}
 .pill.prog{background:var(--prog-bg);color:var(--prog)}
 .pill.done{background:var(--done-bg);color:var(--done)}
-.pill.warn{background:var(--warn-bg);color:var(--warn)}
+.pill.warn,.good{display:block;padding:.7rem .9rem;border-radius:4px;margin:.6rem 0;font-weight:500;border-left:4px solid currentColor}.warn{background:var(--warn-bg);color:var(--warn)}
 .pill.flat{background:#f3f4f6;color:var(--muted)}
 
 /* actions: explicit buttons, never a mystery "next state" toggle */
@@ -246,11 +246,21 @@ def nav(current: str, key: str = "", counts: Optional[dict] = None) -> str:
 
 
 def page(title: str, body: str, *, current: str = "", key: str = "",
-         counts: Optional[dict] = None) -> str:
-    """The shell every admin surface renders into."""
+         counts: Optional[dict] = None, refresh_s: int = 0) -> str:
+    """The shell every admin surface renders into.
+
+    `refresh_s` makes the page reload itself while something is running.
+    Without it the corpus page told the reader to "reload for progress",
+    which is a job for the page, not the reader: press Fetch, watch
+    nothing visibly change, conclude it did not work. It did -- that run
+    finished in 46 seconds.
+    """
+    meta_refresh = (f"<meta http-equiv='refresh' content='{int(refresh_s)}'>"
+                    if refresh_s else "")
     return (
         "<!doctype html><html lang='en'><head><meta charset='utf-8'>"
         "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+        f"{meta_refresh}"
         f"<title>{e(title)} — Smart Chatbot admin</title>"
         f"<style>{STYLE}</style></head><body>"
         "<header class='top'><div class='wrap'>"

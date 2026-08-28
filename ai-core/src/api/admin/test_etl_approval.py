@@ -527,3 +527,74 @@ def test_the_page_says_nothing_changes_until_somebody_signs(client, diffs,
     body = client.get("/admin/etl").text
     assert "nothing changes until somebody" in body.lower() or \
            "next fetch" in body.lower()
+
+
+# --- pressing the button has to look like it did something ---------------
+#
+# Reported from the live console, 2026-08-28: "this can't fetch, and if you
+# fill in the wrong details there is no message at all."
+#
+# Both had in fact worked. The fetch ran and finished in 46 seconds, and a
+# wrong passphrase did return "Wrong passphrase." What failed was showing
+# it: the notice was a bare tinted line with no padding sitting above a
+# large white card and a red button, and the page told the READER to
+# reload for progress, so pressing Fetch looked like pressing nothing.
+
+
+def test_a_wrong_passphrase_says_so(client, diffs):
+    r = client.post("/admin/etl/fetch",
+                    data={"email": "a@miamioh.edu", "password": "nope"})
+    assert r.status_code == 403
+    assert "Wrong passphrase" in r.text
+
+
+def test_an_email_not_on_the_list_says_so(client, diffs):
+    r = client.post("/admin/etl/fetch",
+                    data={"email": "stranger@example.com",
+                          "password": "correct horse"})
+    assert r.status_code == 403
+    assert "not on the approver list" in r.text
+
+
+def test_a_notice_is_styled_like_a_notice(client):
+    """A bare tinted line next to a red button is a whisper. Padding and a
+    rule are what make somebody see it."""
+    from src.api.admin import admin_ui as ui
+
+    assert "padding" in ui.STYLE.split(".warn,.good{")[1].split("}")[0]
+    assert "border-left" in ui.STYLE.split(".warn,.good{")[1].split("}")[0]
+
+
+def test_starting_a_fetch_confirms_it_started(client, diffs, _no_real_etl):
+    """Not a silent redirect to a page that looks unchanged -- the
+    reasonable conclusion from that is that the button is broken."""
+    r = client.post("/admin/etl/fetch",
+                    data={"email": "a@miamioh.edu",
+                          "password": "correct horse"})
+    assert r.status_code == 200
+    assert "Fetching the site now" in r.text
+
+
+def test_the_page_refreshes_itself_while_a_job_runs(client, diffs,
+                                                    monkeypatch):
+    from src.api.admin import etl_jobs
+
+    monkeypatch.setattr(etl_jobs, "is_running", lambda: True)
+    assert "http-equiv='refresh'" in client.get("/admin/etl").text
+
+
+def test_it_stops_refreshing_once_the_job_is_done(client, diffs, monkeypatch):
+    """A page that reloads for ever fights the reader trying to read a
+    diff on it -- which is the whole point of the page."""
+    from src.api.admin import etl_jobs
+
+    monkeypatch.setattr(etl_jobs, "is_running", lambda: False)
+    assert "http-equiv='refresh'" not in client.get("/admin/etl").text
+
+
+def test_it_no_longer_tells_the_reader_to_reload(client, diffs, monkeypatch):
+    from src.api.admin import etl_jobs
+
+    monkeypatch.setattr(etl_jobs, "is_running", lambda: True)
+    body = client.get("/admin/etl").text
+    assert "Reload this page" not in body
