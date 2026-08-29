@@ -159,6 +159,16 @@ const TicketWidget = () => {
 
   return (
     <form onSubmit={handleTicketSubmit} className="space-y-4">
+      {/* The form says what it is. The dialog above it says "Smart
+          Chatbot" on every mode, so without this a reader arriving here
+          by heading had four name fields and no way to tell which form
+          they were in. Reported in the accessibility review, 2026-08. */}
+      <h2 className="text-base font-semibold text-gray-800">
+        Send a question to a librarian
+      </h2>
+      <p className="text-sm text-gray-600 -mt-2">
+        A librarian will reply by email, usually within one working day.
+      </p>
       <div>
         <Label htmlFor="ticket-name">Name</Label>
         <Input
@@ -171,7 +181,7 @@ const TicketWidget = () => {
       </div>
       <div>
         <div className="flex justify-between items-center mb-1">
-          <Label>Question</Label>
+          <Label htmlFor="ticket-question">Question</Label>
           {chatHistory && chatHistory.length > 0 && (
             <Tooltip>
               <TooltipTrigger asChild>
@@ -200,6 +210,7 @@ const TicketWidget = () => {
           )}
         </div>
         <Textarea
+          id="ticket-question"
           placeholder="Enter your question..."
           value={question}
           onChange={(e) => setQuestion(e.target.value)}
@@ -208,7 +219,7 @@ const TicketWidget = () => {
       </div>
       <div>
         <div className="flex justify-between items-center mb-1">
-          <Label>Details</Label>
+          <Label htmlFor="ticket-details">Details</Label>
           {chatHistory && chatHistory.length > 0 && (
             <Tooltip>
               <TooltipTrigger asChild>
@@ -218,15 +229,24 @@ const TicketWidget = () => {
                   variant="outline"
                   onClick={handleCopyTranscript}
                 >
-                  <Copy className="h-3 w-3 mr-1" />
-                  {copied ? 'Copied!' : 'Copy Transcript'}
+                  <Copy className="h-3 w-3 mr-1" aria-hidden="true" />
+                  {/* It writes the transcript INTO the Details field; it
+                      never touches the clipboard. "Copy" described the
+                      icon rather than the action, and a reader who pressed
+                      it went looking in their clipboard. The trailing
+                      words are for screen readers only, so the button
+                      stays narrow while its name says what happens.
+                      Reported in the accessibility review. */}
+                  {copied ? 'Added!' : 'Add transcript'}
+                  <span className="sr-only"> to the details box below</span>
                 </Button>
               </TooltipTrigger>
-              <TooltipContent className="bg-gray-900/80 text-white font-xs">Copy full chat transcript to details</TooltipContent>
+              <TooltipContent className="bg-gray-900/80 text-white font-xs">Puts the whole chat into the details box below</TooltipContent>
             </Tooltip>
           )}
         </div>
         <Textarea
+          id="ticket-details"
           placeholder="Enter details about your question..."
           value={details}
           onChange={(e) => setDetails(e.target.value)}

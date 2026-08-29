@@ -345,9 +345,21 @@ const App = () => {
                 Back
               </Button>
             )}
-            {step === 'services' && <FeedbackFormComponent />}
           </div>
           
+          {/* Every mode needs its own <h1>. The dialog title says "Smart
+              Chatbot" on all four of them, so a screen reader user moving
+              by heading could not tell the chat from the ticket form.
+              sr-only because the visible design already communicates it --
+              this names the page for people the design cannot reach.
+              Reported in the accessibility review, 2026-08. */}
+          <h1 className="sr-only">
+            {step === 'initial' && 'Smart Chatbot — choose how to get help'}
+            {step === 'services' && 'Chat with the Smart Chatbot'}
+            {step === 'humanLibrarian' && 'Chat with a librarian'}
+            {step === 'ticket' && 'Send a question to the librarians'}
+          </h1>
+
           <div className="py-5">
             {step === 'initial' && (
               <div className="flex flex-col gap-3">
@@ -423,8 +435,12 @@ const App = () => {
                   </div>
                 )}
                 
+                {/* "Ticket" is our word, not a reader's. Somebody who has
+                    never used a helpdesk does not know that a ticket is
+                    how you reach a person. Reported in the accessibility
+                    review, 2026-08. */}
                 <Button variant="miamiOutline" onClick={() => setStep('ticket')}>
-                  Create a ticket
+                  Send a question to a librarian
                 </Button>
               </div>
             )}
@@ -466,13 +482,25 @@ const App = () => {
                       variant="default"
                       onClick={() => setStep('ticket')}
                     >
-                      Submit a Ticket
+                      Send a question to a librarian
                     </Button>
                   )}
                 </div>
               ))}
             {step === 'humanLibrarian' && <HumanLibrarianWidget />}
             {step === 'ticket' && <OfflineTicketWidget />}
+
+            {/* AFTER the conversation, not above it. It used to sit in the
+                header, so tabbing into the panel reached "rate this
+                conversation" before the conversation being rated -- and
+                submitting it restarts the session, which is the last
+                thing a reader wants to land on first.
+                Reported in the accessibility review, 2026-08. */}
+            {step === 'services' && (
+              <div className="mt-4 flex justify-end">
+                <FeedbackFormComponent />
+              </div>
+            )}
           </div>
           
           {/* Bottom action button during chat - shows librarian chat or ticket based on availability */}
@@ -485,7 +513,7 @@ const App = () => {
                 ? setStep('humanLibrarian') : setStep('ticket')}
             >
               {(askUsStatus.isOpen || !askUsStatus.known)
-                ? 'Talk to a librarian' : 'Submit a ticket'}
+                ? 'Talk to a librarian' : 'Send a question to a librarian'}
             </Button>
           )}
         </DialogContent>

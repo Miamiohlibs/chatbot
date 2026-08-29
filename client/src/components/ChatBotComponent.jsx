@@ -25,6 +25,14 @@ const ChatBotComponent = ({ askUsStatus = { isOpen: false, known: false, hoursTo
   const { socketContextValues } = useContext(SocketContext);
   const { messageContextValues } = useContext(MessageContext);
   const chatRef = useRef();
+  // Focus goes back here after every send. The review reported that on a
+  // multi-question chat "keyboard focus appears to get lost and starts at
+  // the top" -- which is what happens whenever the focused element is
+  // unmounted or disabled mid-turn, and a transcript that re-renders on
+  // every message has several ways to do that. Rather than chase which
+  // one, put focus somewhere correct on purpose: after sending a message
+  // the next thing a person wants is the box they type the next one in.
+  const inputRef = useRef(null);
   const [widgetVisible, setWidgetVisible] = useState(false);
   const [showTicketForm, setShowTicketForm] = useState(false);
   const [elapsedTime, setElapsedTime] = useState(0);
@@ -103,6 +111,8 @@ const ChatBotComponent = ({ askUsStatus = { isOpen: false, known: false, hoursTo
       // Use startThinking to begin timer
       messageContextValues.startThinking();
       socketContextValues.sendUserMessage(messageContextValues.inputMessage);
+      // After the re-render, not during it.
+      requestAnimationFrame(() => inputRef.current?.focus());
     }
   };
 
@@ -315,7 +325,14 @@ const ChatBotComponent = ({ askUsStatus = { isOpen: false, known: false, hoursTo
                   renderCitations &&
                   renderCitations.length > 0 && (
                     <div className="mt-1 ml-1 px-4 text-[11px] leading-snug text-gray-500">
-                      <span className="font-semibold text-gray-600">Sources</span>
+                      {/* A heading, not a bold span: the sources are a
+                          section of the answer, and a screen reader user
+                          navigating by heading had no way to reach them.
+                          h3 because the answer sits under the dialog's
+                          h2. Reported in the accessibility review. */}
+                      <h3 className="font-semibold text-gray-600 text-[11px] m-0">
+                        Sources
+                      </h3>
                       <ul className="mt-0.5 space-y-0.5">
                         {renderCitations
                           .filter((c) => c && c.url)
@@ -381,6 +398,7 @@ const ChatBotComponent = ({ askUsStatus = { isOpen: false, known: false, hoursTo
             Type your message to the Smart Chatbot
           </label>
           <Input
+            ref={inputRef}
             id="chat-message-input"
             value={messageContextValues.inputMessage}
             onChange={(e) => messageContextValues.setInputMessage(e.target.value)}

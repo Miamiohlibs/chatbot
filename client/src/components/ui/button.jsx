@@ -4,7 +4,7 @@ import { cva } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium min-h-11 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
+  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium min-h-11 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
   {
     variants: {
       variant: {
@@ -38,7 +38,11 @@ const buttonVariants = cva(
         miamiOutline:
           "border border-miami-red-dark text-miami-red-dark bg-transparent " +
           "hover:bg-miami-red-dark hover:text-white " +
-          "focus-visible:ring-miami-red-dark",
+          /* A red ring on a red button is nearly invisible. The white
+             offset ring sits between the two, so the focus reads on the
+             button AND on whatever is behind it. Reported in the
+             accessibility review, 2026-08. */
+          "focus-visible:ring-miami-red-dark focus-visible:ring-offset-white",
       },
       size: {
         default: "h-9 px-4 py-2",
