@@ -496,26 +496,32 @@ const App = () => {
                 submitting it restarts the session, which is the last
                 thing a reader wants to land on first.
                 Reported in the accessibility review, 2026-08. */}
+            {/* Both end-of-chat actions in one row, in normal flow.
+                The "talk to a librarian" button used to carry six
+                conflicting position utilities -- `fixed` AND `absolute`,
+                two different bottoms and rights -- which is what writing
+                CSS looks like when an unlayered `button{position:relative}`
+                in index.css is silently cancelling all of them. With that
+                rule moved into @layer base the positioning works again,
+                and absolute-bottom-right would now really sit on top of
+                the transcript. Neither of these needs positioning: they
+                belong after the conversation, which is where they are. */}
             {step === 'services' && (
-              <div className="mt-4 flex justify-end">
+              <div className="mt-4 flex flex-wrap justify-end gap-2">
                 <FeedbackFormComponent />
+                <Button
+                  size="xs"
+                  variant="miamiOutline"
+                  onClick={() => (askUsStatus.isOpen || !askUsStatus.known)
+                    ? setStep('humanLibrarian') : setStep('ticket')}
+                >
+                  {(askUsStatus.isOpen || !askUsStatus.known)
+                    ? 'Talk to a librarian' : 'Send a question to a librarian'}
+                </Button>
               </div>
             )}
           </div>
           
-          {/* Bottom action button during chat - shows librarian chat or ticket based on availability */}
-          {step === 'services' && (
-            <Button
-              size="sm"
-              variant="miamiOutline"
-              className="fixed bottom-10 right-20 mr-4 absolute right-0 bottom-0 mb-2"
-              onClick={() => (askUsStatus.isOpen || !askUsStatus.known)
-                ? setStep('humanLibrarian') : setStep('ticket')}
-            >
-              {(askUsStatus.isOpen || !askUsStatus.known)
-                ? 'Talk to a librarian' : 'Send a question to a librarian'}
-            </Button>
-          )}
         </DialogContent>
       </Dialog>
     </ErrorBoundaryComponent>

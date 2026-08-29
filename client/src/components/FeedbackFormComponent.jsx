@@ -81,12 +81,18 @@ const FeedbackFormComponent = () => {
           <form>
             <div className="space-y-4">
               <div>
-                <Label>Rate this conversation</Label>
-                {/* A radio whose only content is an icon has no accessible
-                    name -- a screen reader announces "radio button" and
-                    nothing else. Each one is named below, and the group is
-                    named here. */}
-                <div className="flex gap-0.5 mt-2" role="radiogroup" aria-label="Rate this answer, 1 to 5 stars">
+                {/* The group is named by this heading rather than by a
+                    duplicate aria-label, so a screen reader reads it once.
+                    id + aria-labelledby because a <label> cannot label a
+                    group -- only a single control. */}
+                <span id="rating-group-label" className="text-sm font-medium">
+                  How was this conversation?
+                </span>
+                <div
+                  className="flex gap-1 mt-2"
+                  role="radiogroup"
+                  aria-labelledby="rating-group-label"
+                >
                   {[...Array(5)].map((_, index) => {
                     const ratingValue = index + 1;
                     return (
@@ -99,9 +105,15 @@ const FeedbackFormComponent = () => {
                          all. And nothing but colour said which were
                          selected, which fails for anyone who cannot
                          separate those two colours. */
+                      /* 44x44, the AAA target size this widget is held to
+                         elsewhere (see index.css). The global hit-target
+                         rule only reaches button / [role=button] / a[href],
+                         so a star in a <label> was about 28px -- under the
+                         bar, and hard to hit on a phone. The star stays
+                         its drawn size; the LABEL is the target. */
                       <label
                         key={index}
-                        className="cursor-pointer p-0.5 rounded"
+                        className="cursor-pointer rounded grid place-items-center min-h-11 min-w-11"
                         onMouseEnter={() => setHover(ratingValue)}
                         onMouseLeave={() => setHover(null)}
                       >

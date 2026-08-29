@@ -160,10 +160,34 @@ h1 {
    The visual button keeps its existing height -- a transparent ::after
    expands only the HIT AREA, so the design is untouched and nothing
    reflows. Buttons that are already tall enough are left alone. */
-button,
-[role="button"],
-a[href] {
-  position: relative;
+/* IN @layer base, not unlayered. Unlayered rules beat everything inside a
+   layer regardless of specificity, and Tailwind v4 puts its utilities in
+   one -- so this bare `position: relative` silently defeated `absolute`
+   and `fixed` on every button in the app. The dialog's close button was
+   the visible casualty: `absolute right-4 top-4` did nothing, the button
+   dropped into normal flow, and it landed at the BOTTOM LEFT of the
+   Rate-this-conversation panel. Reported 2026-08-28.
+
+   Second time this file has done this: a bare `a { color }` here once
+   defeated every `text-*` class on a link. An unlayered rule in a
+   Tailwind project is a rule with no way to be overridden. */
+@layer base {
+  button,
+  [role="button"],
+  a[href] {
+    position: relative;
+  }
+}
+
+/* The hit-target rule above only needs a positioned ancestor for its
+   ::after, and an element that is ALREADY positioned has one. Say so, so
+   that a future edit which moves the rule back out of the layer cannot
+   take the dialog's close button with it a third time. */
+button.absolute,
+button.fixed,
+[role="button"].absolute,
+[role="button"].fixed {
+  position: revert-layer;
 }
 
 button::after,
