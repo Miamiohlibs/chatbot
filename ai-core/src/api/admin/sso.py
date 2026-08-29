@@ -334,6 +334,25 @@ def saml_settings(cfg: SSOConfig) -> dict:
             "signatureAlgorithm":
                 "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256",
             "digestAlgorithm": "http://www.w3.org/2001/04/xmlenc#sha256",
+            # NO EXPIRY ON OUR METADATA.
+            #
+            # python3-saml defaults `validUntil` to now + 2 days and
+            # recomputes it on every request, so this URL was handing Miami
+            # IT a document that expired within 48 hours of being fetched.
+            # For an IdP that saves a static copy -- which is how this
+            # integration is being set up -- that is a login that stops
+            # working on a date nobody wrote down, with no failure until
+            # the day it happens.
+            #
+            # It also disagreed with its own cacheDuration: cache this for
+            # a week, and it expires in two days.
+            #
+            # validUntil is OPTIONAL in SAML 2.0 metadata. Our SP details
+            # change only when the certificate is rotated, and that is an
+            # event we would tell them about rather than something a clock
+            # should discover. An empty string omits the attribute; None
+            # would restore the default. Asked for by Miami IT, 2026-08-27.
+            "metadataValidUntil": "",
         },
         # contactPerson is included ONLY with a real address. python3-saml
         # rejects the whole settings dict with "contact_not_enought_data"

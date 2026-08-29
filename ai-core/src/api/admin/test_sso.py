@@ -426,3 +426,35 @@ def test_metadata_still_builds_with_no_contact_email(monkeypatch):
     from onelogin.saml2.settings import OneLogin_Saml2_Settings
     s = OneLogin_Saml2_Settings(saml_settings(cfg()), sp_validation_only=True)
     assert s.get_sp_metadata()
+
+
+def test_the_metadata_does_not_expire():
+    """python3-saml defaults validUntil to now + 2 days and recomputes it
+    on every request, so this endpoint was handing Miami IT a document
+    that expired within 48 hours of being fetched. For an IdP that saves a
+    static copy -- which is how this integration is being set up -- that
+    is a login that stops working on a date nobody wrote down, with no
+    warning until the day it happens.
+
+    It also disagreed with its own cacheDuration: cache for a week, expire
+    in two days.
+
+    Asked for by Miami IT, 2026-08-27.
+    """
+    import os
+
+    from src.api.admin import sso
+
+    for k, v in {
+        "SSO_BASE_URL": "https://chatbot.lib.miamioh.edu",
+        "SSO_IDP_ENTITY_ID": "https://idp.example.edu/idp",
+        "SSO_IDP_SSO_URL": "https://idp.example.edu/idp/SSO",
+        "SSO_IDP_CERT": "MIIBfake",
+    }.items():
+        os.environ.setdefault(k, v)
+
+    cfg = sso.load_config()
+    settings = sso.saml_settings(cfg)
+    assert settings["security"]["metadataValidUntil"] == "", (
+        "an empty string omits the attribute; None restores the 2-day default"
+    )
