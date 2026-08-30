@@ -65,7 +65,12 @@ def test_main_mounts_the_kill_switch_outside_the_admin_block():
     text = src.read_text(encoding="utf-8")
 
     mount = text.index("app.include_router(build_killswitch_router(")
-    admin_block = text.index('_admin_token = os.getenv("ADMIN_API_TOKEN"')
+    # The block itself, not the line that reads the token. The switch now
+    # asks the SSO config who is calling -- only to decide whether the
+    # passphrase is still worth asking for, never whether to answer -- so
+    # that read sits above the mount, and using it as the marker made this
+    # test fail on a change that did exactly what it is here to protect.
+    admin_block = text.index("if _admin_token or _sso_cfg.enabled:")
     assert mount < admin_block, (
         "build_killswitch_router is mounted after the admin/SSO block began "
         "-- it must be mounted standalone, before it."

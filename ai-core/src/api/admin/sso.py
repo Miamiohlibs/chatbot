@@ -90,6 +90,21 @@ def _env_bool(name: str, default: bool) -> bool:
     return raw.lower() in ("1", "true", "yes", "on")
 
 
+def _hours(name: str, default: int) -> int:
+    """Never raise on a typo.
+
+    load_config() is read before the kill switch is mounted, because the
+    switch asks it who is calling. A ValueError here would therefore stop
+    the whole app from importing -- and the one thing the kill switch must
+    survive is everything else being misconfigured.
+    """
+    try:
+        return int(_env(name) or default)
+    except ValueError:
+        logger.error("%s is not a number; using %d", name, default)
+        return default
+
+
 def _uid_set(name: str) -> set:
     """Parse one of the allowlists. Commas or semicolons, case-insensitive."""
     return {
@@ -204,7 +219,7 @@ def load_config() -> SSOConfig:
         operator_uids=frozenset(operators),
         librarian_uids=frozenset(librarians),
         session_secret=_env("SSO_SESSION_SECRET"),
-        session_hours=int(_env("SSO_SESSION_HOURS", "8") or 8),
+        session_hours=_hours("SSO_SESSION_HOURS", 8),
         allow_token_fallback=_env_bool("SSO_ALLOW_TOKEN_FALLBACK", True),
     )
 

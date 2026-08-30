@@ -740,3 +740,103 @@ def test_the_console_and_the_command_line_agree_on_pending(client, diffs,
         "- Written to collection: **X**\n", encoding="utf-8")
     assert gate.find_latest_pending_diff() == diffs
     assert R.latest_diff() == diffs
+
+
+# --- the passphrase, once Miami says who is asking -----------------------
+
+from src.api.admin import audit as _audit  # noqa: E402
+from src.api.admin.sso import Caller, ROLE_OPERATOR  # noqa: E402
+
+SIGNED_IN = Caller(role=ROLE_OPERATOR, uid="a", via="sso")
+
+
+@pytest.fixture
+def audit_log(tmp_path, monkeypatch):
+    monkeypatch.setattr(_audit, "AUDIT_DIR", tmp_path / "audit")
+    return tmp_path / "audit"
+
+
+@pytest.fixture
+def sso_client(diffs, monkeypatch, audit_log):
+    """A client arriving with a Miami session rather than the shared key."""
+    monkeypatch.setenv("ETL_APPROVERS", "nobody@miamioh.edu")
+    monkeypatch.setenv("ETL_APPROVAL_PASSWORD", "correct horse")
+    app = FastAPI()
+
+    async def _signed_in():
+        return SIGNED_IN
+
+    app.include_router(R.build_etl_approval_router(
+        {"admin_token": KEY, "guard": _signed_in}))
+    return TestClient(app)
+
+
+def test_a_signed_in_operator_is_not_asked_for_a_passphrase(sso_client, diffs):
+    """It is a second copy of a check Miami already made, and it is the
+    reason a colleague has to keep a shared secret written down."""
+    body = sso_client.get("/admin/etl").text
+    assert "type='password'" not in body
+    assert "Signing as" in body
+    assert "a@miamioh.edu" in body
+
+
+def test_a_signed_in_operator_can_sign_with_no_credentials(sso_client, diffs,
+                                                           audit_log):
+    r = sso_client.post("/admin/etl/approve",
+                        data={"ack": "yes", "diff_file": diffs.name,
+                              "diff_hash": gate.hash_diff_file(diffs)},
+                        follow_redirects=False)
+    assert r.status_code == 303, r.text[:400]
+    token = gate.parse_approval(diffs.with_suffix(".approval"))
+    # Taken from the session, not from a form field nobody filled in.
+    assert token.approved_by_email == "a@miamioh.edu"
+
+
+def test_signing_is_written_down(sso_client, diffs, audit_log):
+    sso_client.post("/admin/etl/approve",
+                    data={"ack": "yes", "diff_file": diffs.name,
+                          "diff_hash": gate.hash_diff_file(diffs)},
+                    follow_redirects=False)
+    rows = _audit.read_recent()
+    assert [r["action"] for r in rows] == ["corpus.approve"]
+    assert rows[0]["actor"] == "a" and rows[0]["authenticated"] is True
+    assert rows[0]["target"] == diffs.name
+
+
+def test_the_approver_list_no_longer_gates_a_signed_in_operator(sso_client,
+                                                                diffs):
+    """Said plainly because it is a widening: ETL_APPROVERS is set to
+    somebody else entirely in this fixture, and the operator still signs.
+    Being in the operators group IS the authorisation now."""
+    r = sso_client.post("/admin/etl/approve",
+                        data={"ack": "yes", "diff_file": diffs.name,
+                              "diff_hash": gate.hash_diff_file(diffs)},
+                        follow_redirects=False)
+    assert r.status_code == 303
+
+
+def test_the_shared_key_still_needs_the_passphrase(client, diffs, audit_log):
+    """The path an IdP outage puts everybody on. A log line naming whoever
+    typed something into a box is not evidence of anything, so the thing
+    that made the name worth having has to stay."""
+    body = client.get("/admin/etl").text
+    assert "type='password'" in body
+    r = client.post("/admin/etl/approve",
+                    data={"email": "a@miamioh.edu", "password": "wrong",
+                          "ack": "yes", "diff_file": diffs.name,
+                          "diff_hash": gate.hash_diff_file(diffs)})
+    assert r.status_code == 403
+    assert _audit.read_recent() == []
+
+
+def test_a_refused_fetch_records_nothing(sso_client, diffs, audit_log,
+                                         monkeypatch):
+    """Only what happened. A log that records attempts as though they were
+    actions is one nobody can count."""
+    from src.api.admin import etl_jobs
+
+    monkeypatch.setattr(etl_jobs, "start",
+                        lambda phase, *, started_by: (False, "already running"))
+    r = sso_client.post("/admin/etl/fetch", data={})
+    assert r.status_code == 409
+    assert _audit.read_recent() == []

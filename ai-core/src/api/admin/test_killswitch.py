@@ -237,3 +237,96 @@ def test_the_page_asks_for_both_credentials_in_both_states(
     ks.pause(who="qum@miamioh.edu", note="x")
     down = c.get("/admin/service?key=k").text
     assert 'name="email"' in down and 'name="password"' in down
+
+
+# --- the passphrase, once Miami says who is asking ------------------------
+#
+# The switch stays reachable with NO credentials: it has to work when the
+# IdP is the thing that is broken, and guarding it with SSO would take away
+# the control you reach for during an outage. Reading the session decides
+# only whether the passphrase is still worth asking for.
+
+from fastapi import FastAPI  # noqa: E402
+from fastapi.testclient import TestClient  # noqa: E402
+
+from src.api.admin import audit as _audit  # noqa: E402
+from src.api.admin.sso import Caller, ROLE_OPERATOR  # noqa: E402
+
+_SIGNED_IN = Caller(role=ROLE_OPERATOR, uid="qum", via="sso")
+
+
+@pytest.fixture()
+def audit_log(tmp_path, monkeypatch):
+    monkeypatch.setattr(_audit, "AUDIT_DIR", tmp_path / "audit")
+    return tmp_path / "audit"
+
+
+@pytest.fixture()
+def flag(tmp_path, monkeypatch):
+    monkeypatch.setattr(ks, "_FLAG_PATH", tmp_path / "SERVICE_PAUSED")
+    return tmp_path / "SERVICE_PAUSED"
+
+
+def _app(caller):
+    async def _whoami():
+        return caller
+
+    app = FastAPI()
+    app.include_router(ks.build_killswitch_router({"whoami": _whoami}))
+    return TestClient(app)
+
+
+def test_a_signed_in_operator_is_not_asked_for_a_passphrase(creds, flag):
+    body = _app(_SIGNED_IN).get("/admin/service").text
+    assert 'type="password"' not in body
+    assert "Acting as" in body and "qum" in body
+
+
+def test_an_anonymous_caller_still_sees_the_passphrase(creds, flag):
+    """This is the emergency path, and it is the whole reason the switch is
+    reachable at all. The passphrase is what stands between a crawler and a
+    shutdown."""
+    body = _app(None).get("/admin/service").text
+    assert 'type="password"' in body
+
+
+def test_a_signed_in_operator_can_stop_the_bot_with_no_credentials(
+        creds, flag, audit_log):
+    r = _app(_SIGNED_IN).post("/admin/service/pause",
+                              data={"note": "answering nonsense"},
+                              follow_redirects=False)
+    assert r.status_code == 303
+    assert ks.is_paused()
+    rows = _audit.read_recent()
+    assert rows[0]["action"] == "service.pause"
+    assert rows[0]["actor"] == "qum" and rows[0]["authenticated"] is True
+    assert "answering nonsense" in rows[0]["detail"]
+    # The name on the pause itself comes from the session too, not from an
+    # empty form field.
+    assert "qum@miamioh.edu" in ks.pause_reason()
+
+
+def test_an_anonymous_caller_with_no_passphrase_changes_nothing(
+        creds, flag, audit_log):
+    r = _app(None).post("/admin/service/pause", data={"note": "hi"})
+    assert r.status_code == 403
+    assert not ks.is_paused()
+    assert _audit.read_recent() == []
+
+
+def test_putting_it_back_is_recorded_too(creds, flag, audit_log):
+    c = _app(_SIGNED_IN)
+    c.post("/admin/service/pause", data={}, follow_redirects=False)
+    c.post("/admin/service/resume", data={}, follow_redirects=False)
+    assert not ks.is_paused()
+    assert [r["action"] for r in _audit.read_recent()] == [
+        "service.resume", "service.pause"]
+
+
+def test_the_switch_still_answers_when_nobody_wired_up_a_reader(creds, flag):
+    """Deployed with no `whoami` at all -- the shape this page had before
+    SSO existed, and the one it falls back to."""
+    app = FastAPI()
+    app.include_router(ks.build_killswitch_router({}))
+    body = TestClient(app).get("/admin/service").text
+    assert 'type="password"' in body

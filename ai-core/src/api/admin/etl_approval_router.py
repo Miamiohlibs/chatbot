@@ -52,6 +52,8 @@ from typing import Optional
 
 from scripts.etl import gate
 from src.api.admin import admin_ui as ui
+from src.api.admin import audit
+from src.api.admin.sso import Caller, ROLE_OPERATOR
 from src.api.admin.review_queries import local_ts
 from src.api.admin.killswitch_router import (
     attempt_key,
@@ -112,6 +114,71 @@ def check_approver(email: str, password: str) -> Optional[str]:
     if not hmac.compare_digest((password or "").strip(), secret):
         return "Wrong passphrase."
     return None
+
+
+def email_for(uid: str) -> str:
+    """The Miami address a uid stands for.
+
+    A Miami uid IS the local part of the Miami address -- it is what the
+    IdP releases as eppn, and uid_from_attributes() reads uids back out of
+    eppn the same way. The gate's token records an email because that is
+    what a librarian signing on paper would have written, so this is the
+    one place the two spellings meet.
+    """
+    u = (uid or "").strip().lower()
+    if not u:
+        return ""
+    return u if "@" in u else f"{u}@miamioh.edu"
+
+
+def signer_for(caller, email: str, password: str):
+    """(the address to record, the reason this may not proceed).
+
+    THE PASSPHRASE WAS A STAND-IN FOR AN IDENTITY WE DID NOT HAVE.
+        Before SSO, "who is signing this diff?" was answered by a name
+        typed into a box, and the passphrase was the only thing making
+        that name worth anything -- it proved the typist was one of the
+        few people who knew a shared secret. It never proved WHICH one.
+
+        A signed-in caller has already been identified by Miami's IdP, and
+        this console only admits the operators group. Asking them for a
+        shared secret as well is a second copy of a check that has already
+        been made, and it is the reason a colleague has to keep that
+        secret written down somewhere. So on that path it is dropped, the
+        address is taken from the session rather than from a form field,
+        and audit.record() writes down who did it.
+
+        Operator's instruction, 2026-08-30.
+
+    WHAT THIS WIDENS, SAID PLAINLY
+        The ETL_APPROVERS list no longer gates a signed-in operator: being
+        in the operators group is the authorisation. That list still
+        governs the command line and the shared-key path, and it is still
+        the only thing standing between a stranger with the URL key and a
+        corpus rebuild.
+    """
+    if getattr(caller, "authenticated", False):
+        return email_for(caller.uid), None
+    return (email or "").strip().lower(), check_approver(email, password)
+
+
+def credential_fields(caller, *, prefix: str = "") -> str:
+    """The email and passphrase boxes -- or nothing, when they are not
+    needed. A signed-in operator seeing a passphrase box has no way to
+    know it is now optional, so the box does not appear."""
+    if getattr(caller, "authenticated", False):
+        return (f"<p class='hint'>Signing as <code>"
+                f"{ui.e(email_for(caller.uid))}</code>. "
+                f"This is recorded in the audit log.</p>")
+    pe, pp = f"{prefix}email", f"{prefix}password"
+    return (
+        f"<label for='{pe}'>Your Miami email</label>"
+        f"<input type='email' id='{pe}' name='email' required "
+        f"autocomplete='username' style='max-width:22rem'>"
+        f"<label for='{pp}'>Approval passphrase</label>"
+        f"<input type='password' id='{pp}' name='password' required "
+        f"autocomplete='current-password' style='max-width:22rem'>"
+    )
 
 
 def latest_diff() -> Optional[Path]:
@@ -416,7 +483,7 @@ def _md_table_rows(block: str) -> str:
     return "".join(rows)
 
 
-def _job_panel(key: str) -> str:
+def _job_panel(key: str, caller=None) -> str:
     """The fetch button, and whatever is running or last ran.
 
     Both live above the diff because both are things you do BEFORE reading
@@ -458,12 +525,7 @@ def _job_panel(key: str) -> str:
     fetch = (
         "<form method='post' action='/admin/etl/fetch"
         f"?key={ui.e(key)}' style='margin:.5rem 0'>"
-        "<label for='f_email'>Your Miami email</label>"
-        "<input type='email' id='f_email' name='email' required "
-        "autocomplete='username' style='max-width:22rem'>"
-        "<label for='f_password'>Approval passphrase</label>"
-        "<input type='password' id='f_password' name='password' required "
-        "autocomplete='current-password' style='max-width:22rem'>"
+        + credential_fields(caller, prefix="f_") +
         f"<div class='acts' style='margin-top:.6rem'>"
         f"<button type='submit'{disabled}>Fetch the latest site content"
         f"</button></div>"
@@ -475,7 +537,7 @@ def _job_panel(key: str) -> str:
     return f"<div class='card'><h2>Get the newest pages</h2>{note}{fetch}</div>"
 
 
-def _exclusions_panel(key: str) -> str:
+def _exclusions_panel(key: str, caller=None) -> str:
     """What reviewers have excluded, and one click to undo each.
 
     On the page, not in a file somebody has to know about. The original
@@ -497,11 +559,12 @@ def _exclusions_panel(key: str) -> str:
         f"<td><form method='post' action='/admin/etl/include"
         f"?key={ui.e(key)}' style='margin:0'>"
         f"<input type='hidden' name='url' value='{ui.e(e.get('url',''))}'>"
-        f"<input type='email' name='email' required placeholder='your email' "
-        f"style='max-width:12rem;font-size:.85rem'>"
-        f"<input type='password' name='password' required "
-        f"placeholder='passphrase' style='max-width:10rem;font-size:.85rem'>"
-        f"<button type='submit' class='ghost'>put it back</button>"
+        + ("" if getattr(caller, "authenticated", False) else
+           "<input type='email' name='email' required placeholder='your email' "
+           "style='max-width:12rem;font-size:.85rem'>"
+           "<input type='password' name='password' required "
+           "placeholder='passphrase' style='max-width:10rem;font-size:.85rem'>")
+        + "<button type='submit' class='ghost'>put it back</button>"
         f"</form></td></tr>"
         for e in rows
     )
@@ -529,7 +592,8 @@ _CONFIRMATIONS = {
 }
 
 
-def render_page(key: str, message: str = "", ok: str = "") -> str:
+def render_page(key: str, message: str = "", ok: str = "",
+                *, caller=None) -> str:
     diff = latest_diff()
     from src.api.admin import etl_jobs as _jobs
 
@@ -552,11 +616,11 @@ def render_page(key: str, message: str = "", ok: str = "") -> str:
         # applied and cleared away.
         return ui.page("Corpus review",
                        banner
-                       + _job_panel(key)
-                       + _exclusions_panel(key)
+                       + _job_panel(key, caller)
+                       + _exclusions_panel(key, caller)
                        + "<p>No prepared diff is waiting — use the button "
                          "above to fetch the site's current pages.</p>",
-                       current="/admin/etl", key=key, refresh_s=_busy)
+                       current="/admin/etl", key=key, refresh_s=_busy, who=caller)
 
     decision = gate.verify_gate(diff)
     token = decision.token
@@ -603,12 +667,7 @@ def render_page(key: str, message: str = "", ok: str = "") -> str:
             f"?key={ui.e(key)}'>"
             f"<input type='hidden' name='diff_hash' value='{ui.e(digest)}'>"
             f"<input type='hidden' name='diff_file' value='{ui.e(diff.name)}'>"
-            "<label for='email'>Your Miami email</label>"
-            "<input type='email' id='email' name='email' required "
-            "autocomplete='username'>"
-            "<label for='password'>Approval passphrase</label>"
-            "<input type='password' id='password' name='password' required "
-            "autocomplete='current-password'>"
+            + credential_fields(caller) +
             "<label class='ack'><input type='checkbox' name='ack' value='yes' "
             "required> I have read the diff above and approve promoting it "
             "to the live index.</label>"
@@ -640,12 +699,7 @@ def render_page(key: str, message: str = "", ok: str = "") -> str:
             f"?key={ui.e(key)}'>"
             f"<input type='hidden' name='diff_hash' value='{ui.e(digest)}'>"
             f"<input type='hidden' name='diff_file' value='{ui.e(diff.name)}'>"
-            "<label for='r_email'>Your Miami email</label>"
-            "<input type='email' id='r_email' name='email' required "
-            "autocomplete='username'>"
-            "<label for='r_password'>Approval passphrase</label>"
-            "<input type='password' id='r_password' name='password' required "
-            "autocomplete='current-password'>"
+            + credential_fields(caller, prefix="r_") +
             "<label for='reason'>What is wrong with it</label>"
             "<textarea id='reason' name='reason' rows='3' required "
             "placeholder='e.g. the events guide should not be in the corpus "
@@ -676,8 +730,8 @@ def render_page(key: str, message: str = "", ok: str = "") -> str:
     return ui.page(
         "Corpus review",
         banner
-        + _job_panel(key)
-        + _exclusions_panel(key)
+        + _job_panel(key, caller)
+        + _exclusions_panel(key, caller)
         + f"<h1>{ui.e(diff.name)}</h1>"
         + state
         + objection
@@ -690,7 +744,7 @@ def render_page(key: str, message: str = "", ok: str = "") -> str:
         + form
         + "<h2>Full diff</h2>"
         + f"<div class='md'>{render_markdown(body)}</div>",
-        current="/admin/etl", key=key, refresh_s=_busy,
+        current="/admin/etl", key=key, refresh_s=_busy, who=caller,
     )
 
 
@@ -713,24 +767,31 @@ def build_etl_approval_router(deps: dict):
     admin_token: str = (deps.get("admin_token")
                         or os.getenv("ADMIN_API_TOKEN", "")).strip()
 
-    async def _require_key(request: Request) -> None:
+    async def _require_key(request: Request):
+        """The standalone guard, for a deployment with no SSO wired up.
+
+        Returns the same Caller shape the SSO guard does, marked as
+        arriving on the shared key -- so the passphrase rule below reads
+        the same sentence whichever guard answered.
+        """
         from fastapi import HTTPException  # type: ignore
 
         supplied = request.query_params.get("key", "")
         if not admin_token or not hmac.compare_digest(supplied, admin_token):
             raise HTTPException(status_code=401, detail="admin token required")
+        return Caller(role=ROLE_OPERATOR, via="token")
 
     guard = deps.get("guard") or _require_key
     router = APIRouter(prefix="/admin", tags=["admin"])
 
     @router.get("/etl", response_class=HTMLResponse)
-    async def etl_page(key: str = "", ok: str = "", _u=Depends(guard)):
-        return HTMLResponse(render_page(key, "", _CONFIRMATIONS.get(ok, "")),
+    async def etl_page(key: str = "", ok: str = "", caller=Depends(guard)):
+        return HTMLResponse(render_page(key, "", _CONFIRMATIONS.get(ok, ""), caller=caller),
                             headers=_NOINDEX)
 
     @router.get("/etl/{action}", response_class=HTMLResponse)
     async def etl_action_by_get(action: str, key: str = "",
-                                _u=Depends(guard)):
+                                caller=Depends(guard)):
         """Every action below is a POST. Send a GET to the console.
 
         A browser reaches these by GET more easily than it looks: the back
@@ -746,11 +807,11 @@ def build_etl_approval_router(deps: dict):
     async def approve(request: Request, key: str = "", email: str = Form(""),
                       password: str = Form(""), ack: str = Form(""),
                       diff_hash: str = Form(""), diff_file: str = Form(""),
-                      _u=Depends(guard)):
+                      caller=Depends(guard)):
         diff = latest_diff()
         if diff is None:
             return HTMLResponse(
-                render_page(key, "No prepared diff is waiting."),
+                render_page(key, "No prepared diff is waiting.", caller=caller),
                 status_code=404, headers=_NOINDEX)
 
         # THE DIFF THEY READ IS THE DIFF THEY SIGN.
@@ -762,15 +823,15 @@ def build_etl_approval_router(deps: dict):
         if diff.name != diff_file or gate.hash_diff_file(diff) != diff_hash:
             return HTMLResponse(
                 render_page(key, "The diff changed while you were reading it. "
-                                 "Nothing was signed -- review the new one."),
+                                 "Nothing was signed -- review the new one.", caller=caller),
                 status_code=409, headers=_NOINDEX)
 
         if not (ack or "").strip():
             return HTMLResponse(
-                render_page(key, "Tick the box to confirm you read the diff."),
+                render_page(key, "Tick the box to confirm you read the diff.", caller=caller),
                 status_code=400, headers=_NOINDEX)
 
-        why = check_approver(email, password)
+        signer, why = signer_for(caller, email, password)
         if why:
             # Never echo the passphrase, not even to say it was wrong.
             logger.warning("corpus approval REFUSED for %r: %s",
@@ -778,14 +839,16 @@ def build_etl_approval_router(deps: dict):
             if not note_failed_attempt(attempt_key(request)):
                 logger.warning("corpus approval attempts THROTTLED for %s",
                                attempt_key(request))
-                return HTMLResponse(render_page(key, _THROTTLED),
+                return HTMLResponse(render_page(key, _THROTTLED, caller=caller),
                                     status_code=429, headers=_NOINDEX)
-            return HTMLResponse(render_page(key, why), status_code=403,
+            return HTMLResponse(render_page(key, why, caller=caller), status_code=403,
                                 headers=_NOINDEX)
         reset_attempts(attempt_key(request))
 
-        who = (email or "").strip().lower()
+        who = signer
         sign(diff, email=who)
+        audit.record(audit.CORPUS_APPROVE, who=caller, target=diff.name,
+                     detail=f"signed as {who}", request=request)
 
         # Report what the gate says, not what we hoped. A token this page
         # writes must never be one the CLI would refuse.
@@ -795,7 +858,7 @@ def build_etl_approval_router(deps: dict):
                          decision.reason)
             return HTMLResponse(
                 render_page(key, f"Signature written but the gate still "
-                                 f"refuses it: {decision.reason}"),
+                                 f"refuses it: {decision.reason}", caller=caller),
                 status_code=500, headers=_NOINDEX)
 
         logger.warning("corpus diff %s APPROVED by %s", diff.name, who)
@@ -816,14 +879,14 @@ def build_etl_approval_router(deps: dict):
                            why_not)
             return HTMLResponse(
                 render_page(key, f"Signed — but the rebuild did not start: "
-                                 f"{why_not}"),
+                                 f"{why_not}", caller=caller),
                 headers=_NOINDEX)
         return RedirectResponse(f"/admin/etl?key={key}&ok=signed",
                                 status_code=303)
 
     @router.post("/etl/fetch", response_class=HTMLResponse)
     async def fetch(request: Request, key: str = "", email: str = Form(""),
-                    password: str = Form(""), _u=Depends(guard)):
+                    password: str = Form(""), caller=Depends(guard)):
         """Re-crawl the site and write a fresh diff.
 
         Behind the same passphrase as signing. It spends nothing and
@@ -831,23 +894,26 @@ def build_etl_approval_router(deps: dict):
         requests on our own web server, and it replaces the diff anyone
         else is currently reading, so it is not anonymous.
         """
-        why = check_approver(email, password)
+        signer, why = signer_for(caller, email, password)
         if why:
             logger.warning("corpus fetch REFUSED for %r: %s",
                            (email or "").strip().lower(), why)
             if not note_failed_attempt(attempt_key(request)):
-                return HTMLResponse(render_page(key, _THROTTLED),
+                return HTMLResponse(render_page(key, _THROTTLED, caller=caller),
                                     status_code=429, headers=_NOINDEX)
-            return HTMLResponse(render_page(key, why), status_code=403,
+            return HTMLResponse(render_page(key, why, caller=caller), status_code=403,
                                 headers=_NOINDEX)
         reset_attempts(attempt_key(request))
 
         from src.api.admin import etl_jobs
 
-        who = (email or "").strip().lower()
+        who = signer
         started, msg = etl_jobs.start("prepare", started_by=who)
+        if started:
+            audit.record(audit.CORPUS_FETCH, who=caller, request=request,
+                         detail="re-crawl of the public site started")
         if not started:
-            return HTMLResponse(render_page(key, msg), status_code=409,
+            return HTMLResponse(render_page(key, msg, caller=caller), status_code=409,
                                 headers=_NOINDEX)
         logger.warning("corpus fetch started by %s", who)
         # POST, redirect, GET -- and the redirect carries the confirmation.
@@ -869,11 +935,11 @@ def build_etl_approval_router(deps: dict):
     async def reject(request: Request, key: str = "", email: str = Form(""),
                      password: str = Form(""), reason: str = Form(""),
                      urls: str = Form(""), exclude: str = Form(""), diff_hash: str = Form(""),
-                     diff_file: str = Form(""), _u=Depends(guard)):
+                     diff_file: str = Form(""), caller=Depends(guard)):
         diff = latest_diff()
         if diff is None:
             return HTMLResponse(
-                render_page(key, "No prepared diff is waiting."),
+                render_page(key, "No prepared diff is waiting.", caller=caller),
                 status_code=404, headers=_NOINDEX)
 
         # Same binding as approving: an objection to a diff that has since
@@ -881,29 +947,33 @@ def build_etl_approval_router(deps: dict):
         if diff.name != diff_file or gate.hash_diff_file(diff) != diff_hash:
             return HTMLResponse(
                 render_page(key, "The diff changed while you were reading it. "
-                                 "Nothing was recorded -- review the new one."),
+                                 "Nothing was recorded -- review the new one.", caller=caller),
                 status_code=409, headers=_NOINDEX)
 
         if not (reason or "").strip():
             return HTMLResponse(
                 render_page(key, "Say what is wrong with it, so the operator "
-                                 "knows what to change."),
+                                 "knows what to change.", caller=caller),
                 status_code=400, headers=_NOINDEX)
 
-        why = check_approver(email, password)
+        signer, why = signer_for(caller, email, password)
         if why:
             logger.warning("corpus rejection REFUSED for %r: %s",
                            (email or "").strip().lower(), why)
             if not note_failed_attempt(attempt_key(request)):
-                return HTMLResponse(render_page(key, _THROTTLED),
+                return HTMLResponse(render_page(key, _THROTTLED, caller=caller),
                                     status_code=429, headers=_NOINDEX)
-            return HTMLResponse(render_page(key, why), status_code=403,
+            return HTMLResponse(render_page(key, why, caller=caller), status_code=403,
                                 headers=_NOINDEX)
         reset_attempts(attempt_key(request))
 
-        who = (email or "").strip().lower()
+        who = signer
         named = [u.strip() for u in (urls or "").splitlines() if u.strip()]
         record_rejection(diff, email=who, reason=reason, urls=named)
+        audit.record(audit.CORPUS_REJECT, who=caller, target=diff.name,
+                     detail=f"{reason.strip()[:300]} "
+                            f"({len(named)} page(s) named)",
+                     request=request)
         _mail_rejection(diff, email=who, reason=reason, urls=named)
         logger.warning("corpus diff %s SENT BACK by %s (%d page(s) named)",
                        diff.name, who, len(named))
@@ -919,36 +989,39 @@ def build_etl_approval_router(deps: dict):
                    f"from the next fetch onward."
                    if added else
                    "Sent back. Those pages were already excluded.")
-            return HTMLResponse(render_page(key, "", msg), headers=_NOINDEX)
+            return HTMLResponse(render_page(key, "", msg, caller=caller), headers=_NOINDEX)
         return RedirectResponse(f"/admin/etl?key={key}", status_code=303)
 
     @router.post("/etl/include", response_class=HTMLResponse)
     async def include(request: Request, key: str = "", url: str = Form(""),
                       email: str = Form(""), password: str = Form(""),
-                      _u=Depends(guard)):
+                      caller=Depends(guard)):
         """Undo one exclusion. Behind the same passphrase as making one.
 
         Deliberately as easy as excluding: a change that is hard to
         reverse is one people hesitate to make, and hesitating is how a
         page that should not be in the corpus stays in it.
         """
-        why = check_approver(email, password)
+        signer, why = signer_for(caller, email, password)
         if why:
             logger.warning("corpus re-include REFUSED for %r: %s",
                            (email or "").strip().lower(), why)
             if not note_failed_attempt(attempt_key(request)):
-                return HTMLResponse(render_page(key, _THROTTLED),
+                return HTMLResponse(render_page(key, _THROTTLED, caller=caller),
                                     status_code=429, headers=_NOINDEX)
-            return HTMLResponse(render_page(key, why), status_code=403,
+            return HTMLResponse(render_page(key, why, caller=caller), status_code=403,
                                 headers=_NOINDEX)
         reset_attempts(attempt_key(request))
 
         from scripts.etl import crawl_exclusions
 
-        who = (email or "").strip().lower()
+        who = signer
         ok = crawl_exclusions.remove(url, by=who)
+        if ok:
+            audit.record(audit.CORPUS_INCLUDE, who=caller, target=url,
+                         request=request)
         note = (f"{url} will be collected again from the next fetch onward."
                 if ok else "That page was not on the exclusion list.")
-        return HTMLResponse(render_page(key, "", note), headers=_NOINDEX)
+        return HTMLResponse(render_page(key, "", note, caller=caller), headers=_NOINDEX)
 
     return router

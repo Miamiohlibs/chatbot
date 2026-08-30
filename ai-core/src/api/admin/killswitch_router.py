@@ -100,6 +100,7 @@ logger = logging.getLogger(__name__)
 #
 # Only FAILURES are counted. A correct credential pair costs nothing, so an
 # operator toggling the service during a real incident is never throttled.
+from src.api.admin import audit  # noqa: E402
 from src.api.rate_limit import SlidingWindowLimiter  # noqa: E402
 
 _ATTEMPT_MAX = int(os.getenv("SERVICE_PAUSE_ATTEMPT_MAX", "5") or 5)
@@ -284,6 +285,21 @@ def build_service_status_router():
     return router
 
 
+def _operator_for(caller, email: str, password: str):
+    """(the address to record, the reason this may not proceed).
+
+    Same rule as the corpus gate: a caller Miami has already identified is
+    not asked for a shared secret as well, and one arriving cold is. The
+    difference matters more here than anywhere else, because this page is
+    deliberately reachable with no credentials -- see make_caller_reader.
+    An anonymous caller is exactly who the passphrase was written for.
+    """
+    if getattr(caller, "authenticated", False):
+        uid = (caller.uid or "").strip().lower()
+        return (uid if "@" in uid else f"{uid}@miamioh.edu"), None
+    return (email or "").strip().lower(), check_operator(email, password)
+
+
 def build_killswitch_router(deps: dict):
     """`deps` may carry a `guard`; without one the page stands alone.
 
@@ -308,12 +324,33 @@ def build_killswitch_router(deps: dict):
     _NOINDEX = {"X-Robots-Tag": "noindex, nofollow, noarchive"}
 
     guard = deps.get("guard") or _no_guard
+
+    async def _nobody():
+        """No caller reader wired up: everybody is anonymous, which is the
+        shape this page has always had and the one the passphrase was
+        written for."""
+        return None
+
+    # NOT a guard. This page stays reachable with no credentials because it
+    # has to work when Miami's IdP is the thing that is broken -- guarding
+    # the stop button with SSO means an outage takes away the control you
+    # reach for during an outage. Reading the session only decides whether
+    # the passphrase is still worth asking for.
+    peek = deps.get("whoami") or _nobody
     router = APIRouter(prefix="/admin", tags=["admin"])
 
-    def _credentials(key: str, action: str, extra: str = "") -> str:
-        """The email + passphrase pair both actions require."""
+    def _credentials(key: str, action: str, extra: str = "",
+                     caller=None) -> str:
+        """The email + passphrase pair -- unless the session already
+        settled who this is, in which case asking for a shared secret is
+        asking a second time for something Miami already established."""
         from src.api.admin.admin_ui import e
 
+        if getattr(caller, "authenticated", False):
+            return f"""
+              {extra}
+              <p class="hint">Acting as <code>{e(caller.uid)}</code>. This is
+              recorded in the audit log.</p>"""
         return f"""
               {extra}
               <label for="op-email-{action}">Your Miami email</label>
@@ -327,62 +364,63 @@ def build_killswitch_router(deps: dict):
               <small class="dim">Both are required. Your email is recorded in
               the log with this action.</small>"""
 
-    def _page(key: str, error: str = "") -> str:
+    def _page(key: str, error: str = "", caller=None) -> str:
         from src.api.admin.admin_ui import e, page
 
         paused = is_paused()
-        err = (f"<div class='err' role='alert' style='margin:.75rem 0'>"
-               f"{e(error)}</div>") if error else ""
+        err = (f"<div class='warn' role='alert'>{e(error)}</div>"
+               if error else "")
         if paused:
             body = f"""
-            <div style="border:2px solid #b61e2e;padding:1.25rem;border-radius:8px">
-              <h2 style="margin-top:0;color:#b61e2e">The bot is OUT OF SERVICE</h2>
-              <p>Every question is being answered with a maintenance notice
-                 pointing patrons at Ask Us. The widget still loads — nobody
-                 sees a broken page.</p>
-              <pre style="background:#f6f6f6;padding:.75rem">{e(pause_reason())}</pre>
+            <h1>Service control</h1>
+            <div class="banner down">
+              <b>The bot is OUT OF SERVICE</b>
+              Every question is being answered with a maintenance notice
+              pointing patrons at Ask Us. The widget still loads &mdash;
+              nobody sees a broken page.
+            </div>
+            <div class="card">
+              <pre>{e(pause_reason())}</pre>
               <form method="post" action="/admin/service/resume?key={e(key)}">
-                {_credentials(key, "resume", err)}
+                {_credentials(key, "resume", err, caller)}
                 <div class="acts">
-                <button style="background:#136f3b;color:#fff;border:0;
-                    padding:.7rem 1.4rem;font-size:1rem;border-radius:6px">
-                  Put the bot back in service</button>
+                  <button type="submit">Put the bot back in service</button>
                 </div>
               </form>
-              <p><small class="dim">Putting a bot back that was stopped for
-              misbehaving is as consequential as stopping it, so it takes the
-              same two credentials.</small></p>
+              <p class="hint" style="margin-bottom:0">Putting a bot back that
+              was stopped for misbehaving is as consequential as stopping it,
+              so it takes the same credentials.</p>
             </div>"""
         else:
             body = f"""
-            <div style="border:1px solid #ccc;padding:1.25rem;border-radius:8px">
-              <h2 style="margin-top:0">The bot is in service</h2>
-              <p>Use this only if the bot is doing something wrong and you
-                 need it to stop <em>now</em>. It keeps answering — with a
-                 maintenance notice — so the page on the library site does not
-                 break.</p>
+            <h1>Service control</h1>
+            <p class="lede">The bot is in service. Use this only if it is
+               doing something wrong and you need it to stop <em>now</em>.</p>
+            <div class="card">
+              <p>It keeps answering &mdash; with a maintenance notice &mdash;
+                 so the page on the library site does not break.</p>
               <form method="post" action="/admin/service/pause?key={e(key)}">
-                {_credentials(key, "pause", err)}
+                {_credentials(key, "pause", err, caller)}
                 <label for="op-note">Why (optional, for the log)</label>
                 <input id="op-note" name="note" style="max-width:36rem">
                 <div class="acts">
-                <button style="background:#b61e2e;color:#fff;border:0;
-                    padding:.7rem 1.4rem;font-size:1rem;border-radius:6px">
-                  Take the bot out of service</button>
+                  <button type="submit" class="danger">Take the bot out of
+                    service</button>
                 </div>
               </form>
             </div>"""
-        return page("Service control", body, current="/admin/service", key=key)
+        return page("Service control", body, current="/admin/service",
+                    key=key, who=caller)
 
     @router.get("/service", response_class=HTMLResponse)
-    async def service_page(key: str = "", _u=Depends(guard)):
-        return HTMLResponse(_page(key), headers=_NOINDEX)
+    async def service_page(key: str = "", caller=Depends(peek), _u=Depends(guard)):
+        return HTMLResponse(_page(key, caller=caller), headers=_NOINDEX)
 
     @router.post("/service/pause", response_class=HTMLResponse)
     async def do_pause(request: Request, key: str = "", email: str = Form(""),
                        password: str = Form(""), note: str = Form(""),
-                       _u=Depends(guard)):
-        why = check_operator(email, password)
+                       caller=Depends(peek), _u=Depends(guard)):
+        actor, why = _operator_for(caller, email, password)
         if why:
             # Never echo the passphrase, not even to say it was wrong.
             logger.warning("service pause REFUSED for %r: %s",
@@ -390,30 +428,33 @@ def build_killswitch_router(deps: dict):
             if not note_failed_attempt(attempt_key(request)):
                 logger.warning("service pause attempts THROTTLED for %s",
                                attempt_key(request))
-                return HTMLResponse(_page(key, _THROTTLED), status_code=429,
+                return HTMLResponse(_page(key, _THROTTLED, caller), status_code=429,
                                     headers=_NOINDEX)
-            return HTMLResponse(_page(key, why), status_code=403,
+            return HTMLResponse(_page(key, why, caller), status_code=403,
                                 headers=_NOINDEX)
         reset_attempts(attempt_key(request))
-        pause(who=(email or "").strip().lower(), note=note)
+        pause(who=actor, note=note)
+        audit.record(audit.SERVICE_PAUSE, who=caller, request=request,
+                     detail=(note or "").strip()[:300])
         return RedirectResponse(f"/admin/service?key={key}", status_code=303)
 
     @router.post("/service/resume", response_class=HTMLResponse)
     async def do_resume(request: Request, key: str = "", email: str = Form(""),
-                        password: str = Form(""), _u=Depends(guard)):
-        why = check_operator(email, password)
+                        password: str = Form(""), caller=Depends(peek), _u=Depends(guard)):
+        actor, why = _operator_for(caller, email, password)
         if why:
             logger.warning("service resume REFUSED for %r: %s",
                            (email or "").strip().lower(), why)
             if not note_failed_attempt(attempt_key(request)):
                 logger.warning("service resume attempts THROTTLED for %s",
                                attempt_key(request))
-                return HTMLResponse(_page(key, _THROTTLED), status_code=429,
+                return HTMLResponse(_page(key, _THROTTLED, caller), status_code=429,
                                     headers=_NOINDEX)
-            return HTMLResponse(_page(key, why), status_code=403,
+            return HTMLResponse(_page(key, why, caller), status_code=403,
                                 headers=_NOINDEX)
         reset_attempts(attempt_key(request))
-        resume(who=(email or "").strip().lower())
+        resume(who=actor)
+        audit.record(audit.SERVICE_RESUME, who=caller, request=request)
         return RedirectResponse(f"/admin/service?key={key}", status_code=303)
 
     return router

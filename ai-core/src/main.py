@@ -476,7 +476,20 @@ app.include_router(build_staff_test_router())
 # fail-closed when unset, plus a per-address throttle on failed attempts.
 from src.api.admin.killswitch_router import build_killswitch_router  # noqa: E402
 
-app.include_router(build_killswitch_router({}))
+# Read here rather than further down because the kill switch now wants to
+# know WHO is asking. Not whether to answer -- it answers anybody, which is
+# the whole point of it -- but whether the passphrase is still worth asking
+# for. A caller Miami has already identified is not asked for a shared
+# secret as well; a caller arriving cold is, exactly as before.
+_admin_token = os.getenv("ADMIN_API_TOKEN", "").strip()
+from src.api.admin.sso import load_config as _load_sso_config  # noqa: E402
+from src.api.admin.sso_router import make_caller_reader  # noqa: E402
+
+_sso_cfg = _load_sso_config()
+
+app.include_router(build_killswitch_router({
+    "whoami": make_caller_reader(cfg=_sso_cfg, token=_admin_token),
+}))
 
 # Corpus review, mounted the same way and for the same reason: the people
 # who know whether a page belongs in the index are not the people with a
@@ -554,10 +567,6 @@ app.include_router(build_metrics_router())
 # SSO_ALLOW_TOKEN_FALLBACK is true. The fallback exists because the kill
 # switch lives behind this same guard: if the IdP were the only way in, an
 # IdP outage would mean nobody could stop the bot. See src/api/admin/sso.py.
-_admin_token = os.getenv("ADMIN_API_TOKEN", "").strip()
-from src.api.admin.sso import load_config as _load_sso_config  # noqa: E402
-
-_sso_cfg = _load_sso_config()
 if _sso_cfg.enabled:
     _sso_problems = _sso_cfg.problems()
     if _sso_problems:
@@ -600,6 +609,11 @@ if _admin_token or _sso_cfg.enabled:
     app.include_router(build_conversations_router(_admin_deps))
     app.include_router(build_corrections_router(_admin_deps))
     app.include_router(build_cost_view_router(_admin_deps))
+    # The other half of dropping the passphrase: what replaces a shared
+    # secret is a record of who acted, and a record nobody can read is not
+    # one. Operator-only -- it names people.
+    from src.api.admin.audit_router import build_audit_router
+    app.include_router(build_audit_router(_admin_deps))
     logging.info(
         "Op1/Op2/Op3 admin surfaces mounted (ADMIN_API_TOKEN set): "
         "/admin/review (HTML), /admin/reviews (JSON), "

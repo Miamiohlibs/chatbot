@@ -231,6 +231,42 @@ def _denied_page(title: str, body_html: str) -> str:
 # --- the guard every admin router depends on -------------------------------
 
 
+def make_caller_reader(*, cfg: SSOConfig, token: str = ""):
+    """Who is asking, or None -- and never a refusal.
+
+    A guard decides whether to let somebody in. This only asks who they
+    are, and the difference matters for exactly one surface: the kill
+    switch is deliberately reachable with no credentials at all, because
+    it has to work when everything else -- including Miami's IdP -- is
+    broken. Guarding it with SSO would mean an IdP outage takes away the
+    control you reach for during an outage.
+
+    So it stays public and reads the session instead. An operator who is
+    signed in gets the no-passphrase treatment and a log line with their
+    name in it; anybody arriving cold still has to know the passphrase,
+    which is what has always stood between a crawler and a shutdown.
+    """
+    async def peek(request: Request):
+        try:
+            if cfg.enabled:
+                uid = read_session(request.cookies.get(SESSION_COOKIE), cfg)
+                if uid:
+                    return Caller(role=role_for(uid, cfg) or "", uid=uid,
+                                  via="sso")
+            if token:
+                supplied = (request.headers.get("x-admin-token")
+                            or request.query_params.get("key") or "")
+                if supplied == token:
+                    return Caller(role=ROLE_OPERATOR, via="token")
+        except Exception:  # noqa: BLE001
+            # Identifying the caller must never be the reason the stop
+            # button does not render.
+            logger.exception("could not read the caller; treating as anonymous")
+        return None
+
+    return peek
+
+
 def make_admin_guard(*, cfg: SSOConfig, token: str = "",
                      require: str = ROLE_OPERATOR):
     """FastAPI dependency: who is calling, and may they be here.
@@ -307,4 +343,5 @@ def make_admin_guard(*, cfg: SSOConfig, token: str = "",
     return guard
 
 
-__all__ = ["build_sso_router", "make_admin_guard"]
+__all__ = ["build_sso_router", "make_admin_guard",
+           "make_caller_reader"]
