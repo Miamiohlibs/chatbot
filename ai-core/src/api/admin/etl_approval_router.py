@@ -489,17 +489,44 @@ def _exclusions_panel(key: str) -> str:
     )
 
 
+_CONFIRMATIONS = {
+    # What a redirect is allowed to say on arrival. A flag in the URL, not
+    # the sentence itself: the query string is the reader's to edit, and a
+    # console that will print any sentence handed to it in the address bar
+    # is a console that can be made to lie to the next person who opens it.
+    "fetching": ("Fetching the site now — about a minute. This page updates "
+                 "itself, and the new diff appears below when it is ready."),
+    "signed": ("Signed. The rebuild starts on its own — the panel at the top "
+               "of this page follows it."),
+    "1": ("Signed. The rebuild starts on its own — the panel at the top "
+          "of this page follows it."),   # links made before 2026-08-30
+}
+
+
 def render_page(key: str, message: str = "", ok: str = "") -> str:
     diff = latest_diff()
     from src.api.admin import etl_jobs as _jobs
 
     # Reload itself only while something is running. A page that refreshes
-    # for ever fights the reader who is trying to read a diff on it.
-    _busy = 5 if _jobs.is_running() else 0
+    # for ever fights the reader who is trying to read a diff on it -- and
+    # a page carrying an error must not navigate off it five seconds later,
+    # because the reader is being told why their passphrase was refused.
+    _busy = 0 if message else (5 if _jobs.is_running() else 0)
+
+    banner = ""
+    if message:
+        banner += f"<p class='warn'>{ui.e(message)}</p>"
+    if ok:
+        banner += f"<p class='good'>{ui.e(ok)}</p>"
 
     if diff is None:
+        # The banner belongs here too. It was rendered only on the
+        # with-a-diff branch, so a refused passphrase or a just-started
+        # fetch said nothing at all on a console whose diff had been
+        # applied and cleared away.
         return ui.page("Corpus review",
-                       _job_panel(key)
+                       banner
+                       + _job_panel(key)
                        + _exclusions_panel(key)
                        + "<p>No prepared diff is waiting — use the button "
                          "above to fetch the site's current pages.</p>",
@@ -509,12 +536,6 @@ def render_page(key: str, message: str = "", ok: str = "") -> str:
     token = decision.token
     applied = _applied_marker(diff)
     digest = gate.hash_diff_file(diff)
-
-    banner = ""
-    if message:
-        banner += f"<p class='warn'>{ui.e(message)}</p>"
-    if ok:
-        banner += f"<p class='good'>{ui.e(ok)}</p>"
 
     rejected = rejection_of(diff)
     if applied:
@@ -677,8 +698,23 @@ def build_etl_approval_router(deps: dict):
     router = APIRouter(prefix="/admin", tags=["admin"])
 
     @router.get("/etl", response_class=HTMLResponse)
-    async def etl_page(key: str = "", _u=Depends(guard)):
-        return HTMLResponse(render_page(key), headers=_NOINDEX)
+    async def etl_page(key: str = "", ok: str = "", _u=Depends(guard)):
+        return HTMLResponse(render_page(key, "", _CONFIRMATIONS.get(ok, "")),
+                            headers=_NOINDEX)
+
+    @router.get("/etl/{action}", response_class=HTMLResponse)
+    async def etl_action_by_get(action: str, key: str = "",
+                                _u=Depends(guard)):
+        """Every action below is a POST. Send a GET to the console.
+
+        A browser reaches these by GET more easily than it looks: the back
+        button onto a form result, a bookmark somebody made while the
+        address bar was showing one, an auto-refresh that named no target.
+        FastAPI answers that with `{"detail":"Method Not Allowed"}` and no
+        stylesheet, which is what the reader who pressed Fetch on
+        2026-08-29 watched the console turn into.
+        """
+        return RedirectResponse(f"/admin/etl?key={key}", status_code=303)
 
     @router.post("/etl/approve", response_class=HTMLResponse)
     async def approve(request: Request, key: str = "", email: str = Form(""),
@@ -756,7 +792,8 @@ def build_etl_approval_router(deps: dict):
                 render_page(key, f"Signed — but the rebuild did not start: "
                                  f"{why_not}"),
                 headers=_NOINDEX)
-        return RedirectResponse(f"/admin/etl?key={key}&ok=1", status_code=303)
+        return RedirectResponse(f"/admin/etl?key={key}&ok=signed",
+                                status_code=303)
 
     @router.post("/etl/fetch", response_class=HTMLResponse)
     async def fetch(request: Request, key: str = "", email: str = Form(""),
@@ -787,15 +824,20 @@ def build_etl_approval_router(deps: dict):
             return HTMLResponse(render_page(key, msg), status_code=409,
                                 headers=_NOINDEX)
         logger.warning("corpus fetch started by %s", who)
-        # Say so, rather than redirecting to a page that looks unchanged.
-        # A 303 here left the reader with a small grey line as the only
-        # sign anything had happened, and the reasonable conclusion from
-        # that is that the button is broken.
-        return HTMLResponse(
-            render_page(key, "", "Fetching the site now — about a minute. "
-                               "This page updates itself, and the new diff "
-                               "appears below when it is ready."),
-            headers=_NOINDEX)
+        # POST, redirect, GET -- and the redirect carries the confirmation.
+        #
+        # Answering the POST with the page itself is why this went wrong:
+        # the address bar stayed on /admin/etl/fetch, the auto-refresh
+        # re-requested that URL as a GET and got a bare Method Not Allowed,
+        # and a reader who pressed reload instead was asked to resubmit --
+        # which starts a second crawl of our own web server.
+        #
+        # The earlier objection to a 303 was that it landed on a page which
+        # looked unchanged. It no longer does: the panel above the button
+        # names the running phase, who started it and how long it has been
+        # going, and `ok=fetching` says it in words on top of that.
+        return RedirectResponse(f"/admin/etl?key={key}&ok=fetching",
+                                status_code=303)
 
     @router.post("/etl/reject", response_class=HTMLResponse)
     async def reject(request: Request, key: str = "", email: str = Form(""),

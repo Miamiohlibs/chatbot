@@ -254,9 +254,21 @@ def page(title: str, body: str, *, current: str = "", key: str = "",
     which is a job for the page, not the reader: press Fetch, watch
     nothing visibly change, conclude it did not work. It did -- that run
     finished in 46 seconds.
+
+    The refresh names where to go, and that is not decoration. A bare
+    `content='5'` reloads whatever URL the document happens to be sitting
+    at -- and this shell is returned from POST handlers too, so pressing
+    Fetch gave the browser a page at /admin/etl/fetch which it re-requested
+    as a GET five seconds later. That route only accepts POST, so the
+    reader watched the console replace itself with a bare
+    `{"detail":"Method Not Allowed"}` on an unstyled page. Reported
+    2026-08-29. Point the refresh at the surface's own GET view instead.
     """
-    meta_refresh = (f"<meta http-equiv='refresh' content='{int(refresh_s)}'>"
-                    if refresh_s else "")
+    meta_refresh = ""
+    if refresh_s:
+        where = f"{current}?key={e(key)}" if (current and key) else current
+        content = f"{int(refresh_s)}; url={where}" if where else str(int(refresh_s))
+        meta_refresh = f"<meta http-equiv='refresh' content='{content}'>"
     return (
         "<!doctype html><html lang='en'><head><meta charset='utf-8'>"
         "<meta name='viewport' content='width=device-width,initial-scale=1'>"

@@ -566,8 +566,9 @@ def test_a_notice_is_styled_like_a_notice(client):
 
 
 def test_starting_a_fetch_confirms_it_started(client, diffs, _no_real_etl):
-    """Not a silent redirect to a page that looks unchanged -- the
-    reasonable conclusion from that is that the button is broken."""
+    """End to end, following the redirect the way a browser does: what the
+    reader ends up looking at says the fetch started. A page that looks
+    unchanged is one the reader concludes the button is broken on."""
     r = client.post("/admin/etl/fetch",
                     data={"email": "a@miamioh.edu",
                           "password": "correct horse"})
@@ -598,3 +599,87 @@ def test_it_no_longer_tells_the_reader_to_reload(client, diffs, monkeypatch):
     monkeypatch.setattr(etl_jobs, "is_running", lambda: True)
     body = client.get("/admin/etl").text
     assert "Reload this page" not in body
+
+
+# --- the black screen after pressing Fetch, reported 2026-08-29 ----------
+#
+# The console replaced itself with `{"detail":"Method Not Allowed"}` on an
+# unstyled page a few seconds after the button was pressed, and only a
+# manual reload got back to something readable. Three things had to line up
+# and all three are pinned here.
+
+def test_the_refresh_names_where_to_go(client, diffs, monkeypatch):
+    """A bare `content='5'` reloads whatever URL the document sits at.
+
+    This shell comes back from POST handlers too, so "reload myself" meant
+    "GET the POST endpoint" -- and that is the Method Not Allowed the
+    reader watched their console turn into.
+    """
+    from src.api.admin import etl_jobs
+
+    monkeypatch.setattr(etl_jobs, "is_running", lambda: True)
+    body = client.get("/admin/etl").text
+    assert "url=/admin/etl?key=" in body
+    assert "content='5'" not in body
+
+
+def test_a_get_on_an_action_lands_on_the_console(client, diffs):
+    """Not a bare JSON 405. The back button reaches these."""
+    for action in ("fetch", "approve", "reject", "include"):
+        r = client.get(f"/admin/etl/{action}", follow_redirects=False)
+        assert r.status_code == 303, action
+        assert r.headers["location"].startswith("/admin/etl?key="), action
+
+
+def test_starting_a_fetch_leaves_the_address_bar_on_the_console(
+        client, diffs, _no_real_etl):
+    """POST, redirect, GET.
+
+    Answering the POST with the page itself parked the browser on
+    /admin/etl/fetch, where reloading either 405s or asks to resubmit --
+    and resubmitting starts a second crawl of our own web server.
+    """
+    r = client.post("/admin/etl/fetch",
+                    data={"email": "a@miamioh.edu",
+                          "password": "correct horse"},
+                    follow_redirects=False)
+    assert r.status_code == 303
+    assert r.headers["location"].startswith("/admin/etl?key=")
+    assert "ok=fetching" in r.headers["location"]
+
+
+def test_the_console_says_it_started_on_arrival(client, diffs):
+    """The redirect has to carry the confirmation, or it lands on a page
+    that looks unchanged -- the objection that made this a POST-rendered
+    page in the first place."""
+    assert "Fetching the site now" in client.get("/admin/etl?ok=fetching").text
+
+
+def test_the_url_cannot_put_words_in_the_console_s_mouth(client, diffs):
+    """The query string is the reader's to edit. A flag stands for a
+    sentence we wrote; it is never the sentence itself."""
+    body = client.get("/admin/etl?ok=Your+session+has+expired,+sign+in+here")
+    assert "session has expired" not in body.text
+
+
+def test_an_error_page_does_not_navigate_away_from_the_error(
+        client, diffs, monkeypatch):
+    """Five seconds is not long enough to read why your passphrase was
+    refused, and the refresh would take the reason off the screen."""
+    from src.api.admin import etl_jobs
+
+    monkeypatch.setattr(etl_jobs, "is_running", lambda: True)
+    r = client.post("/admin/etl/fetch",
+                    data={"email": "a@miamioh.edu", "password": "wrong"})
+    assert r.status_code == 403
+    assert "http-equiv='refresh'" not in r.text
+
+
+def test_the_banner_shows_even_with_no_diff_waiting(client, diffs,
+                                                    monkeypatch, tmp_path):
+    """It was rendered on the with-a-diff branch only, so a console whose
+    diff had been applied and cleared said nothing at all."""
+    monkeypatch.setattr(R, "DIFF_DIR", tmp_path / "empty")
+    body = client.get("/admin/etl?ok=fetching").text
+    assert "No prepared diff is waiting" in body
+    assert "Fetching the site now" in body
