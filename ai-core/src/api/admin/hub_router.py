@@ -43,7 +43,8 @@ def _section(heading: str, blurb: str, cards: str) -> str:
 
 
 def render_admin_hub(admin_key: str, librarian_code: str, caller=None,
-                     counts: "Optional[dict]" = None) -> str:
+                     counts: "Optional[dict]" = None,
+                     presence_snapshot: "Optional[dict]" = None) -> str:
     """The operator dashboard.
 
     Rebuilt 2026-07-28: it used to be a flat list of card links, so the
@@ -179,16 +180,35 @@ def render_admin_hub(admin_key: str, librarian_code: str, caller=None,
            "staff form is closed.</div>")
     )
 
+    # High on the page, under the service banner. The question it answers
+    # -- "am I about to land a deploy on somebody?" -- is asked at the
+    # moment of arriving here, not after reading four cards.
+    from src.api.admin.presence_view import render_card
+
+    live = presence_snapshot or _live()
+    now_card = render_card(live, key=admin_key)
+
     body = (
         f"{banner}<h1>Dashboard</h1><p class='lede'>{ui.e(headline)}</p>"
         f"<div class='stats'>{stats}</div>"
+        f"{now_card}"
         f"{reading}{wrong}{running}{staff}"
         f"<p><small class='dim'>Bookmark this page — every link carries "
         f"your key.</small></p>"
     )
+    # Refresh only while somebody is actually there. A dashboard that
+    # reloads every fifteen seconds around the clock is one that fights
+    # the reader; one that never reloads is one whose live number is a
+    # screenshot from whenever they opened the tab.
     return ui.page("Dashboard", body, current="/admin/", key=admin_key,
-                   who=caller,
-                   counts=counts)
+                   who=caller, counts=counts,
+                   refresh_s=15 if live["open"] else 0)
+
+
+def _live() -> dict:
+    from src.api import presence
+
+    return presence.snapshot()
 
 
 def render_librarian_hub(code: str, caller=None) -> str:

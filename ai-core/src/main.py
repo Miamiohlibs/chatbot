@@ -56,6 +56,7 @@ from src.memory.conversation_store import (
     update_message_rating,
     save_conversation_feedback,
 )
+from src.api import presence
 from src.database.prisma_client import connect_database, disconnect_database
 from src.utils.weaviate_client import get_weaviate_client, close_weaviate_client, get_weaviate_url
 from src.api.health import router as health_router
@@ -622,6 +623,11 @@ if _admin_token or _sso_cfg.enabled:
     from src.api.admin.audit_router import build_audit_router
     app.include_router(build_audit_router(_admin_deps))
 
+    # "Is anyone using it right now?" -- the same numbers the dashboard
+    # shows, reachable from the terminal the deploy runs in.
+    from src.api.admin.presence_view import build_presence_router
+    app.include_router(build_presence_router(_admin_deps))
+
     # The librarian console: what patrons asked, hard-scoped to real
     # patrons, plus the report form that was already here. Split out on
     # 2026-08-30 -- one console had been serving two jobs, and the list a
@@ -842,6 +848,10 @@ async def _v2_connect(sid, environ):
                         "too fast", ip)
         return False
     client_ips[sid] = ip
+    # Counted for the minute before a deploy: see src/api/presence.py for
+    # why an open socket on its own is NOT somebody a restart would
+    # interrupt.
+    presence.connected(sid)
     dev = _looks_like_dev_client(environ or {})
     client_is_dev[sid] = dev
     # Which door they came through. The handshake already carries the
@@ -862,6 +872,7 @@ async def _v2_connect(sid, environ):
 
 async def _v2_disconnect(sid):
     logging.info(f"🔌 [v2] Client disconnected: {sid}")
+    presence.disconnected(sid)
     _conversation_turns.pop(client_conversations.get(sid, ""), None)
     client_conversations.pop(sid, None)
     client_is_dev.pop(sid, None)
@@ -951,6 +962,10 @@ async def _v2_message(sid, data):
                 matched=_hit, client_key=f"ws:{sid}")
     except Exception as _e:  # noqa: BLE001
         logging.warning(f"injection alert failed: {_e}")
+    # A real question, not a page load. This is what separates somebody a
+    # restart would interrupt from a library tab open in the background.
+    presence.message_received(sid)
+
     conversation_id = client_conversations.get(sid)
     if not conversation_id:
         conversation_id = await create_conversation()
@@ -1022,12 +1037,19 @@ async def _v2_message(sid, data):
                 to=sid,
             )
             return
-        wire = await handle_v2_message(
-            data,
-            deps,
-            conversation_id=conversation_id,
-            conversation_history=history,
-        )
+        # Bracketed, not wrapped in the whole handler: this is the stretch
+        # where a restart costs somebody an answer they will never see.
+        # try/finally because an exception here still ends the wait.
+        presence.turn_started(sid)
+        try:
+            wire = await handle_v2_message(
+                data,
+                deps,
+                conversation_id=conversation_id,
+                conversation_history=history,
+            )
+        finally:
+            presence.turn_finished(sid)
         # Log the assistant turn, but NEVER let a logging failure swallow a
         # successfully-generated reply -- the emit happens regardless.
         #

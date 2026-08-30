@@ -1,9 +1,46 @@
 # Deployment Guide
 
-**Last Updated:** July 18, 2026
+**Last Updated:** August 30, 2026
 **Describes the CURRENT flow** (AWS host, systemd, nginx). The
 pre-migration guide is archived at
 [archive/legacy-v31/10-DEPLOYMENT-GUIDE.md](./archive/legacy-v31/10-DEPLOYMENT-GUIDE.md).
+
+## Before you deploy: is anyone using it?
+
+`build.sh` restarts the service. That drops every open socket and the bot
+cannot answer for about a minute while it warms up.
+
+`/admin/` shows this at the top, and so does `/admin/service`. From a
+terminal:
+
+```bash
+curl -s "https://chatbot.lib.miamioh.edu/admin/presence.json?key=$ADMIN_API_TOKEN" | jq
+```
+
+Three numbers, and they do **not** mean the same thing:
+
+| | What a restart costs them |
+|---|---|
+| `waiting` | Their question is lost with nothing shown. **Wait.** |
+| `in_conversation` | Their thread ends and the bot is unreachable for ~60s. |
+| `open` | Nothing — the widget reconnects on its own. |
+
+Most open sockets are nobody: the widget connects when a library page
+*loads*, so a background tab is in `open` and would not notice. Read
+`safe_to_restart`, or the sentence next to it on the page.
+
+To make a script wait rather than remember:
+
+```bash
+until curl -sf "https://chatbot.lib.miamioh.edu/admin/presence.json?key=$ADMIN_API_TOKEN" \
+      | jq -e '.safe_to_restart' >/dev/null; do
+  echo "somebody is mid-answer; waiting 15s"; sleep 15
+done
+```
+
+The count lives in the serving process, and `chatbot.service` runs one
+uvicorn worker. If anyone ever adds `--workers`, this number silently
+becomes a fraction of the truth and has to move out of process.
 
 ## Standard deploy
 

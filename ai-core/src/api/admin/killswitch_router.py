@@ -392,10 +392,13 @@ def build_killswitch_router(deps: dict):
               so it takes the same credentials.</p>
             </div>"""
         else:
+            from src.api.admin.presence_view import render_card
+
             body = f"""
             <h1>Service control</h1>
             <p class="lede">The bot is in service. Use this only if it is
                doing something wrong and you need it to stop <em>now</em>.</p>
+            {render_card(key=key)}
             <div class="card">
               <p>It keeps answering &mdash; with a maintenance notice &mdash;
                  so the page on the library site does not break.</p>
