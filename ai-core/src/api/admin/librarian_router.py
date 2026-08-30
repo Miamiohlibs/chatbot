@@ -1,12 +1,13 @@
 """The librarian console: what patrons asked, and a way to say it was wrong.
 
 WHY THIS IS A SEPARATE SURFACE
-    One console served two jobs. A subject librarian wants to know what
-    students asked about her subject this week and to report an answer that
-    was wrong. Nobody on the library staff needs the spend ladder, the kill
-    switch, or a button that rebuilds the index for seven minutes -- and a
-    console that shows you six controls you must not touch is a console you
-    stop reading.
+    One console served two jobs. The people who read this -- the
+    department heads and the dean's office, who are accountable for what
+    the bot says -- want to know what patrons asked and to report an
+    answer that was wrong. None of them needs the spend ladder, the kill
+    switch, or a button that rebuilds the index for seven minutes, and a
+    console that shows you six controls you must not touch is a console
+    you stop reading.
 
     Operator, 2026-08-30: split the librarian form and the day's real
     questions into one part to hand out, and keep everything else -- every

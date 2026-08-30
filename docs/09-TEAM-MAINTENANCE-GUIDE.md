@@ -36,14 +36,22 @@ The split is by SSO account, so it needs two lists in `/opt/chatbot/.env`:
 
 ```
 SSO_ALLOWED_UIDS=qum,bomholmm,maderir,irwinkr,yarnete   # operators (existing name, unchanged)
-SSO_LIBRARIAN_UIDS=<the Advise & Instruct department>   # 12 subject librarians
+SSO_LIBRARIAN_UIDS=<the leadership team>                # 8 department heads / dean's office
 ```
 
-The librarian list is **derived, not typed**: `staff-members.csv`,
-`department == advise-instruct` — the same set the website's
-"Advise & Instruct" filter shows. Re-derive it when somebody joins or
-leaves rather than editing it by hand; the one-liner is in
+The librarian list is the **leadership team** — department heads and the
+dean's office — so that the people accountable for what the bot says can
+read what it actually said.
+
+It is **curated, not derived**. `leadership == yes` in
+`staff-members.csv` is close but not the same: it carries two
+Coordinators, who are deliberately out, and misses one person who is
+deliberately in. Compare against that flag when reviewing the list; do
+not regenerate from it. Details in
 [02-ENVIRONMENT-VARIABLES.md](./02-ENVIRONMENT-VARIABLES.md).
+
+Nobody in `SSO_ALLOWED_UIDS` belongs on this list — operator already
+includes everything librarian does.
 
 `SSO_ALLOWED_UIDS` still means "operators" — nothing to rename. Adding a
 uid to `SSO_LIBRARIAN_UIDS` gives that person the librarian console and

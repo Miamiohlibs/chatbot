@@ -232,18 +232,25 @@ GOOGLE_CSE_CX=your_search_engine_id
 #
 # Miami uids, not email addresses (the local part of the address).
 #
-# The librarian list is the Advise & Instruct department: 12 people, and
-# it is derived rather than typed -- staff-members.csv, department ==
-# advise-instruct, which is the same set the website's "Advise &
-# Instruct" filter shows. Re-derive it when somebody joins or leaves:
+# The librarian list is the LEADERSHIP TEAM -- department heads and the
+# dean's office -- so that the people accountable for what the bot says
+# can read what it actually said. Set by the operator 2026-08-30.
 #
-#   python -c "import csv;print(','.join(sorted(
-#     (r['uniqueid'] or '').strip().lower()
-#     for r in csv.DictReader(open('/opt/chatbot/staff-members.csv',
-#                                  encoding='utf-8-sig'))
-#     if (r.get('department') or '').strip()=='advise-instruct')))"
+# It is CURATED, not derived. `leadership == yes` in staff-members.csv is
+# close but does not reproduce it: that flag includes two Coordinators
+# (deliberately out, they are not on the admin team) and omits Kristina
+# Abney (deliberately in). Use the flag to REVIEW the list, never to
+# regenerate it:
+#
+#   python -c "import csv;[print(r['uniqueid'],r['first-name'],r['last-name'],r['title'])
+#     for r in csv.DictReader(open('/opt/chatbot/staff-members.csv',encoding='utf-8-sig'))
+#     if (r.get('leadership') or '').strip().lower()=='yes']"
+#
+# Nobody in SSO_ALLOWED_UIDS belongs here -- operator is a superset of
+# librarian, which is why Michael Bomholt is absent despite being on the
+# leadership team.
 SSO_ALLOWED_UIDS=qum,bomholmm,maderir,irwinkr,yarnete
-SSO_LIBRARIAN_UIDS=adamsk3,boehmemv,dahlqumj,freede,gibsonke,hillessa,jaskowma,justusra,messnekr,morgan55,presnejl,zaslowbj
+SSO_LIBRARIAN_UIDS=abneykl,conleyj,henlear,johnsoj,kirschb,messnekr,millarj,shrimpak
 
 # Where the audit log is written. One JSONL file per month. Default is
 # ai-core/data/audit; it is a file rather than a table because it is read
