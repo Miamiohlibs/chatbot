@@ -62,6 +62,33 @@ def _isolate_booking_ledger(tmp_path, monkeypatch):
     yield
 
 @pytest.fixture(autouse=True)
+def _no_real_audit_log(monkeypatch, tmp_path_factory):
+    """A test can never write to the real audit log.
+
+    WHY THIS EXISTS. The corpus gate and the kill switch started recording
+    to data/audit/ on 2026-08-30. The tests written WITH that change
+    redirected the directory; the dozen tests written before it did not,
+    and they exercise the same endpoints -- so a full-suite run appended
+    its fixture data to the production log. Twenty kilobytes of
+    `a@miamioh.edu` and `ip: testclient` were sitting in the August file
+    before anybody looked.
+
+    That log is the thing that replaced a shared passphrase. A record
+    nobody trusts is worth less than the control it replaced, and one that
+    fills with test rows on every CI run is one nobody will trust.
+
+    Autouse and directory-level, so remembering is no longer part of it. A
+    test that WANTS to assert on the log redirects AUDIT_DIR itself and
+    still gets a private one.
+    """
+    from src.api.admin import audit
+
+    monkeypatch.setattr(
+        audit, "AUDIT_DIR",
+        tmp_path_factory.mktemp("audit"), raising=False)
+
+
+@pytest.fixture(autouse=True)
 def _no_real_email(monkeypatch, request):
     """A test can never send a real alert email.
 
