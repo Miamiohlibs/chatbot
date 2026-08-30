@@ -468,7 +468,8 @@ async def list_conversations_on(db: Any, day: "str", *,
                                 source: str = "",
                                 day_to: str = "",
                                 needs_only: bool = False,
-                                flag: str = "") -> dict:
+                                flag: str = "",
+                                real_patrons_only: bool = False) -> dict:
     """Every conversation that had a question on `day` (YYYY-MM-DD, Oxford time).
 
     WHY THIS EXISTS
@@ -634,6 +635,25 @@ async def list_conversations_on(db: Any, day: "str", *,
         t = v["source"]["tag"]
         key = "patron" if t == "unlabelled" else t
         source_counts[key] = source_counts.get(key, 0) + 1
+
+    # THE LIBRARIAN CONSOLE'S SCOPE, AND IT IS NOT A DEFAULT FILTER.
+    #
+    # Applied before `source` and not reachable from the query string: the
+    # librarian view exists to show what PATRONS asked, and most of what is
+    # in this table is us -- staff testing, replays, the eval harness. A
+    # subject librarian handed the raw list would spend the first minute
+    # working out which rows were real, and would reasonably conclude the
+    # thing gets ten questions a day from her own colleagues.
+    #
+    # Two tags count as real: nothing about the conversation suggested it
+    # was us, or a person looked at it and said so. Everything else --
+    # staff, maybe-staff, bot -- is ours. `maybe-staff` is a GUESS, and it
+    # is excluded on purpose: showing a librarian a conversation we suspect
+    # is a colleague's test costs less than the alternative, which is
+    # teaching her that half the list is noise.
+    if real_patrons_only:
+        out = [v for v in out
+               if v["source"]["tag"] in ("unlabelled", "patron-confirmed")]
 
     if source:
         # Canonicalised HERE, not in the router: this is where the

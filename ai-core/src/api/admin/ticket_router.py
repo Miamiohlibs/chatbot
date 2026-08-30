@@ -186,17 +186,14 @@ def render_thanks(ticket_id: str, email_sent: bool, key: str) -> str:
 
 
 def _staff_page(title: str, body: str) -> str:
-    """Staff pages share the visual language but NOT the operator nav --
-    library staff must never see links into the admin console."""
-    return (
-        "<!doctype html><html lang='en'><head><meta charset='utf-8'>"
-        "<meta name='viewport' content='width=device-width,initial-scale=1'>"
-        f"<title>{ui.e(title)} — Miami University Libraries</title>"
-        f"<style>{ui.STYLE}</style></head><body>"
-        "<header class='top'><div class='wrap'><b>Smart Chatbot</b>"
-        "<span style='opacity:.85'>library staff</span></div></header>"
-        f"<main>{body}</main></body></html>"
-    )
+    """Staff pages share the visual language but NOT the console nav.
+
+    This form reaches any member of library staff who has the link -- it
+    is gated by a shareable code, not by the SSO allowlist -- so every
+    destination in that nav would be a door they cannot open. A menu of
+    locked doors is worse than no menu.
+    """
+    return ui.page(title, body, chrome=False)
 
 
 # Explicit states, explicit transitions. This used to be a single

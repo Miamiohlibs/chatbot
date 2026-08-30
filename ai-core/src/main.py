@@ -588,6 +588,13 @@ if _admin_token or _sso_cfg.enabled:
     from src.database.prisma_client import get_prisma_client
 
     _guard = make_admin_guard(cfg=_sso_cfg, token=_admin_token)
+    # The librarian console admits both roles: an operator may do anything
+    # a librarian may. The reverse is what the two guards are for -- a
+    # librarian reaching /admin/cost gets a page saying which console is
+    # theirs, not a bare 403 on a link we drew.
+    from src.api.admin.sso import ROLE_LIBRARIAN as _ROLE_LIBRARIAN
+    _librarian_guard = make_admin_guard(cfg=_sso_cfg, token=_admin_token,
+                                        require=_ROLE_LIBRARIAN)
     # Mounted as soon as a base URL exists, not only once SSO is switched
     # on: /admin/sso/metadata is what Miami IT needs in order to configure
     # their side, and they need it BEFORE the switch can be flipped. The
@@ -614,6 +621,15 @@ if _admin_token or _sso_cfg.enabled:
     # one. Operator-only -- it names people.
     from src.api.admin.audit_router import build_audit_router
     app.include_router(build_audit_router(_admin_deps))
+
+    # The librarian console: what patrons asked, hard-scoped to real
+    # patrons, plus the report form that was already here. Split out on
+    # 2026-08-30 -- one console had been serving two jobs, and the list a
+    # subject librarian needs is the real one, not ours.
+    from src.api.admin.librarian_router import build_librarian_router
+    app.include_router(build_librarian_router({
+        **_admin_deps, "librarian_guard": _librarian_guard,
+    }))
     logging.info(
         "Op1/Op2/Op3 admin surfaces mounted (ADMIN_API_TOKEN set): "
         "/admin/review (HTML), /admin/reviews (JSON), "
@@ -637,6 +653,9 @@ if _admin_token or _sso_cfg.enabled:
     app.include_router(build_hub_router({
         "admin_token": _admin_token,
         "librarian_code": _ticket_code,
+        # Decides whether the staff hub offers the transcripts, never
+        # whether it answers -- the code still gates the page itself.
+        "whoami": make_caller_reader(cfg=_sso_cfg, token=_admin_token),
         # the dashboard leads with live counts (tickets / flagged / corrections)
         "db": _admin_deps["db"],
     }))

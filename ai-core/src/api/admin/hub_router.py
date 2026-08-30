@@ -190,7 +190,7 @@ def render_admin_hub(admin_key: str, librarian_code: str,
                    counts=counts)
 
 
-def render_librarian_hub(code: str) -> str:
+def render_librarian_hub(code: str, caller=None) -> str:
     """Staff hub. Deliberately has NO operator nav or counts.
 
     Changed 2026-08-08. The "Ask Us" card came out: it linked staff to
@@ -246,31 +246,49 @@ def render_librarian_hub(code: str) -> str:
         f"{ui.action('/librarian/staff-test/off', 'Stop marking me', ghost=True)}"
         "</div></div>"
     )
+    # Only for somebody Miami has signed in AND who is on the librarian
+    # list. The form below is reachable with a shareable code by any member
+    # of library staff, and offering all of them a link to real patron
+    # transcripts -- which this card is -- would hand out reading rights
+    # that the code was never meant to carry.
+    reading = ""
+    if getattr(caller, "is_librarian", False) and getattr(
+            caller, "authenticated", False):
+        reading = (
+            "<h2>What patrons have been asking</h2>"
+            "<p class='sub'>Real questions from the library website, in the "
+            "words people used. Our own testing is left out.</p>"
+            + _card("Read the last week",
+                    "The question, what the bot said back, and a way to "
+                    "report an answer from the turn it is on.",
+                    ui.action('/librarian/conversations',
+                              'Open the questions', primary=True))
+        )
+
     body = (
         "<h1>Smart Chatbot &mdash; staff hub</h1>"
         "<p class='lede'>Found the chatbot giving a wrong or outdated "
         "answer? Tell us here and the maintainer will fix it.</p>"
-        f"{report}{after}{testing}"
+        f"{report}{reading}{after}{testing}"
         "<p><small class='dim'>Bookmark this page &mdash; the links carry "
         "the access code.</small></p>"
     )
-    return (
-        "<!doctype html><html lang='en'><head><meta charset='utf-8'>"
-        "<meta name='viewport' content='width=device-width,initial-scale=1'>"
-        "<title>Staff hub — Miami University Libraries</title>"
-        f"<style>{ui.STYLE}</style></head><body>"
-        "<header class='top'><div class='wrap'><b>Smart Chatbot</b>"
-        "<span style='opacity:.85'>library staff</span></div></header>"
-        f"<main>{body}</main></body></html>"
-    )
+    return ui.page("Staff hub", body, chrome=False)
 
 
 def build_hub_router(deps: dict):
-    from fastapi import APIRouter, HTTPException  # type: ignore
+    from fastapi import APIRouter, Depends, HTTPException  # type: ignore
     from fastapi.responses import HTMLResponse  # type: ignore
 
     admin_token: str = (deps.get("admin_token") or "").strip()
     librarian_code: str = (deps.get("librarian_code") or "").strip()
+
+    async def _nobody():
+        return None
+
+    # Who is looking, not whether to answer -- the code still gates this
+    # page. It only decides whether somebody is offered the transcripts.
+    whoami = deps.get("whoami") or _nobody
     db = deps.get("db")
     router = APIRouter(tags=["hub"])
 
@@ -289,7 +307,7 @@ def build_hub_router(deps: dict):
 
     @router.get("/librarian/", response_class=HTMLResponse)
     @router.get("/librarian", response_class=HTMLResponse, include_in_schema=False)
-    async def librarian_hub(request: Request):
+    async def librarian_hub(request: Request, caller=Depends(whoami)):
         supplied = request.query_params.get("key", "")
         if not librarian_code or supplied != librarian_code:
             raise HTTPException(
@@ -297,6 +315,6 @@ def build_hub_router(deps: dict):
                 detail="Missing or wrong access code. Ask the library web "
                        "services team for the staff-hub link.",
             )
-        return HTMLResponse(render_librarian_hub(supplied))
+        return HTMLResponse(render_librarian_hub(supplied, caller))
 
     return router

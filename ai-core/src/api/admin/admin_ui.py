@@ -145,14 +145,14 @@ a:hover{text-decoration:underline}
 .brand{display:flex;align-items:center;gap:.55rem;padding:.35rem .5rem 1rem;
   text-decoration:none;color:inherit}
 .brand:hover{text-decoration:none}
-.brand .mark{
+.brand .mark,.topbar .mark{
   width:1.85rem;height:1.85rem;border-radius:.5rem;flex:0 0 auto;
   background:hsl(var(--primary));color:hsl(var(--primary-foreground));
   display:grid;place-items:center;font-weight:700;font-size:.9rem;
   letter-spacing:-.02em;
 }
-.brand .name{font-weight:600;letter-spacing:-.01em;line-height:1.15}
-.brand .role{display:block;font-weight:500;font-size:.72rem;
+.brand .name,.topbar .name{font-weight:600;letter-spacing:-.01em;line-height:1.15}
+.brand .role,.topbar .role{display:block;font-weight:500;font-size:.72rem;
   color:hsl(var(--muted-foreground));letter-spacing:.02em}
 
 .navgroup{margin-top:.85rem}
@@ -191,6 +191,16 @@ a:hover{text-decoration:underline}
   font-weight:500;word-break:break-all}
 
 main{padding:1.75rem 2rem 4rem;max-width:1180px;min-width:0}
+
+/* Pages shared outside the group -- the report form reaches any member of
+   library staff who has the link. They get the visual language and no nav,
+   because every destination in that nav would be a door they cannot open,
+   and a menu of locked doors is worse than no menu. */
+.topbar{background:hsl(var(--sidebar));
+  border-bottom:1px solid hsl(var(--sidebar-border));padding:.7rem 1rem}
+.topbar .wrap{max-width:820px;margin:0 auto;display:flex;align-items:center;
+  gap:.55rem}
+body.plain main{max-width:820px;margin:0 auto}
 
 @media (max-width:900px){
   .shell{grid-template-columns:minmax(0,1fr)}
@@ -631,7 +641,7 @@ def _signature(who) -> str:
 
 def page(title: str, body: str, *, current: str = "", key: str = "",
          counts: Optional[dict] = None, refresh_s: int = 0,
-         role: str = "", who=None) -> str:
+         role: str = "", who=None, chrome: bool = True) -> str:
     """The shell every admin surface renders into.
 
     `refresh_s` makes the page reload itself while something is running.
@@ -652,6 +662,11 @@ def page(title: str, body: str, *, current: str = "", key: str = "",
     `who` is the Caller from the guard. It picks which sidebar to draw and
     signs the foot of it; passing nothing draws the operator console,
     which is what every caller got before there were two.
+
+    `chrome=False` drops the sidebar for a page shared outside the group.
+    The report form reaches any member of library staff who has the link,
+    and every destination in that nav is a door they cannot open -- a menu
+    of locked doors is worse than no menu.
     """
     role = role or (getattr(who, "role", "") or ROLE_OPERATOR)
     meta_refresh = ""
@@ -665,15 +680,24 @@ def page(title: str, body: str, *, current: str = "", key: str = "",
         "<meta name='color-scheme' content='light dark'>"
         f"{meta_refresh}"
         f"<title>{e(title)} — Smart Chatbot admin</title>"
-        f"<style>{STYLE}</style></head><body>"
-        "<div class='shell'>"
-        "<aside class='sidebar'>"
-        f"{_brand(key, role)}"
-        f"{nav(current, key, counts, role)}"
-        f"{_signature(who)}"
-        "</aside>"
-        f"<main>{body}</main>"
-        "</div></body></html>"
+        f"<style>{STYLE}</style></head>"
+        + ("<body>"
+           "<div class='shell'>"
+           "<aside class='sidebar'>"
+           f"{_brand(key, role)}"
+           f"{nav(current, key, counts, role)}"
+           f"{_signature(who)}"
+           "</aside>"
+           f"<main>{body}</main>"
+           "</div></body></html>"
+           if chrome else
+           "<body class='plain'>"
+           "<header class='topbar'><div class='wrap'>"
+           "<span class='mark' aria-hidden='true'>SC</span>"
+           "<span class='name'>Smart Chatbot"
+           "<span class='role'>Library staff</span></span>"
+           "</div></header>"
+           f"<main>{body}</main></body></html>")
     )
 
 
