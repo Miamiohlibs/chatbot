@@ -683,3 +683,51 @@ def test_the_banner_shows_even_with_no_diff_waiting(client, diffs,
     body = client.get("/admin/etl?ok=fetching").text
     assert "No prepared diff is waiting" in body
     assert "Fetching the site now" in body
+
+
+# --- the apply report is not a thing to sign ----------------------------
+
+def test_an_apply_report_is_not_offered_for_approval(client, diffs, tmp_path):
+    """`apply` writes its own report into the diff directory when it
+    finishes, with a newer timestamp in the name than the diff it was
+    applying. The console took the newest .md, found no signature on that
+    report and said "Not yet approved" in red about work already live --
+    and signing it would start another seven-minute rebuild to index what
+    is already indexed. Two were sitting there on 2026-08-30.
+    """
+    report = tmp_path / "2026-08-26_0040.md"
+    report.write_text(
+        "# ETL Diff Report\n\n## Summary\n\n"
+        "- Written to collection: **Chunk_vv20260826_0039**\n",
+        encoding="utf-8")          # no .approval beside it -- that is the tell
+    assert report.name > diffs.name, "the report must be the newer name"
+
+    assert R.latest_diff() == diffs
+    # The page is about the real diff, and the report is nowhere on it.
+    body = client.get("/admin/etl").text
+    assert report.name not in body
+    assert diffs.name in body
+
+
+def test_an_applied_diff_still_shows_on_the_page(client, diffs):
+    """The filter is "was offered for approval", not "is still waiting for
+    one" -- this page is where somebody checks what actually went live."""
+    diffs.with_suffix(".applied").write_text(
+        "applied_at: 2026-08-26T00:40:00+00:00\n"
+        "collection: Chunk_vv20260826_0039\n", encoding="utf-8")
+    assert R.latest_diff() == diffs
+    assert "already been applied" in client.get("/admin/etl").text
+
+
+def test_the_console_and_the_command_line_agree_on_pending(client, diffs,
+                                                           tmp_path,
+                                                           monkeypatch):
+    """They disagreed, and that disagreement was the bug: the CLI has
+    always required the `.approval` sibling and the console never did."""
+    from scripts.etl import config as _cfg
+
+    monkeypatch.setattr(_cfg, "DIFF_REPORT_DIR", str(tmp_path))
+    (tmp_path / "2026-08-30_0303.md").write_text(
+        "- Written to collection: **X**\n", encoding="utf-8")
+    assert gate.find_latest_pending_diff() == diffs
+    assert R.latest_diff() == diffs

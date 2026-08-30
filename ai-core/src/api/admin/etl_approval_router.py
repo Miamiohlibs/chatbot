@@ -115,12 +115,38 @@ def check_approver(email: str, password: str) -> Optional[str]:
 
 
 def latest_diff() -> Optional[Path]:
-    """The newest prepared diff, or None if there is not one."""
+    """The newest diff that was ever offered for approval.
+
+    NOT simply the newest .md in the directory, which is what this was.
+    `apply` writes its own report there when it finishes, with a fresh
+    timestamp in the name -- so the moment a rebuild completed, the
+    console picked up that report, found no signature on it, and put
+    "Not yet approved" in red above a description of work that was
+    already live. The honest answer to "is there anything to sign?" was
+    no. Sitting there on 2026-08-30 were two of them, from the applies on
+    the 26th and the 30th.
+
+    Signing one would have been worse than confusing: it starts another
+    full rebuild, seven minutes of slower answers, to index exactly what
+    is already indexed.
+
+    A prepared diff has an unsigned `.approval` template written beside
+    it by prepare; an apply report has nothing beside it. That is the
+    difference, and `gate.find_latest_pending_diff()` -- what the command
+    line has always used -- draws it the same way. The console differing
+    from the CLI about which file is "the current diff" was the fault
+    underneath.
+
+    An applied diff still belongs here: this page is where somebody
+    checks what went live, so the filter is "was offered for approval",
+    not "is still waiting for one".
+    """
     try:
-        diffs = sorted(DIFF_DIR.glob("*.md"))
+        offered = [md for md in sorted(DIFF_DIR.glob("*.md"))
+                   if md.with_suffix(gate.APPROVAL_FILENAME_SUFFIX).exists()]
     except OSError:
         return None
-    return diffs[-1] if diffs else None
+    return offered[-1] if offered else None
 
 
 def _applied_marker(diff_path: Path) -> Optional[Path]:
