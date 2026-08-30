@@ -20,6 +20,39 @@ page is right and this document is stale — tell Meng.
 
 ---
 
+## When you hear from the bot
+
+**One scheduled time: 09:30, Oxford time, every day.** Anything urgent
+comes the moment it happens; everything else waits for 09:30.
+
+| | When | Who |
+|---|---|---|
+| **Urgent** — the service or a dependency is down; the student purse is spent and patrons are being turned away | at once | qum, bomholmm, maderir |
+| **Daily report** — data health. Sent *every* morning, all-clear included, so a morning with no mail means the job failed | 09:30 daily | qum |
+| **Daily digest** — everything else queued since yesterday, including a failed backup | 09:30 daily | qum |
+| **Website changed** | 09:30 Mondays | qum |
+| **Budget report** | 09:30 Mondays, and the 1st | qum (via the digest) |
+
+The five of these used to be five cron lines at five different times
+between 06:10 and 13:30. They are one systemd timer now —
+`scripts/morning_jobs.sh` says what runs on which day, and it is in the
+repo where you can read it:
+
+```bash
+systemctl list-timers chatbot-morning.timer
+bash /opt/chatbot/ai-core/scripts/morning_jobs.sh --dry-run   # runs everything, mails nothing
+```
+
+The dry run exits non-zero on purpose: a suppressed send counts as a
+failed send to the jobs underneath.
+
+**Still on cron, deliberately:** the liveness watchdog (every 5 min), the
+budget guard (every 15 min), the cost rollup (02:00, has to finish before
+the morning reports read it) and the database backup (03:30, a pg_dump
+kept out of the hours students are asking).
+
+---
+
 ## Two consoles, not one
 
 Since 2026-08-30 there are two.

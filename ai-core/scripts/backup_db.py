@@ -135,11 +135,22 @@ def table_counts() -> "dict[str, int]":
 
 
 def _alert(subject: str, body: str) -> None:
+    """Queue it for the morning digest rather than mailing it at 03:30.
+
+    This ran as a direct send, so a failed backup woke the operator at
+    half past three with something nobody can act on before the morning
+    anyway. Routed through incident_alerts 2026-08-30 so it arrives with
+    everything else at 09:30 -- see scripts/morning_jobs.sh.
+
+    `backup` is deliberately NOT in URGENT_KINDS. A backup that failed
+    last night is serious and is not an emergency: the database is still
+    there, and the fix is to look at why and run it again.
+    """
     try:
         sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-        from src.observability.alerting import send_alert_email
+        from src.observability.incident_alerts import _send
 
-        send_alert_email(subject, body)
+        _send("backup", subject, body)
     except Exception as e:  # noqa: BLE001 -- never let alerting mask the failure
         log.error("could not send the backup alert: %s", e)
 

@@ -76,7 +76,8 @@ Then open the operator hub (`/admin/?key=…`) and click through the pages.
 |---|---|---|
 | nginx site config | `/etc/nginx/sites-enabled/default` | path-allowlist proxy; `/librarian/` + `/admin/` blocks required (see [06-CORRECTION-TICKETS.md](./06-CORRECTION-TICKETS.md)) |
 | `.env` | `/opt/chatbot/.env` | secrets incl. `ALERT_SMTP_*`, `ADMIN_API_TOKEN`, `LIBRARIAN_TICKET_CODE`, model tiers |
-| cost rollup cron | root crontab | `0 2 * * *` → `scripts/cost_rollup.py` |
+| cron jobs | root crontab | only the four that must not wait for, or must not run during, business hours: cost rollup `0 2`, backup `30 3`, budget guard `*/15`, liveness `*/5` |
+| **scheduled email timer** | `/etc/systemd/system/chatbot-morning.{service,timer}` | fires `scripts/morning_jobs.sh` at **09:30 America/New_York**. NOT cron: this box is UTC and Ubuntu's cron cannot schedule in another timezone, so a fixed UTC time would drift an hour at each daylight-saving change. `systemctl enable --now chatbot-morning.timer` to re-create |
 | systemd unit | `/etc/systemd/system/chatbot.service` | uvicorn `src.main:app_sio`, port 8081 |
 | Weaviate + Postgres | Docker | `ai-core/docker-compose.weaviate.yml`; Postgres container `chatbot-postgres` |
 
