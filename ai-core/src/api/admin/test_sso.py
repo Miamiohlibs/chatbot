@@ -572,3 +572,58 @@ async def test_a_librarian_is_admitted_to_a_librarian_page():
     who = await _run(g, _Req(cookies={SESSION_COOKIE: issue_session("wardtd", c)}))
     assert who.uid == "wardtd" and who.authenticated
     assert not who.is_operator
+
+
+# --- the sidebar signature, everywhere -----------------------------------
+
+def test_the_shell_signs_itself_for_a_signed_in_caller():
+    from src.api.admin import admin_ui as ui
+
+    body = ui.page("x", "y", who=Caller(role=ROLE_OPERATOR, uid="qum",
+                                        via="sso"))
+    assert "Signed in as" in body and "qum" in body
+    assert "/admin/sso/logout" in body
+
+
+def test_the_shell_says_when_the_caller_is_only_a_key():
+    """Which console mode you are in decides whether the next dangerous
+    action asks for a passphrase. Deducing that from whether a password
+    box appeared is not a design."""
+    from src.api.admin import admin_ui as ui
+
+    body = ui.page("x", "y", who=Caller(role=ROLE_OPERATOR, via="token"))
+    assert "shared key" in body
+    assert "passphrase" in body
+
+
+def test_every_operator_surface_passes_the_caller_to_the_shell():
+    """Read from source, because the failure is silent.
+
+    A page that renders the shell without `who` still works -- it just
+    draws a sidebar with no signature on it, so the console tells you who
+    you are on six pages and not on the seventh. That is exactly the kind
+    of inconsistency this whole rebuild was about.
+
+    `chrome=False` is the deliberate exception: pages shared outside the
+    group get no sidebar at all, so there is nothing to sign.
+    """
+    import pathlib
+    import re
+
+    here = pathlib.Path(__file__).resolve().parent
+    offenders = []
+    for path in sorted(here.glob("*_router.py")):
+        text = path.read_text(encoding="utf-8")
+        # Each ui.page( / admin_ui.page( call, up to its closing paren.
+        for m in re.finditer(r"\b(?:ui|admin_ui)\.page\(", text):
+            i, depth = m.end(), 1
+            while depth and i < len(text):
+                depth += (text[i] == "(") - (text[i] == ")")
+                i += 1
+            call = text[m.end():i]
+            if "who=" not in call and "chrome=False" not in call:
+                line = text[:m.start()].count("\n") + 1
+                offenders.append(f"{path.name}:{line}")
+    assert not offenders, (
+        "these render the console shell without saying who is looking: "
+        + ", ".join(offenders))

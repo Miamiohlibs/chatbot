@@ -80,7 +80,7 @@ _STYLE = (
 )
 
 
-def _page(title: str, body: str, *, key: str = "") -> str:
+def _page(title: str, body: str, *, key: str = "", who=None) -> str:
     """Render into the SHARED admin shell so this page has the same tab bar
     as every other operator surface.
 
@@ -93,9 +93,10 @@ def _page(title: str, body: str, *, key: str = "") -> str:
     """
     from src.api.admin import admin_ui
 
-    return admin_ui.page(title,
-                         f"<style>{_STYLE}</style><div class='cost'>{body}</div>",
-                         current="/admin/cost", key=key)
+    return admin_ui.page(
+        title,
+        f"<style>{_STYLE}</style><div class='cost'>{body}</div>",
+        current="/admin/cost", key=key, who=who)
 
 
 async def _aggregate(db: Any, days: int) -> dict:
@@ -284,7 +285,7 @@ def build_cost_view_router(deps: dict) -> Any:
     router = APIRouter(tags=["admin-cost"])
 
     @router.get("/admin/cost.json")
-    async def cost_json(days: int = Query(7, ge=1, le=90), _g=Depends(guard)):
+    async def cost_json(days: int = Query(7, ge=1, le=90), who=Depends(guard)):
         data = await _aggregate(db, days)
         history = await _model_history(db)
         data["total"]["usd"] = round(data["total"]["usd"], 4)
@@ -301,7 +302,7 @@ def build_cost_view_router(deps: dict) -> Any:
 
     @router.get("/admin/cost", response_class=HTMLResponse)
     async def cost_html(days: int = Query(7, ge=1, le=90), key: str = "",
-                        _g=Depends(guard)):
+                        who=Depends(guard)):
         # Carried onto every in-page link so the window switcher does not
         # drop the caller's credentials. Empty when there is no key, which is
         # the SSO case -- the cookie travels on its own.
@@ -416,6 +417,6 @@ def build_cost_view_router(deps: dict) -> Any:
             f"<table><tr><th>Model</th><th>Input</th><th>Cached input</th>"
             f"<th>Output</th><th>Ever used here</th></tr>{card_rows}</table>"
         )
-        return HTMLResponse(_page("Cost", body, key=key))
+        return HTMLResponse(_page("Cost", body, key=key, who=who))
 
     return router

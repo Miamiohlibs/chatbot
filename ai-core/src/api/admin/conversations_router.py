@@ -91,7 +91,7 @@ def build_conversations_router(deps: dict) -> Any:
     async def conversations(day: str = "", key: str = "", page: int = 1,
                             per: int = 50, source: str = "",
                             to: str = "", needs: int = 0, flag: str = "",
-                            _g=Depends(guard)) -> Any:
+                            caller=Depends(guard)) -> Any:
         day = day or today_local()
         page = max(1, page)
         per = min(max(per, 10), 200)
@@ -214,7 +214,7 @@ def build_conversations_router(deps: dict) -> Any:
                 f"<p class='dim'>{gone}</p>"
                 f"<div style='margin-top:1rem'>{recent}</div>"
             )
-            return HTMLResponse(ui.page("Conversations", body,
+            return HTMLResponse(ui.page("Conversations", body, who=caller,
                                         current="/admin/conversations", key=key))
 
         _SRC_CLASS = {"staff": "thumbs_up", "bot": "refusal",
@@ -405,15 +405,15 @@ def build_conversations_router(deps: dict) -> Any:
             + f"<h2 style='font-size:.95rem;margin-top:1.4rem'>Other days</h2>"
             f"<div>{recent}</div>"
         )
-        return HTMLResponse(ui.page("Conversations",
-                                    f"<div class='convs'>{body}</div>",
-                                    current="/admin/conversations", key=key))
+        return HTMLResponse(ui.page(
+            "Conversations", f"<div class='convs'>{body}</div>",
+            current="/admin/conversations", key=key, who=caller))
 
 
     @router.get("/admin/search", response_class=HTMLResponse)
     async def search(q: str = "", who: str = "any", key: str = "",
                      page: int = 1, per: int = 50,
-                     _g=Depends(guard)) -> Any:
+                     caller=Depends(guard)) -> Any:
         """Keyword search across every conversation held.
 
         One row per CONVERSATION, not per matching message: ten hits in one
@@ -499,14 +499,14 @@ def build_conversations_router(deps: dict) -> Any:
         body = (f"<h1>Search</h1>{form}"
                 f"<div class='filter-bar'>{who_bar}</div>"
                 f"{note}{pager}{table}{pager}")
-        return HTMLResponse(ui.page("Search", body,
+        return HTMLResponse(ui.page("Search", body, who=caller,
                                     current="/admin/conversations", key=key))
 
     @router.get("/admin/conversations/{conversation_id}/source",
                 response_class=HTMLResponse)
     async def set_source(conversation_id: str, set: str = "", day: str = "",
                          key: str = "", source: str = "",
-                         _g=Depends(guard)) -> Any:
+                         caller=Depends(guard)) -> Any:
         """Record, or clear, a person's verdict on one conversation.
 
         A GET from a link on the row it concerns. Reversible in one click,

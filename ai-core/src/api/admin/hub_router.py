@@ -42,7 +42,7 @@ def _section(heading: str, blurb: str, cards: str) -> str:
             f"<p class='sub'>{ui.e(blurb)}</p>{cards}")
 
 
-def render_admin_hub(admin_key: str, librarian_code: str,
+def render_admin_hub(admin_key: str, librarian_code: str, caller=None,
                      counts: "Optional[dict]" = None) -> str:
     """The operator dashboard.
 
@@ -187,6 +187,7 @@ def render_admin_hub(admin_key: str, librarian_code: str,
         f"your key.</small></p>"
     )
     return ui.page("Dashboard", body, current="/admin/", key=admin_key,
+                   who=caller,
                    counts=counts)
 
 
@@ -294,7 +295,7 @@ def build_hub_router(deps: dict):
 
     @router.get("/admin/", response_class=HTMLResponse)
     @router.get("/admin", response_class=HTMLResponse, include_in_schema=False)
-    async def admin_hub(request: Request):
+    async def admin_hub(request: Request, caller=Depends(whoami)):
         supplied = request.query_params.get("key", "")
         if not admin_token or supplied != admin_token:
             raise HTTPException(status_code=401, detail="admin token required")
@@ -303,7 +304,7 @@ def build_hub_router(deps: dict):
             from src.api.admin.review_queries import dashboard_counts
             counts = await dashboard_counts(db)
         return HTMLResponse(
-            render_admin_hub(supplied, librarian_code, counts))
+            render_admin_hub(supplied, librarian_code, caller, counts))
 
     @router.get("/librarian/", response_class=HTMLResponse)
     @router.get("/librarian", response_class=HTMLResponse, include_in_schema=False)

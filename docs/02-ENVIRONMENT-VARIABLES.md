@@ -216,8 +216,44 @@ LIBANSWERS_API_BASE_URL=https://miamioh.libanswers.com/1.1
 # ==================== Google Custom Search ====================
 GOOGLE_CSE_API_KEY=your_google_api_key
 GOOGLE_CSE_CX=your_search_engine_id
+
+# ==================== Miami SSO / who sees which console ==============
+# Two roles since 2026-08-30. Operator is a superset of librarian.
+#
+#   operators   /admin/*      everything, including cost, the stop button,
+#                             the corpus gate and every conversation
+#   librarians  /librarian/*  the report form and REAL patron questions only
+#
+# SSO_ALLOWED_UIDS is the original name and still means "the operators" --
+# nothing to rename. SSO_OPERATOR_UIDS is accepted as well and the two
+# merge. A uid on both lists is an operator: the wider role wins, so
+# adding yourself to the librarian list to see what they see cannot
+# quietly cost you the stop button.
+#
+# Miami uids, not email addresses (the local part of the address).
+SSO_ALLOWED_UIDS=qum,bomholmm,maderir,irwinkr,yarnete
+SSO_LIBRARIAN_UIDS=
+
+# Where the audit log is written. One JSONL file per month. Default is
+# ai-core/data/audit; it is a file rather than a table because it is read
+# after exactly the events that take the database away.
+ADMIN_AUDIT_DIR=/opt/chatbot/ai-core/data/audit
 ```
+
+### The passphrase rule
+
+`ETL_APPROVAL_PASSWORD` and `SERVICE_PAUSE_PASSWORD` are still required —
+but only from a caller who is **not** signed in through Miami SSO.
+
+A signed-in operator is not asked. The IdP has already established who
+they are, the action is recorded against their Miami account in the audit
+log, and asking for a shared secret as well is a second copy of a check
+that has already been made.
+
+A caller on the shared `?key=` is anonymous, so both passphrases apply
+exactly as before. That is also the path everybody falls back to during an
+IdP outage, which is why neither variable can be removed.
 
 ---
 
-**Document Version:** updated 2026-07-17 (model tiers, alerts, admin surfaces)
+**Document Version:** updated 2026-08-30 (SSO roles, audit log, the passphrase rule)

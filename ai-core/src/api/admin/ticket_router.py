@@ -343,7 +343,8 @@ def render_admin_list(tickets: list[dict], key: str,
                       counts: "Optional[dict]" = None,
                       show_done: bool = False, *,
                       tag: str = "", tag_counts: "Optional[dict]" = None,
-                      page: int = 1, per: int = 25, total: int = 0) -> str:
+                      page: int = 1, per: int = 25, total: int = 0,
+                      caller=None) -> str:
     kq = f"key={ui.e(key)}" if key else ""
     kq_amp = f"?{kq}" if kq else ""
     cards = []
@@ -404,7 +405,7 @@ def render_admin_list(tickets: list[dict], key: str,
             "No tickets waiting. Staff submit them from the librarian hub."))
         + _pager
     )
-    return ui.page("Correction tickets", body,
+    return ui.page("Correction tickets", body, who=caller,
                    current="/admin/tickets/view", key=key, counts=counts)
 
 
@@ -498,9 +499,8 @@ def build_ticket_router(deps: dict):
             )
         return HTMLResponse(render_thanks(row.id, sent, key))
 
-    @router.get("/admin/tickets/view", response_class=HTMLResponse,
-                dependencies=[Depends(admin_guard)])
-    async def tickets_list(request: Request):
+    @router.get("/admin/tickets/view", response_class=HTMLResponse)
+    async def tickets_list(request: Request, caller=Depends(admin_guard)):
         q = request.query_params
         key = q.get("key", "")
         show_done = q.get("show", "") == "all"
@@ -526,13 +526,13 @@ def build_ticket_router(deps: dict):
              for r in rows],
             key, counts=counts, show_done=show_done,
             tag=tag, tag_counts=tag_counts,
-            page=page, per=per, total=total,
+            page=page, per=per, total=total, caller=caller,
         ))
 
-    @router.get("/admin/tickets/{ticket_id}", response_class=HTMLResponse,
-                dependencies=[Depends(admin_guard)])
+    @router.get("/admin/tickets/{ticket_id}", response_class=HTMLResponse)
     async def ticket_detail(ticket_id: str, key: str = "",
-                            msg: str = "") -> Any:
+                            msg: str = "",
+                            caller=Depends(admin_guard)) -> Any:
         """One ticket, plus everything the follow-up needs.
 
         The list view could only hand you the ticket and a link to the
@@ -550,7 +550,7 @@ def build_ticket_router(deps: dict):
         except Exception:  # noqa: BLE001
             t = None
         if t is None:
-            return HTMLResponse(ui.page("Ticket", (
+            return HTMLResponse(ui.page("Ticket", who=caller, body=(
                 f"<h1>Ticket not found</h1>"
                 f"<p class='dim'>No ticket with id <code>{ui.e(ticket_id)}</code>.</p>"
                 f"{ui.action(back, '← back to the queue', ghost=True)}"),
@@ -683,6 +683,7 @@ def build_ticket_router(deps: dict):
             f"{convo_html}{asks_html}{form}"
         )
         return HTMLResponse(ui.page("Ticket", f"<div class='tkt'>{body}</div>",
+                                    who=caller,
                                     current="/admin/tickets/view", key=key))
 
     @router.post("/admin/tickets/{ticket_id}/correct",

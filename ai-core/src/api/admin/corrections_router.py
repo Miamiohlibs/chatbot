@@ -241,7 +241,8 @@ def build_corrections_router(deps: dict) -> Any:
         return {"deactivated": _row(row)}
 
     @router.get("/view", response_class=HTMLResponse)
-    async def corrections_view(key: str = "", _user=Depends(require_librarian)):
+    async def corrections_view(key: str = "",
+                               caller=Depends(require_librarian)):
         """Librarian-facing form + table. Open as
         /admin/corrections/view with the x-admin-token header, or
         ?key=... in the URL (same guard convention as
@@ -253,7 +254,7 @@ def build_corrections_router(deps: dict) -> Any:
 
         return HTMLResponse(ui.page(
             "Corrections", _VIEW_BODY,
-            current="/admin/corrections/view", key=key))
+            current="/admin/corrections/view", key=key, who=caller))
 
     return router
 

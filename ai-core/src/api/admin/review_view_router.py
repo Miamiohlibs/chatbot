@@ -84,8 +84,10 @@ def _kq_plain(key: str) -> str:
 
 
 def _page(title: str, body: str, *, current: str = "", key: str = "",
+          who=None,
           counts: "Any" = None) -> str:
-    return ui.page(title, body, current=current, key=key, counts=counts)
+    return ui.page(title, body, current=current, key=key,
+                   counts=counts, who=who)
 
 
 def build_review_view_router(deps: dict) -> Any:
@@ -127,7 +129,7 @@ def build_review_view_router(deps: dict) -> Any:
         per: int = 50,
         limit: int = 50,
         key: str = "",
-        _g=Depends(guard),
+        who=Depends(guard),
     ) -> Any:
         """Redirect to the conversations view, which now does this.
 
@@ -175,7 +177,7 @@ def build_review_view_router(deps: dict) -> Any:
         return RedirectResponse(target, status_code=307)
 
     @router.get("/admin/review/close-testing", response_class=HTMLResponse)
-    async def close_testing(key: str = "", _g=Depends(guard)) -> Any:
+    async def close_testing(key: str = "", who=Depends(guard)) -> Any:
         """Close every flagged turn that came from testing.
 
         A GET because it is reached from a link the operator has just read
@@ -206,7 +208,7 @@ def build_review_view_router(deps: dict) -> Any:
         filter: str = "flagged",
         key: str = "",
         undo: int = 0,
-        _g=Depends(guard),
+        who=Depends(guard),
     ) -> Any:
         """Flip one row's triage state, then bounce back to the list.
 
@@ -227,7 +229,7 @@ def build_review_view_router(deps: dict) -> Any:
     async def review_detail(
         conversation_id: str,
         key: str = "",
-        _g=Depends(guard),
+        who=Depends(guard),
     ) -> Any:
         d = await conversation_detail(db, conversation_id)
         lib_code = _librarian_code()

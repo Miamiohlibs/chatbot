@@ -20,6 +20,61 @@ page is right and this document is stale — tell Meng.
 
 ---
 
+## Two consoles, not one
+
+Since 2026-08-30 there are two.
+
+**`/librarian/`** — for subject librarians. The report form, and the real
+questions patrons asked. Nothing else: no spend, no stop button, no
+rebuild. This is the link to hand out.
+
+**`/admin/`** — for the five of us. Everything above, plus every
+conversation *including our own testing*, the corpus gate, the cost
+dashboard, the stop button and the audit log.
+
+The split is by SSO account, so it needs two lists in `/opt/chatbot/.env`:
+
+```
+SSO_ALLOWED_UIDS=qum,bomholmm,maderir,irwinkr,yarnete   # operators (existing name, unchanged)
+SSO_LIBRARIAN_UIDS=                                     # subject librarians, comma-separated Miami uids
+```
+
+`SSO_ALLOWED_UIDS` still means "operators" — nothing to rename. Adding a
+uid to `SSO_LIBRARIAN_UIDS` gives that person the librarian console and
+nothing more. Somebody on both lists is an operator; the wider role wins,
+so putting yourself on the librarian list to see what they see does not
+quietly cost you the stop button.
+
+**Until Miami IT finishes the SSO configuration none of this is live.**
+Everyone arrives on the shared `?key=`, which is treated as an operator
+and is asked for a passphrase — exactly as before. See "Passphrases"
+below.
+
+### Passphrases
+
+Signed in through Miami SSO, the dangerous actions no longer ask for a
+shared passphrase. Your identity came from the IdP, and what the action
+is recorded against is your Miami account.
+
+Arriving on the shared key, they still do. That key says nothing about
+who you are, so a log line naming you would be worth nothing — and it is
+also the path everybody falls back to if the IdP is down.
+
+The foot of the sidebar always says which of the two you are on.
+
+### The audit log
+
+`/admin/audit` — every corpus rebuild, every send-back, and every use of
+the stop button, newest first. Lines done with the shared key are marked
+`unverified`, because the name on those is whatever was typed into the
+form.
+
+It is a file, not a database table: `ai-core/data/audit/actions-YYYY-MM.jsonl`.
+That is deliberate — it is read after exactly the events that take the
+database away. `tail -f` works when the console does not.
+
+---
+
 ## Start here: the dashboard
 
 `/admin/` is a hub of cards, grouped by what you came to do:
@@ -35,6 +90,7 @@ page is right and this document is stale — tell Meng.
 | **Cost dashboard** | Daily spend, by model, all-time | Mike |
 | **Health checks** | Dependency probes and an end-to-end smoke test | Rachel |
 | **Corpus review** (`/admin/etl`) | Website updates into the bot | Ken, Jerry |
+| **Audit log** (`/admin/audit`) | Who rebuilt the corpus, who stopped the bot | everyone |
 
 ---
 
