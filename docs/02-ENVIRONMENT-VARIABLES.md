@@ -231,8 +231,19 @@ GOOGLE_CSE_CX=your_search_engine_id
 # quietly cost you the stop button.
 #
 # Miami uids, not email addresses (the local part of the address).
+#
+# The librarian list is the Advise & Instruct department: 12 people, and
+# it is derived rather than typed -- staff-members.csv, department ==
+# advise-instruct, which is the same set the website's "Advise &
+# Instruct" filter shows. Re-derive it when somebody joins or leaves:
+#
+#   python -c "import csv;print(','.join(sorted(
+#     (r['uniqueid'] or '').strip().lower()
+#     for r in csv.DictReader(open('/opt/chatbot/staff-members.csv',
+#                                  encoding='utf-8-sig'))
+#     if (r.get('department') or '').strip()=='advise-instruct')))"
 SSO_ALLOWED_UIDS=qum,bomholmm,maderir,irwinkr,yarnete
-SSO_LIBRARIAN_UIDS=
+SSO_LIBRARIAN_UIDS=adamsk3,boehmemv,dahlqumj,freede,gibsonke,hillessa,jaskowma,justusra,messnekr,morgan55,presnejl,zaslowbj
 
 # Where the audit log is written. One JSONL file per month. Default is
 # ai-core/data/audit; it is a file rather than a table because it is read
