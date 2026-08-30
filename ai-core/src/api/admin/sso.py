@@ -90,6 +90,36 @@ def _env_bool(name: str, default: bool) -> bool:
     return raw.lower() in ("1", "true", "yes", "on")
 
 
+def _uid_set(name: str) -> set:
+    """Parse one of the allowlists. Commas or semicolons, case-insensitive."""
+    return {
+        u.strip().lower()
+        for u in _env(name).replace(";", ",").split(",")
+        if u.strip()
+    }
+
+
+# --- the two audiences -----------------------------------------------------
+#
+# One console served two jobs that have nothing to do with each other. A
+# subject librarian wants to know what students asked her subject this week
+# and to report an answer that was wrong. Nobody on the library staff needs
+# the spend ladder, the kill switch, or a button that rebuilds the index for
+# seven minutes -- and the conversation list they do need is the real one,
+# not ours: most of what is in there is us testing the bot.
+#
+# So: two roles, and the operator role is a superset. Not a permission
+# matrix -- there are five people in this group and a matrix would be five
+# people maintaining a table about five people.
+ROLE_OPERATOR = "operator"
+ROLE_LIBRARIAN = "librarian"
+
+ROLE_LABELS = {
+    ROLE_OPERATOR: "operator",
+    ROLE_LIBRARIAN: "librarian",
+}
+
+
 @dataclass(frozen=True)
 class SSOConfig:
     """Everything the SP needs, read once at startup."""
@@ -104,6 +134,8 @@ class SSOConfig:
     sp_cert: str = ""
     sp_key: str = ""
     allowed_uids: frozenset = field(default_factory=frozenset)
+    operator_uids: frozenset = field(default_factory=frozenset)
+    librarian_uids: frozenset = field(default_factory=frozenset)
     session_secret: str = ""
     session_hours: int = 8
     allow_token_fallback: bool = True
@@ -146,11 +178,16 @@ class SSOConfig:
 
 def load_config() -> SSOConfig:
     base = _env("SSO_BASE_URL").rstrip("/")
-    uids = {
-        u.strip().lower()
-        for u in _env("SSO_ALLOWED_UIDS").replace(";", ",").split(",")
-        if u.strip()
-    }
+    # SSO_ALLOWED_UIDS is what the list was called when there was one list,
+    # and it is what is in .env today. It keeps meaning "the operators", so
+    # nothing breaks by upgrading; SSO_OPERATOR_UIDS is the name to use in
+    # new deployments and the two are merged rather than one winning.
+    operators = _uid_set("SSO_ALLOWED_UIDS") | _uid_set("SSO_OPERATOR_UIDS")
+    librarians = _uid_set("SSO_LIBRARIAN_UIDS")
+    # Being on both lists is not an error and is not worth refusing over: an
+    # operator is already allowed everything a librarian is, so the operator
+    # role simply wins in role_for().
+    uids = operators | librarians
     return SSOConfig(
         enabled=_env_bool("SSO_ENABLED", False),
         base_url=base,
@@ -164,6 +201,8 @@ def load_config() -> SSOConfig:
         sp_cert=_env("SSO_SP_CERT"),
         sp_key=_env("SSO_SP_KEY"),
         allowed_uids=frozenset(uids),
+        operator_uids=frozenset(operators),
+        librarian_uids=frozenset(librarians),
         session_secret=_env("SSO_SESSION_SECRET"),
         session_hours=int(_env("SSO_SESSION_HOURS", "8") or 8),
         allow_token_fallback=_env_bool("SSO_ALLOW_TOKEN_FALLBACK", True),
@@ -215,6 +254,86 @@ def display_name_from_attributes(attrs: dict) -> str:
 
 def is_allowed(uid: str | None, cfg: SSOConfig) -> bool:
     return bool(uid) and uid.lower() in cfg.allowed_uids
+
+
+@dataclass(frozen=True)
+class Caller:
+    """Who is making this request, as far as the console can tell.
+
+    WHY THE GUARD RETURNS THIS RATHER THAN None
+        Two things need it. The console has to know which role it is
+        drawing for, and every dangerous action has to be able to write
+        down who did it -- which is only worth writing down if somebody
+        else established the name. `via` is that distinction, and it is
+        the whole reason a passphrase can be dropped in one case and not
+        the other:
+
+          via="sso"    Miami's IdP says this is qum@miamioh.edu. The name
+                       in the log is evidence.
+          via="token"  Somebody has the shared URL key. The name in the
+                       log would be whatever they typed in the box, which
+                       is not evidence of anything.
+
+        So `authenticated` gates the passphrase, not `enabled` and not a
+        setting. A console with SSO configured but a caller arriving on
+        the fallback key is still asked for the passphrase, because that
+        caller is still anonymous.
+    """
+
+    role: str = ""
+    uid: str = ""
+    via: str = ""
+
+    @property
+    def authenticated(self) -> bool:
+        """Somebody other than the caller vouched for this name."""
+        return self.via == "sso" and bool(self.uid)
+
+    @property
+    def is_operator(self) -> bool:
+        return self.role == ROLE_OPERATOR
+
+    @property
+    def is_librarian(self) -> bool:
+        return self.role in (ROLE_LIBRARIAN, ROLE_OPERATOR)
+
+    def may(self, role: str) -> bool:
+        """Operators may do anything a librarian may. Not the reverse."""
+        if self.role == ROLE_OPERATOR:
+            return True
+        return self.role == role
+
+    @property
+    def display(self) -> str:
+        """What to put on the screen and in the log."""
+        if self.authenticated:
+            return self.uid
+        return "shared key (unauthenticated)"
+
+
+def role_for(uid: str | None, cfg: SSOConfig) -> "str | None":
+    """Which console this person gets, or None if they get neither.
+
+    Operator wins when somebody is on both lists. The alternative -- the
+    narrower role winning, or refusing the sign-in -- would mean adding
+    yourself to the librarian list to see what librarians see quietly locks
+    you out of the kill switch, and you would find out during an incident.
+    """
+    if not uid:
+        return None
+    u = uid.lower()
+    if u in cfg.operator_uids:
+        return ROLE_OPERATOR
+    if u in cfg.librarian_uids:
+        return ROLE_LIBRARIAN
+    # On the old single list and neither of the new ones. That list granted
+    # the whole console before roles existed, so operator is what it has
+    # always meant -- and reading it here rather than only in load_config()
+    # is what stops a config built any other way from locking out everyone
+    # who has not been re-sorted into a role yet.
+    if u in cfg.allowed_uids:
+        return ROLE_OPERATOR
+    return None
 
 
 # --- signed session cookie -------------------------------------------------

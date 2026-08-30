@@ -250,10 +250,13 @@ class _Req:
 
 
 async def _run(guard, req):
+    """The guard's answer: a Caller when it admits, the HTTPException when
+    it does not. It used to return None on success -- it returns who the
+    caller is now, because the console has two roles to draw for and every
+    dangerous action has a name to write down."""
     from fastapi import HTTPException
     try:
-        await guard(req)
-        return None
+        return await guard(req)
     except HTTPException as e:
         return e
 
@@ -265,7 +268,10 @@ async def test_a_valid_sso_session_is_admitted():
     c = cfg()
     g = make_admin_guard(cfg=c, token="tok")
     req = _Req(cookies={SESSION_COOKIE: issue_session("qum", c)})
-    assert await _run(g, req) is None
+    who = await _run(g, req)
+    assert who.uid == "qum"
+    assert who.authenticated
+    assert who.is_operator, "the pre-roles allowlist has always meant operator"
 
 
 @pytest.mark.asyncio
@@ -274,7 +280,9 @@ async def test_the_token_still_works_while_the_fallback_is_on():
     # switch.
     from src.api.admin.sso_router import make_admin_guard
     g = make_admin_guard(cfg=cfg(allow_token_fallback=True), token="tok")
-    assert await _run(g, _Req(headers={"x-admin-token": "tok"})) is None
+    who = await _run(g, _Req(headers={"x-admin-token": "tok"}))
+    assert who.is_operator, "the emergency key opens the whole console"
+    assert not who.authenticated, "...but it does not establish a name"
 
 
 @pytest.mark.asyncio
@@ -322,7 +330,7 @@ async def test_a_session_for_a_removed_uid_does_not_open_the_door():
 async def test_with_sso_off_the_guard_is_the_old_token_check():
     from src.api.admin.sso_router import make_admin_guard
     g = make_admin_guard(cfg=cfg(enabled=False), token="tok")
-    assert await _run(g, _Req(query="key=tok")) is None
+    assert (await _run(g, _Req(query="key=tok"))).is_operator
     e = await _run(g, _Req(query="key=wrong"))
     assert e is not None and e.status_code == 401
 
@@ -458,3 +466,109 @@ def test_the_metadata_does_not_expire():
     assert settings["security"]["metadataValidUntil"] == "", (
         "an empty string omits the attribute; None restores the 2-day default"
     )
+
+
+# --- two audiences ---------------------------------------------------------
+#
+# One console served two jobs. A subject librarian wants the questions
+# students asked and a way to report a wrong answer; nobody on the library
+# staff needs the spend ladder, the kill switch, or a button that rebuilds
+# the index for seven minutes.
+
+from src.api.admin.sso import (  # noqa: E402
+    Caller, ROLE_LIBRARIAN, ROLE_OPERATOR, load_config, role_for,
+)
+
+
+def _roles(**over):
+    return cfg(**over)
+
+
+def test_an_operator_gets_the_operator_role():
+    assert role_for("qum", _roles(operator_uids=frozenset({"qum"}))) \
+        == ROLE_OPERATOR
+
+
+def test_a_librarian_gets_the_librarian_role():
+    assert role_for("wardtd", _roles(librarian_uids=frozenset({"wardtd"}))) \
+        == ROLE_LIBRARIAN
+
+
+def test_somebody_on_neither_list_gets_no_role():
+    assert role_for("stranger", _roles(allowed_uids=frozenset())) is None
+
+
+def test_operator_wins_when_somebody_is_on_both_lists():
+    """Adding yourself to the librarian list to see what librarians see must
+    not quietly cost you the kill switch -- you would find out during an
+    incident."""
+    c = _roles(operator_uids=frozenset({"qum"}),
+               librarian_uids=frozenset({"qum"}))
+    assert role_for("qum", c) == ROLE_OPERATOR
+
+
+def test_the_old_single_list_still_means_operator():
+    """SSO_ALLOWED_UIDS granted the whole console before roles existed, and
+    it is what is in .env today. Upgrading must not lock out five people."""
+    c = _roles(allowed_uids=frozenset({"qum"}),
+               operator_uids=frozenset(), librarian_uids=frozenset())
+    assert role_for("qum", c) == ROLE_OPERATOR
+
+
+def test_the_role_lists_merge_rather_than_one_winning(monkeypatch):
+    monkeypatch.setenv("SSO_ALLOWED_UIDS", "qum")
+    monkeypatch.setenv("SSO_OPERATOR_UIDS", "bomholmm")
+    monkeypatch.setenv("SSO_LIBRARIAN_UIDS", "wardtd, yarnete")
+    c = load_config()
+    assert c.operator_uids == frozenset({"qum", "bomholmm"})
+    assert c.librarian_uids == frozenset({"wardtd", "yarnete"})
+    assert "wardtd" in c.allowed_uids, "a librarian must be able to sign in"
+
+
+def test_a_librarian_may_not_do_operator_things():
+    who = Caller(role=ROLE_LIBRARIAN, uid="wardtd", via="sso")
+    assert who.may(ROLE_LIBRARIAN)
+    assert not who.may(ROLE_OPERATOR)
+
+
+def test_an_operator_may_do_librarian_things():
+    who = Caller(role=ROLE_OPERATOR, uid="qum", via="sso")
+    assert who.may(ROLE_LIBRARIAN) and who.may(ROLE_OPERATOR)
+
+
+def test_the_shared_key_is_never_a_name():
+    """It opens the console -- it is our emergency key -- but a log line
+    naming whoever typed it in a box is not evidence of anything."""
+    who = Caller(role=ROLE_OPERATOR, via="token")
+    assert who.is_operator
+    assert not who.authenticated
+    assert "unauthenticated" in who.display
+
+
+@pytest.mark.asyncio
+async def test_a_librarian_reaching_an_operator_page_is_told_why():
+    """Not a bare 403. They clicked a link, and "Forbidden" invites them to
+    conclude the console is broken."""
+    from src.api.admin.sso import SESSION_COOKIE
+    from src.api.admin.sso_router import make_admin_guard
+
+    c = cfg(allowed_uids=frozenset({"wardtd"}),
+            librarian_uids=frozenset({"wardtd"}))
+    g = make_admin_guard(cfg=c, token="tok", require=ROLE_OPERATOR)
+    e = await _run(g, _Req(cookies={SESSION_COOKIE: issue_session("wardtd", c)}))
+    assert e.status_code == 403
+    assert "/librarian/" in e.detail
+    assert "wardtd" in e.detail
+
+
+@pytest.mark.asyncio
+async def test_a_librarian_is_admitted_to_a_librarian_page():
+    from src.api.admin.sso import SESSION_COOKIE
+    from src.api.admin.sso_router import make_admin_guard
+
+    c = cfg(allowed_uids=frozenset({"wardtd"}),
+            librarian_uids=frozenset({"wardtd"}))
+    g = make_admin_guard(cfg=c, token="tok", require=ROLE_LIBRARIAN)
+    who = await _run(g, _Req(cookies={SESSION_COOKIE: issue_session("wardtd", c)}))
+    assert who.uid == "wardtd" and who.authenticated
+    assert not who.is_operator

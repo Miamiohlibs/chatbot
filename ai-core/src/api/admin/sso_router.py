@@ -18,6 +18,7 @@ WHY THE GUARD REDIRECTS INSTEAD OF 401-ING
 
 from __future__ import annotations
 
+import html
 import logging
 from typing import Any
 
@@ -45,8 +46,11 @@ from src.api.admin.sso import (
     SSOConfig,
     display_name_from_attributes,
     is_allowed,
+    Caller,
+    ROLE_OPERATOR,
     issue_session,
     read_session,
+    role_for,
     safe_next,
     saml_settings,
     uid_from_attributes,
@@ -227,21 +231,52 @@ def _denied_page(title: str, body_html: str) -> str:
 # --- the guard every admin router depends on -------------------------------
 
 
-def make_admin_guard(*, cfg: SSOConfig, token: str = ""):
-    """FastAPI dependency: allow an SSO session, or the shared token while
-    the fallback is still on. Fail-closed in every other case.
+def make_admin_guard(*, cfg: SSOConfig, token: str = "",
+                     require: str = ROLE_OPERATOR):
+    """FastAPI dependency: who is calling, and may they be here.
+
+    Returns a `Caller` rather than None. Endpoints take it as
+    `who=Depends(guard)` and use it for two things: drawing the console
+    for the right role, and writing down who performed a dangerous
+    action. See `Caller` for why the second only counts on the SSO path.
+
+    `require` is the role a surface needs. Operators satisfy any
+    requirement; a librarian reaching an operator-only page is told so on
+    a page, not handed a bare 403 -- they clicked a link we drew, and
+    "Forbidden" invites them to conclude the console is broken.
 
     Both keys are checked on every request rather than one being chosen at
     startup, so switching the fallback off is a restart, not a redeploy, and
     switching it back on during an incident is the same.
+
+    THE SHARED TOKEN IS AN OPERATOR, AND IS NOT AUTHENTICATED.
+        It is our own emergency key -- see main.py on why the fallback
+        exists at all -- so it opens every surface. What it does not do is
+        establish a name, so `Caller.authenticated` is false on that path
+        and everything that keys off it (the passphrase, the audit log's
+        confidence in the name) behaves as it did before SSO existed.
     """
     from fastapi import HTTPException  # type: ignore
 
-    async def guard(request: Request) -> None:
+    async def guard(request: Request) -> Caller:
         if cfg.enabled:
             uid = read_session(request.cookies.get(SESSION_COOKIE), cfg)
             if uid:
-                return
+                who = Caller(role=role_for(uid, cfg) or "", uid=uid,
+                             via="sso")
+                if who.may(require):
+                    return who
+                raise HTTPException(
+                    status_code=403,
+                    detail=_denied_page(
+                        "Not your part of the console",
+                        "<p>You are signed in as <code>" + html.escape(uid)
+                        + "</code>, and this page belongs to the operators "
+                          "group.</p><p>The librarian console is at "
+                          "<a href='/librarian/'>/librarian/</a>. If you "
+                          "need this page, ask an operator to add you.</p>"),
+                    headers={"content-type": "text/html; charset=utf-8"},
+                )
 
         if token and cfg.allow_token_fallback:
             supplied = (
@@ -250,7 +285,7 @@ def make_admin_guard(*, cfg: SSOConfig, token: str = ""):
                 or ""
             )
             if supplied == token:
-                return
+                return Caller(role=ROLE_OPERATOR, via="token")
 
         if not cfg.enabled:
             # SSO off and the token did not match: nothing else to offer.
