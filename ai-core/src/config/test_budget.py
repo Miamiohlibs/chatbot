@@ -14,7 +14,23 @@ from src.config import budget as B
 
 
 def _aug(day: int = 15) -> _dt.date:
-    return _dt.date(2026, 8, day)  # 31 days -> $75/31 = $2.4194/day
+    return _dt.date(2026, 8, day)  # 31 days
+
+
+# THE SAME IMPORT-ORDER LUCK, IN FOUR TESTS THE NOTE ABOVE MISSED.
+#
+# They spelled the student purse as $75, which is the module DEFAULT and
+# not a number any deployment uses: .env has held $25 before the flip and
+# $45 after it since 2026-08-13, deliberately -- the eval purse is the
+# larger one during development. So these passed when nothing had loaded
+# .env yet and failed in a full run, and a colleague reading the four red
+# lines would reasonably conclude the money was misconfigured. It is not;
+# the tests were. Found 2026-08-30.
+#
+# Read the purse from the module. What is worth pinning here is the
+# LADDER -- that 85% is where the cheap model comes on -- not the dollar
+# figure the ladder is a percentage of.
+_PURSE = B.MONTHLY_SERVING_USD
 
 
 # --- the two purses ------------------------------------------------------
@@ -34,10 +50,20 @@ _PRE = _dt.datetime(2026, 8, 1)          # before BUDGET_LAUNCH_AT
 _POST = _dt.datetime(2026, 8, 20)        # after it
 
 
-def test_the_prelaunch_split_is_75_25():
+def test_the_two_purses_are_real_and_separate():
+    """No dollar figure here on purpose.
+
+    The split is an operator decision that has already changed once and is
+    documented in .env to change again (5/95 when development stops). A
+    test that names today's numbers fails on the day somebody follows
+    those instructions correctly, which teaches the next reader to ignore
+    it. What must hold is that both purses exist, neither is zero, and
+    they are not the same number read twice.
+    """
     serving, evl = B._PRELAUNCH_SERVING_USD, B._PRELAUNCH_EVAL_USD
-    assert (serving, evl) == (75.00, 25.00)
-    assert serving + evl == 100.00
+    assert serving > 0 and evl > 0
+    assert B.MONTHLY_TOTAL_USD == B.MONTHLY_SERVING_USD + B.MONTHLY_EVAL_USD
+    assert B.split_for(_PRE) == (serving, evl)
 
 
 def test_the_flip_takes_effect_at_launch_and_not_before():
@@ -129,17 +155,19 @@ def test_only_an_exhausted_monthly_purse_refuses_students():
 
 
 def test_monthly_thresholds_are_where_the_design_says():
-    for mtd, want in ((52.50, B.L_ALERT),      # 70%
-                      (63.75, B.L_CHEAP),      # 85%
-                      (71.25, B.L_TIGHTEN),    # 95%
-                      (75.00, B.L_REFUSE)):    # 100%
+    for fraction, want in ((0.70, B.L_ALERT),
+                           (0.85, B.L_CHEAP),
+                           (0.95, B.L_TIGHTEN),
+                           (1.00, B.L_REFUSE)):
+        mtd = _PURSE * fraction
         lvl, _ = B.level_for(serving_today=0.0, serving_mtd=mtd, when=_aug())
-        assert lvl == want, (mtd, lvl, want)
+        assert lvl == want, (fraction, mtd, lvl, want)
 
 
 def test_the_higher_of_the_two_triggers_wins():
     """A quiet day inside an exhausted month must not read as normal."""
-    lvl, _ = B.level_for(serving_today=0.0, serving_mtd=74.0, when=_aug())
+    lvl, _ = B.level_for(serving_today=0.0, serving_mtd=_PURSE * 0.96,
+                         when=_aug())
     assert lvl == B.L_TIGHTEN
     # ...and a wild day inside a quiet month must not read as normal either.
     line = B.daily_serving_line(_aug())
@@ -159,12 +187,16 @@ def test_escalation_is_never_delayed():
 def test_recovery_needs_clearance_below_the_trigger():
     """Just under the line is not enough, or the guard flaps and mails
     on every 15-minute crossing."""
-    # 85% of $75 = $63.75. Just below it -> hold at cheap.
+    trigger = _PURSE * 0.85          # the rung that put us on the cheap model
+    clear = trigger * (1 - B.RECOVERY_MARGIN)
+    # Just under the trigger is not clearance -> hold at cheap.
     assert B.apply_hysteresis(B.L_ALERT, B.L_CHEAP, serving_today=0.0,
-                              serving_mtd=63.00, when=_aug()) == B.L_CHEAP
-    # 10% clear of the trigger ($57.37) -> allowed to step down.
+                              serving_mtd=trigger - 0.01,
+                              when=_aug()) == B.L_CHEAP
+    # Past the margin -> allowed to step down one rung.
     assert B.apply_hysteresis(B.L_ALERT, B.L_CHEAP, serving_today=0.0,
-                              serving_mtd=50.00, when=_aug()) == B.L_ALERT
+                              serving_mtd=clear - 0.01,
+                              when=_aug()) == B.L_ALERT
 
 
 def test_recovery_steps_down_one_rung_at_a_time():
