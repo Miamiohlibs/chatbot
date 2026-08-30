@@ -301,16 +301,25 @@ def test_a_wrong_admin_key_is_refused(keyed):
     assert keyed.get("/admin/etl?key=nope").status_code == 401
 
 
-def test_with_the_key_every_nav_tab_carries_it(keyed):
-    """The reported bug. A tab that drops the key is a dead link."""
+def test_with_the_key_every_nav_link_carries_it(keyed):
+    """The reported bug. A nav link that drops the key is a dead link.
+
+    Written against the sidebar rather than the tab strip it replaced, and
+    it covers the brand mark too -- that is a link home, and it was the one
+    the tab-strip version could not have caught.
+    """
     import re
     html = keyed.get("/admin/etl?key=TOKEN123").text
-    nav = re.search(r"<nav class='tabs'>(.*?)</nav>", html, re.S)
-    assert nav, "no nav rendered"
-    hrefs = re.findall(r"href='([^']+)'", nav.group(1))
-    assert hrefs, "no tabs rendered"
+    bar = re.search(r"<aside class='sidebar'>(.*?)</aside>", html, re.S)
+    assert bar, "no sidebar rendered"
+    hrefs = [h for h in re.findall(r"href='([^']+)'", bar.group(1))
+             # Sign-out deliberately carries nothing: it ends a session,
+             # and handing it the key would be handing it the thing the
+             # session exists to replace.
+             if not h.startswith("/admin/sso/")]
+    assert hrefs, "no links rendered"
     for h in hrefs:
-        assert "key=TOKEN123" in h, f"tab without the key: {h}"
+        assert "key=TOKEN123" in h, f"link without the key: {h}"
 
 
 def test_the_key_guards_looking_and_the_passphrase_guards_signing(keyed, diffs):

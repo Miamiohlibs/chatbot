@@ -22,6 +22,8 @@ from __future__ import annotations
 import html
 from typing import Optional
 
+from src.api.admin.sso import ROLE_LIBRARIAN, ROLE_OPERATOR
+
 
 def e(v: object) -> str:
     """HTML-escape anything. All admin content is untrusted: ticket text
@@ -32,221 +34,604 @@ def e(v: object) -> str:
 # Miami University red is the anchor; everything else is neutral so the
 # status colors are the only things competing for attention.
 STYLE = """
-:root{
-  --miami:#b61e2e; --miami-dark:#8e1724;
-  --ink:#1c1c1e; --muted:#6b7280; --line:#e5e7eb; --bg:#f7f7f8;
-  --open:#b45309; --open-bg:#fef3c7;
-  --prog:#1d4ed8; --prog-bg:#dbeafe;
-  --done:#15803d; --done-bg:#dcfce7;
-  --warn:#b91c1c; --warn-bg:#fee2e2;
-}
-*{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--ink);
-  font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif}
-a{color:#1a4480}
-header.top{background:var(--miami);color:#fff;padding:.7rem 1rem}
-header.top .wrap{max-width:1080px;margin:0 auto;display:flex;
-  align-items:center;gap:1rem;flex-wrap:wrap}
-header.top b{font-size:1.05rem}
-nav.tabs{max-width:1080px;margin:0 auto;padding:0 1rem;display:flex;
-  gap:.25rem;flex-wrap:wrap;background:#fff;border-bottom:1px solid var(--line)}
-nav.tabs a{padding:.6rem .9rem;text-decoration:none;color:var(--muted);
-  border-bottom:3px solid transparent;font-weight:500;white-space:nowrap}
-nav.tabs a:hover{color:var(--ink);background:#fafafa}
-nav.tabs a.on{color:var(--miami);border-bottom-color:var(--miami);font-weight:600}
-nav.tabs .badge{display:inline-block;min-width:1.2rem;margin-left:.35rem;
-  padding:0 .35rem;border-radius:999px;background:var(--warn-bg);
-  color:var(--warn);font-size:.75rem;font-weight:700;text-align:center}
-main{max-width:1080px;margin:0 auto;padding:1.25rem 1rem 3rem}
-h1{font-size:1.4rem;margin:.2rem 0 1rem}
-h2{font-size:1.05rem;margin:1.8rem 0 .6rem;color:#374151}
-p.lede{color:var(--muted);margin:.2rem 0 1.2rem}
-/* Says what a GROUP of tools is for, so the grouping is legible without
-   opening every card in it. */
-p.sub{color:var(--muted);font-size:.88rem;margin:-.35rem 0 .75rem}
+/* ---------------------------------------------------------------------
+   Tokens.
 
-/* "Is the bot up?" is the only question during an incident, so it gets
-   answered above everything else rather than in a card halfway down. */
-.banner{border-radius:8px;padding:1rem 1.15rem;margin:0 0 1.3rem}
-.banner.down{background:var(--warn-bg);border:2px solid var(--warn)}
-.banner.down b{color:var(--warn);display:block;font-size:1.05rem;
+   Every colour on every operator surface resolves through this block.
+   It is not tidiness: the console had five hardcoded greys, three blues
+   and two different "warning" reds scattered through the components
+   below, which is why nothing looked like part of one tool and why the
+   page could not follow a reader into dark mode.
+
+   HSL triplets rather than hex so a component can take a colour at
+   partial strength -- hsl(var(--primary) / .12) for a tint -- without a
+   second token existing for every tint.
+
+   The neutral is warm (hue 20) rather than the usual blue-grey. Beside
+   Miami red a cool grey reads as two unrelated decisions; this one reads
+   as the same family desaturated, which is what lets the red be the only
+   thing on the page competing for attention.
+   --------------------------------------------------------------------- */
+:root{
+  --background:0 0% 100%;
+  --foreground:20 14% 12%;
+  --card:0 0% 100%;
+  --muted:24 16% 96%;
+  --muted-foreground:20 8% 44%;
+  --border:22 13% 89%;
+  --input:22 13% 84%;
+  --sidebar:24 16% 98%;
+  --sidebar-border:22 13% 91%;
+  --accent:24 16% 94%;
+
+  /* Miami red. The one saturated colour, spent on the brand mark, the
+     active nav item and primary buttons -- nowhere else. */
+  --primary:354 72% 42%;
+  --primary-foreground:0 0% 100%;
+  --ring:354 72% 42%;
+
+  /* Semantic, and deliberately NOT the accent: "this needs you" must not
+     be the same colour as "this is a button". */
+  --success:142 64% 26%;   --success-bg:142 52% 94%;
+  --warning:32 84% 32%;    --warning-bg:38 92% 92%;
+  --info:221 78% 42%;      --info-bg:214 95% 94%;
+  --danger:0 68% 44%;      --danger-bg:0 86% 96%;
+
+  --radius:.65rem;
+}
+
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --background:20 14% 7%;
+    --foreground:24 12% 94%;
+    --card:20 12% 10%;
+    --muted:20 10% 15%;
+    --muted-foreground:22 9% 62%;
+    --border:20 10% 19%;
+    --input:20 10% 26%;
+    --sidebar:20 13% 9%;
+    --sidebar-border:20 10% 17%;
+    --accent:20 10% 17%;
+
+    --primary:354 68% 54%;
+    --primary-foreground:0 0% 100%;
+    --ring:354 68% 54%;
+
+    --success:142 55% 62%;   --success-bg:142 40% 14%;
+    --warning:38 82% 62%;    --warning-bg:34 55% 14%;
+    --info:214 88% 70%;      --info-bg:217 60% 15%;
+    --danger:0 78% 68%;      --danger-bg:0 50% 15%;
+  }
+}
+
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{
+  margin:0;
+  background:hsl(var(--background));
+  color:hsl(var(--foreground));
+  font:15px/1.55 ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",
+       system-ui,"Helvetica Neue",sans-serif;
+  -webkit-font-smoothing:antialiased;
+}
+a{color:hsl(var(--primary));text-underline-offset:2px}
+a:hover{text-decoration:underline}
+
+/* One visible focus treatment for the whole console. An operator working
+   a queue from the keyboard must always be able to see where they are. */
+:focus-visible{
+  outline:2px solid hsl(var(--ring));
+  outline-offset:2px;
+  border-radius:4px;
+}
+
+/* ---------------------------------------------------------------------
+   Shell: a fixed sidebar and a scrolling content column.
+
+   The tab strip this replaces put eight destinations in one horizontal
+   row with no grouping, so "where am I" and "what else is there" were
+   both answered by reading eight words of the same size. A column has
+   room to say which of them are queues and which are controls.
+   --------------------------------------------------------------------- */
+.shell{display:grid;grid-template-columns:248px minmax(0,1fr);min-height:100vh}
+
+.sidebar{
+  background:hsl(var(--sidebar));
+  border-right:1px solid hsl(var(--sidebar-border));
+  padding:1rem .75rem 1.5rem;
+  display:flex;flex-direction:column;gap:.25rem;
+  position:sticky;top:0;height:100vh;overflow-y:auto;
+}
+.brand{display:flex;align-items:center;gap:.55rem;padding:.35rem .5rem 1rem;
+  text-decoration:none;color:inherit}
+.brand:hover{text-decoration:none}
+.brand .mark{
+  width:1.85rem;height:1.85rem;border-radius:.5rem;flex:0 0 auto;
+  background:hsl(var(--primary));color:hsl(var(--primary-foreground));
+  display:grid;place-items:center;font-weight:700;font-size:.9rem;
+  letter-spacing:-.02em;
+}
+.brand .name{font-weight:600;letter-spacing:-.01em;line-height:1.15}
+.brand .role{display:block;font-weight:500;font-size:.72rem;
+  color:hsl(var(--muted-foreground));letter-spacing:.02em}
+
+.navgroup{margin-top:.85rem}
+.navgroup > .lbl{
+  padding:0 .5rem .35rem;font-size:.7rem;font-weight:600;
+  text-transform:uppercase;letter-spacing:.06em;
+  color:hsl(var(--muted-foreground));
+}
+.sidebar a.item{
+  display:flex;align-items:center;gap:.55rem;
+  padding:.45rem .5rem;border-radius:calc(var(--radius) - .2rem);
+  text-decoration:none;color:hsl(var(--foreground));
+  font-size:.9rem;font-weight:500;line-height:1.3;
+}
+.sidebar a.item:hover{background:hsl(var(--accent));text-decoration:none}
+.sidebar a.item.on{
+  background:hsl(var(--primary) / .1);
+  color:hsl(var(--primary));font-weight:600;
+}
+.sidebar a.item .ico{
+  flex:0 0 1rem;width:1rem;text-align:center;opacity:.75;font-size:.95rem;
+}
+.sidebar a.item.on .ico{opacity:1}
+.sidebar .badge{
+  margin-left:auto;min-width:1.35rem;padding:.05rem .35rem;
+  border-radius:999px;background:hsl(var(--danger) / .14);
+  color:hsl(var(--danger));font-size:.72rem;font-weight:700;
+  text-align:center;font-variant-numeric:tabular-nums;
+}
+.sidebar .foot{
+  margin-top:auto;padding:.85rem .5rem 0;
+  border-top:1px solid hsl(var(--sidebar-border));
+  font-size:.78rem;color:hsl(var(--muted-foreground));
+}
+.sidebar .foot .who{display:block;color:hsl(var(--foreground));
+  font-weight:500;word-break:break-all}
+
+main{padding:1.75rem 2rem 4rem;max-width:1180px;min-width:0}
+
+@media (max-width:900px){
+  .shell{grid-template-columns:minmax(0,1fr)}
+  .sidebar{
+    position:static;height:auto;flex-direction:row;flex-wrap:nowrap;
+    align-items:center;gap:.15rem;overflow-x:auto;padding:.5rem .75rem;
+    border-right:0;border-bottom:1px solid hsl(var(--sidebar-border));
+  }
+  .brand{padding:0 .75rem 0 .25rem}
+  .brand .role{display:none}
+  .navgroup{margin:0;display:contents}
+  .navgroup > .lbl{display:none}
+  .sidebar a.item{white-space:nowrap}
+  .sidebar .foot{display:none}
+  main{padding:1.25rem 1rem 3rem}
+}
+
+/* --- page heading ---------------------------------------------------- */
+h1{font-size:1.5rem;font-weight:600;letter-spacing:-.02em;margin:0 0 .35rem;
+  line-height:1.2;text-wrap:balance}
+h2{font-size:1.05rem;font-weight:600;letter-spacing:-.01em;
+  margin:2rem 0 .7rem;color:hsl(var(--foreground))}
+h3{font-size:.95rem;font-weight:600;margin:1.4rem 0 .5rem}
+p.lede{color:hsl(var(--muted-foreground));margin:0 0 1.5rem;max-width:68ch}
+p.sub{color:hsl(var(--muted-foreground));font-size:.88rem;
+  margin:-.35rem 0 .8rem;max-width:68ch}
+.hint{color:hsl(var(--muted-foreground));font-size:.86rem}
+small.dim,.dim{color:hsl(var(--muted-foreground))}
+
+/* --- service banner: the only question during an incident ------------- */
+.banner{border-radius:var(--radius);padding:1rem 1.15rem;margin:0 0 1.4rem;
+  border:1px solid hsl(var(--border))}
+.banner.down{background:hsl(var(--danger-bg));
+  border-color:hsl(var(--danger) / .45)}
+.banner.down b{color:hsl(var(--danger));display:block;font-size:1.05rem;
   margin-bottom:.2rem}
 
-/* stat cards -- the "what needs me now" row */
-.stats{display:grid;gap:.75rem;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));
-  margin-bottom:1.5rem}
-.stat{background:#fff;border:1px solid var(--line);border-left:4px solid var(--line);
-  border-radius:8px;padding:.9rem 1rem;text-decoration:none;color:inherit;display:block}
-.stat:hover{box-shadow:0 1px 6px rgba(0,0,0,.08)}
-.stat .n{font-size:1.9rem;font-weight:700;line-height:1.1}
-.stat .lbl{color:var(--muted);font-size:.85rem;margin-top:.15rem}
-.stat.needs{border-left-color:var(--warn)}
-.stat.needs .n{color:var(--warn)}
-.stat.calm{border-left-color:var(--done)}
-.stat.calm .n{color:var(--done)}
+/* --- stat tiles ------------------------------------------------------- */
+.stats{display:grid;gap:.75rem;margin-bottom:1.75rem;
+  grid-template-columns:repeat(auto-fit,minmax(180px,1fr))}
+.stat{
+  background:hsl(var(--card));border:1px solid hsl(var(--border));
+  border-radius:var(--radius);padding:1rem 1.1rem;
+  text-decoration:none;color:inherit;display:block;
+  transition:border-color .12s,background .12s;
+}
+.stat:hover{border-color:hsl(var(--foreground) / .22);text-decoration:none}
+/* Label first, number second. The number is the answer; the label is the
+   question, and a reader who meets the answer first has to look back up. */
+.stat .lbl{color:hsl(var(--muted-foreground));font-size:.78rem;
+  font-weight:500;text-transform:uppercase;letter-spacing:.05em;
+  margin-bottom:.3rem;order:1}
+.stat .n{font-size:1.85rem;font-weight:650;line-height:1.05;
+  letter-spacing:-.03em;font-variant-numeric:tabular-nums}
+.stat.needs .n{color:hsl(var(--danger))}
+.stat.needs{border-color:hsl(var(--danger) / .4);
+  background:hsl(var(--danger-bg) / .55)}
+.stat.calm .n{color:hsl(var(--foreground))}
 
-/* cards replace wide tables so this works on a phone too */
-.card{background:#fff;border:1px solid var(--line);border-radius:8px;
-  padding:.9rem 1rem;margin-bottom:.7rem}
-.card.attn{border-left:4px solid var(--warn)}
-.card .meta{color:var(--muted);font-size:.82rem;display:flex;gap:.6rem;
-  flex-wrap:wrap;align-items:center;margin-bottom:.45rem}
-.card .q{font-weight:600;margin:.3rem 0}
+/* --- cards ------------------------------------------------------------ */
+.card{
+  background:hsl(var(--card));border:1px solid hsl(var(--border));
+  border-radius:var(--radius);padding:1.1rem 1.2rem;margin-bottom:.75rem;
+}
+.card.attn{border-color:hsl(var(--danger) / .4)}
+.card > h2:first-child{margin-top:0}
+.card .meta{color:hsl(var(--muted-foreground));font-size:.8rem;
+  display:flex;gap:.55rem;flex-wrap:wrap;align-items:center;
+  margin-bottom:.5rem}
+.card .q{font-weight:600;margin:.3rem 0;letter-spacing:-.005em}
 .card .body{white-space:pre-wrap}
-.card dl{margin:.4rem 0 0;display:grid;grid-template-columns:auto 1fr;
-  gap:.15rem .6rem}
-.card dt{color:var(--muted);font-size:.82rem;text-transform:uppercase;
-  letter-spacing:.03em}
+.card dl{margin:.5rem 0 0;display:grid;grid-template-columns:auto 1fr;
+  gap:.3rem .8rem}
+.card dt{color:hsl(var(--muted-foreground));font-size:.76rem;
+  text-transform:uppercase;letter-spacing:.05em;font-weight:600;
+  padding-top:.1rem}
 .card dd{margin:0}
 
-/* status pills */
-.pill{display:inline-block;padding:.1rem .5rem;border-radius:999px;
-  font-size:.78rem;font-weight:600;white-space:nowrap}
-.pill.open{background:var(--open-bg);color:var(--open)}
-.pill.prog{background:var(--prog-bg);color:var(--prog)}
-.pill.done{background:var(--done-bg);color:var(--done)}
-.pill.warn,.good{display:block;padding:.7rem .9rem;border-radius:4px;margin:.6rem 0;font-weight:500;border-left:4px solid currentColor}.warn{background:var(--warn-bg);color:var(--warn)}
-.pill.flat{background:#f3f4f6;color:var(--muted)}
+/* --- status pills ----------------------------------------------------- */
+.pill{display:inline-block;padding:.12rem .55rem;border-radius:999px;
+  font-size:.76rem;font-weight:600;white-space:nowrap;
+  border:1px solid transparent}
+.pill.open{background:hsl(var(--warning-bg));color:hsl(var(--warning));
+  border-color:hsl(var(--warning) / .28)}
+.pill.prog{background:hsl(var(--info-bg));color:hsl(var(--info));
+  border-color:hsl(var(--info) / .28)}
+.pill.done{background:hsl(var(--success-bg));color:hsl(var(--success));
+  border-color:hsl(var(--success) / .28)}
+.pill.flat{background:hsl(var(--muted));color:hsl(var(--muted-foreground));
+  border-color:hsl(var(--border))}
 
-/* actions: explicit buttons, never a mystery "next state" toggle */
-.acts{display:flex;gap:.4rem;flex-wrap:wrap;margin-top:.7rem}
-.btn{display:inline-block;padding:.35rem .75rem;border-radius:6px;
-  text-decoration:none;font-size:.86rem;font-weight:600;border:1px solid var(--line);
-  background:#fff;color:var(--ink)}
-.btn:hover{background:#fafafa}
-.btn.primary{background:var(--miami);border-color:var(--miami);color:#fff}
-.btn.primary:hover{background:var(--miami-dark)}
-.btn.ghost{color:var(--muted)}
-table{border-collapse:collapse;width:100%;background:#fff;font-size:.9rem}
-th,td{border:1px solid var(--line);padding:.45rem .6rem;text-align:left;
-  vertical-align:top}
-th{background:#fafafa;font-size:.8rem;text-transform:uppercase;
-  letter-spacing:.03em;color:var(--muted)}
-.empty{background:#fff;border:1px dashed var(--line);border-radius:8px;
-  padding:2rem 1rem;text-align:center;color:var(--muted)}
-code{background:#f3f4f6;padding:.1rem .3rem;border-radius:3px;font-size:.85em}
-small.dim{color:var(--muted)}
-.note{background:#fff8e1;border:1px solid #e6d9a8;padding:.7rem 1rem;
-  border-radius:6px}
+/* --- notices ---------------------------------------------------------- */
+/* Padding and a rule down the left edge are what make somebody see one.
+   As one line of coloured text it read as ordinary copy. */
+.warn,.good{
+  display:block;padding:.75rem 1rem;border-radius:calc(var(--radius) - .2rem);
+  margin:.7rem 0;font-weight:500;border:1px solid transparent;
+  border-left:3px solid currentColor;
+}
+.warn{background:hsl(var(--danger-bg));color:hsl(var(--danger));
+  border-color:hsl(var(--danger) / .3);border-left-color:hsl(var(--danger))}
+.good{background:hsl(var(--success-bg));color:hsl(var(--success));
+  border-color:hsl(var(--success) / .3);border-left-color:hsl(var(--success))}
+.note{background:hsl(var(--warning-bg));border:1px solid hsl(var(--warning) / .3);
+  color:hsl(var(--foreground));padding:.8rem 1rem;
+  border-radius:calc(var(--radius) - .2rem)}
+.warnbox{border:1px solid hsl(var(--warning) / .35);
+  background:hsl(var(--warning-bg));border-radius:var(--radius);
+  padding:.9rem 1.1rem;margin:1rem 0}
+.warnbox h2{margin:.1rem 0 .45rem;font-size:1rem}
+.warnbox ul{margin:.3rem 0 .5rem;padding-left:1.2rem}
+
+/* --- buttons and links-as-buttons ------------------------------------- */
+.acts{display:flex;gap:.45rem;flex-wrap:wrap;margin-top:.8rem;
+  align-items:center}
+.btn{
+  display:inline-flex;align-items:center;justify-content:center;gap:.4rem;
+  height:2.2rem;padding:0 .85rem;border-radius:calc(var(--radius) - .2rem);
+  text-decoration:none;font-size:.86rem;font-weight:500;
+  border:1px solid hsl(var(--input));
+  background:hsl(var(--card));color:hsl(var(--foreground));
+  cursor:pointer;white-space:nowrap;
+}
+.btn:hover{background:hsl(var(--accent));text-decoration:none}
+.btn.primary{background:hsl(var(--primary));border-color:hsl(var(--primary));
+  color:hsl(var(--primary-foreground));font-weight:600}
+.btn.primary:hover{background:hsl(var(--primary) / .9)}
+.btn.ghost{border-color:transparent;background:transparent;
+  color:hsl(var(--muted-foreground))}
+.btn.ghost:hover{background:hsl(var(--accent));color:hsl(var(--foreground))}
+
+button{
+  height:2.2rem;padding:0 .95rem;font:inherit;font-size:.86rem;
+  font-weight:600;cursor:pointer;
+  background:hsl(var(--primary));color:hsl(var(--primary-foreground));
+  border:1px solid hsl(var(--primary));
+  border-radius:calc(var(--radius) - .2rem);
+}
+button:hover{background:hsl(var(--primary) / .9)}
+button[disabled]{opacity:.5;cursor:not-allowed}
+button.ghost{background:transparent;color:hsl(var(--muted-foreground));
+  border-color:hsl(var(--input));font-weight:500}
+button.ghost:hover{background:hsl(var(--accent));
+  color:hsl(var(--foreground))}
+button.danger{background:hsl(var(--danger));border-color:hsl(var(--danger));
+  color:#fff}
+
+/* --- forms ------------------------------------------------------------ */
+label{display:block;margin:.85rem 0 .3rem;font-weight:500;font-size:.86rem}
+input[type=text],input[type=email],input[type=password],input[type=date],
+input[type=search],input[type=number],textarea,select{
+  width:100%;height:2.2rem;padding:0 .6rem;
+  border:1px solid hsl(var(--input));
+  border-radius:calc(var(--radius) - .2rem);
+  font:inherit;font-size:.9rem;
+  background:hsl(var(--background));color:hsl(var(--foreground));
+}
+textarea{min-height:6rem;height:auto;padding:.5rem .6rem;line-height:1.5}
+input::placeholder,textarea::placeholder{color:hsl(var(--muted-foreground))}
+input:focus-visible,textarea:focus-visible,select:focus-visible{
+  outline:2px solid hsl(var(--ring) / .55);outline-offset:0;
+  border-color:hsl(var(--ring));
+}
+
+/* --- tables ----------------------------------------------------------- */
+table{border-collapse:collapse;width:100%;font-size:.88rem;
+  background:transparent}
+th,td{padding:.55rem .7rem;text-align:left;vertical-align:top;
+  border-bottom:1px solid hsl(var(--border))}
+th{font-size:.74rem;text-transform:uppercase;letter-spacing:.05em;
+  color:hsl(var(--muted-foreground));font-weight:600;
+  border-bottom:1px solid hsl(var(--border))}
+tbody tr:hover{background:hsl(var(--muted) / .6)}
+tbody tr:last-child td{border-bottom:0}
+td:has(> form){white-space:nowrap}
+.scroll-table{overflow-x:auto;-webkit-overflow-scrolling:touch;
+  margin:.5rem 0 1.25rem;border:1px solid hsl(var(--border));
+  border-radius:var(--radius);background:hsl(var(--card))}
+.scroll-table table{margin:0;width:auto;min-width:100%}
+.scroll-table th:first-child,.scroll-table td:first-child{padding-left:1rem}
+.scroll-table th:last-child,.scroll-table td:last-child{padding-right:1rem}
+
+.empty{background:hsl(var(--card));border:1px dashed hsl(var(--border));
+  border-radius:var(--radius);padding:2.5rem 1rem;text-align:center;
+  color:hsl(var(--muted-foreground))}
+
+code{background:hsl(var(--muted));padding:.1rem .35rem;border-radius:4px;
+  font-size:.85em;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+pre{white-space:pre-wrap;word-break:break-word;overflow-wrap:break-word;
+  background:hsl(var(--muted));color:hsl(var(--foreground));
+  padding:.7rem .85rem;border-radius:calc(var(--radius) - .2rem);
+  margin:.5rem 0;font-size:.85rem;max-width:100%;
+  border:1px solid hsl(var(--border))}
+
 form.inline{display:inline}
 /* A form that reveals only the fields the chosen task uses hides its
    wrappers with [hidden]; make that beat any display rule above. */
 [hidden]{display:none!important}
-.ok{color:var(--done);font-weight:600}
-.err{color:var(--warn);font-weight:600}
-/* the passages an answer was built from, on the conversation page */
-ul.sources{list-style:none;margin:.3rem 0 0;padding:0}
+.ok{color:hsl(var(--success));font-weight:600}
+.err{color:hsl(var(--danger));font-weight:600}
+
+/* --- conversation transcript ------------------------------------------ */
+ul.sources{list-style:none;margin:.35rem 0 0;padding:0}
 ul.sources li{display:flex;gap:.4rem;align-items:center;flex-wrap:wrap;
   padding:.25rem 0}
-pre{white-space:pre-wrap;word-break:break-word;overflow-wrap:break-word;
-  background:#f3f4f6;padding:.5rem .6rem;border-radius:6px;margin:.4rem 0;
-  font-size:.9rem;max-width:100%}
-.scroll-table{overflow-x:auto;-webkit-overflow-scrolling:touch;margin:.4rem 0 1rem}
-/* Rendered ETL diff. The report is markdown we generate, so it is shown as
-   markdown rather than as the raw text an editor would see. */
-.md{line-height:1.55}
-.md h2,.md h3,.md h4{margin:1.4rem 0 .5rem;line-height:1.25}
-.md h2{font-size:1.25rem}
-.md h3{font-size:1.05rem}
-.md h4{font-size:.95rem;color:#555}
-.md p{margin:.5rem 0}
-.md ul{margin:.4rem 0 .8rem;padding-left:1.25rem}
-.md li{margin:.15rem 0}
-.md blockquote{margin:.7rem 0;padding:.55rem .9rem;border-left:3px solid #bfc7d6;
-  background:#f5f7fa;border-radius:0 3px 3px 0;color:#3d4557}
-.md code{background:#eef1f6;padding:.08rem .3rem;border-radius:2px;
-  font-size:.85em;word-break:break-all}
-.md a{word-break:break-all}
-.md .scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;margin:.5rem 0 1rem;
-  border:1px solid #dfe3ea;border-radius:3px}
-.md .scroll table{margin:0;width:auto;min-width:100%}
-.warnbox{border:1px solid #e0c088;background:#fdf6e8;border-radius:3px;
-  padding:.8rem 1rem;margin:1rem 0}
-.warnbox h2{margin:.1rem 0 .4rem;font-size:1.05rem}
-.warnbox ul{margin:.3rem 0 .5rem;padding-left:1.2rem}
-.hint{color:#5b6272;font-size:.88rem}
-.scroll-table table{margin:0;width:auto;min-width:100%}
-.msg{background:#fff;border:1px solid var(--line);border-radius:8px;
-  padding:.85rem 1rem;margin:.7rem 0}
+.msg{background:hsl(var(--card));border:1px solid hsl(var(--border));
+  border-radius:var(--radius);padding:.9rem 1.05rem;margin:.7rem 0}
 .msg-hd{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;
-  margin-bottom:.35rem}
-.msg .role{font-weight:600;color:var(--miami)}
-.msg .time{color:var(--muted);font-size:.82rem}
-.tag{display:inline-block;padding:.1rem .45rem;border-radius:999px;
-  font-size:.75rem;background:#f3f4f6;color:var(--ink);border:1px solid transparent}
-.tag.down{background:var(--warn-bg);color:var(--warn)}
-.tag.up{background:var(--done-bg);color:var(--done)}
-.tag.refuse{background:var(--open-bg);color:var(--open)}
-.tag.done{background:var(--done-bg);color:var(--done)}
-.tag.rated{background:var(--prog-bg);color:var(--prog)}
-.tag.flagged{background:var(--warn-bg);color:var(--warn)}
-.tag.low-conf{background:var(--open-bg);color:var(--open)}
-.tag.all{background:#f3f4f6;color:var(--muted)}
+  margin-bottom:.4rem}
+.msg .role{font-weight:600;color:hsl(var(--primary));font-size:.86rem}
+.msg .time{color:hsl(var(--muted-foreground));font-size:.8rem;
+  font-variant-numeric:tabular-nums}
+
+/* --- chips ------------------------------------------------------------ */
+.tag{display:inline-block;padding:.12rem .5rem;border-radius:999px;
+  font-size:.75rem;font-weight:500;
+  background:hsl(var(--muted));color:hsl(var(--foreground));
+  border:1px solid transparent;text-decoration:none}
+a.tag:hover{text-decoration:none;border-color:hsl(var(--input))}
+.tag.down,.tag.flagged{background:hsl(var(--danger-bg));
+  color:hsl(var(--danger))}
+.tag.up,.tag.done{background:hsl(var(--success-bg));
+  color:hsl(var(--success))}
+.tag.refuse,.tag.low-conf{background:hsl(var(--warning-bg));
+  color:hsl(var(--warning))}
+.tag.rated{background:hsl(var(--info-bg));color:hsl(var(--info))}
+.tag.all,.tag.dim{background:hsl(var(--muted));
+  color:hsl(var(--muted-foreground))}
 /* What the classifier decided this question was. Deliberately a different
-   shape from the problem chips beside it -- square-ish, monospace, no
-   colour of its own -- because "the bot read this as room_booking" is a
-   FACT about the turn, not something wrong with it. Reading it as a
-   warning is exactly the confusion to avoid. */
-.tag.intent{background:#eef1f6;color:#33415c;border-radius:4px;
-  font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.72rem;
-  letter-spacing:0}
-.filter-bar{display:flex;gap:.4rem;flex-wrap:wrap;margin:.6rem 0 1rem}
-.filter-bar a.tag{padding:.25rem .7rem;text-decoration:none;border-color:var(--line)}
-.filter-bar a.tag:hover{filter:brightness(.95);border-color:var(--muted)}
-.filter-bar a.tag.active{box-shadow:0 0 0 2px var(--miami);font-weight:600;border-color:var(--miami)}
-label{display:block;margin:.8rem 0 .25rem;font-weight:600}
-input[type=text],input[type=email],textarea,select{width:100%;padding:.5rem;
-  border:1px solid #bbb;border-radius:6px;font:inherit;background:#fff}
-textarea{min-height:6rem}
-button{padding:.5rem 1.1rem;font:inherit;font-weight:600;cursor:pointer;
-  background:var(--miami);color:#fff;border:0;border-radius:6px}
+   shape from the problem chips beside it -- square, monospace, no colour
+   of its own -- because "the bot read this as room_booking" is a FACT
+   about the turn, not something wrong with it. Reading it as a warning is
+   exactly the confusion to avoid. */
+.tag.intent{background:hsl(var(--muted));color:hsl(var(--muted-foreground));
+  border-radius:4px;border-color:hsl(var(--border));
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+  font-size:.72rem;letter-spacing:0}
+.filter-bar{display:flex;gap:.4rem;flex-wrap:wrap;margin:.7rem 0 1.25rem}
+.filter-bar a.tag{padding:.3rem .75rem;border-color:hsl(var(--border))}
+.filter-bar a.tag:hover{background:hsl(var(--accent))}
+.filter-bar a.tag.active{background:hsl(var(--primary) / .1);
+  color:hsl(var(--primary));border-color:hsl(var(--primary) / .45);
+  font-weight:600}
+.pager{display:flex;align-items:center;gap:.3rem;flex-wrap:wrap;
+  font-size:.85rem}
+
+/* --- rendered ETL diff ------------------------------------------------ */
+/* The report is markdown we generate, so it is shown as markdown rather
+   than as the raw text an editor would see. */
+.md{line-height:1.6}
+.md h2,.md h3,.md h4{margin:1.5rem 0 .55rem;line-height:1.25}
+.md h2{font-size:1.15rem}
+.md h3{font-size:1rem}
+.md h4{font-size:.92rem;color:hsl(var(--muted-foreground))}
+.md p{margin:.55rem 0}
+.md ul{margin:.45rem 0 .85rem;padding-left:1.25rem}
+.md li{margin:.18rem 0}
+.md blockquote{margin:.8rem 0;padding:.6rem 1rem;
+  border-left:3px solid hsl(var(--border));
+  background:hsl(var(--muted) / .7);
+  border-radius:0 calc(var(--radius) - .3rem) calc(var(--radius) - .3rem) 0;
+  color:hsl(var(--foreground))}
+.md code{background:hsl(var(--muted));padding:.08rem .32rem;border-radius:4px}
+.md .scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;
+  margin:.6rem 0 1.1rem;border:1px solid hsl(var(--border));
+  border-radius:var(--radius)}
+.md .scroll table{margin:0;width:auto;min-width:100%}
+.joblog{max-height:22rem;overflow:auto}
+
+@media (prefers-reduced-motion:reduce){
+  *{transition:none!important;animation:none!important}
+}
 """
 
-# Every operator surface, in the order an operator works them: things
-# that need action first, reference material last.
+# --- icons ----------------------------------------------------------------
 #
-# /admin/service is last but is NOT reference -- it is the stop button.
-# It shipped with no way to reach it from the UI, so the only way to take
-# the bot out of service was to already know the URL. Added 2026-08-08.
-NAV = (
-    ("/admin/", "Dashboard", None),
-    # Conversations sits second because "what did people ask today" is the
-    # question asked most often, and until 2026-08-21 the only way to answer
-    # it was Flagged -> the `all` preset -> scroll and read timestamps.
-    #
-    # Flagged had its own entry here until 2026-08-27. It is the same page
-    # now -- Conversations grew the date range, the flag presets, the
-    # patron's rating and the classified intent -- so a second link would
-    # send two names to one destination and invite the reader to hunt for a
-    # difference that no longer exists. /admin/review still redirects, for
-    # the bookmarks.
-    ("/admin/conversations", "Conversations", None),
-    ("/admin/tickets/view", "Tickets", "tickets"),
-    ("/admin/corrections/view", "Corrections", None),
-    ("/admin/cost", "Cost", None),
-    # Corpus review sits beside Service because both are gates a colleague
-    # walks up to and operates, rather than reference they read.
-    ("/admin/etl", "Corpus review", None),
-    ("/admin/service", "Service", None),
+# Inline SVG, not an icon font and not emoji. A font is a network request
+# the console does not otherwise need, and emoji render as somebody else's
+# artwork at a size we do not control -- on one machine a flat glyph, on
+# the next a full-colour cartoon three sizes too big. These are lucide
+# paths, stroked in currentColor so they follow the nav item they sit in.
+_ICONS = {
+    "overview": '<rect width="7" height="9" x="3" y="3" rx="1"/>'
+                '<rect width="7" height="5" x="14" y="3" rx="1"/>'
+                '<rect width="7" height="9" x="14" y="12" rx="1"/>'
+                '<rect width="7" height="5" x="3" y="16" rx="1"/>',
+    "chat": '<path d="M14 9a2 2 0 0 1-2 2H6l-4 4V4a2 2 0 0 1 2-2h8a2 2 0 0 '
+            '1 2 2z"/><path d="M18 9h2a2 2 0 0 1 2 2v11l-4-4h-6a2 2 0 0 1-2'
+            '-2v-1"/>',
+    "inbox": '<polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/>'
+             '<path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l'
+             '-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>',
+    "wrench": '<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3'
+              '.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l'
+              '6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>',
+    "database": '<ellipse cx="12" cy="5" rx="9" ry="3"/>'
+                '<path d="M3 5V19A9 3 0 0 0 21 19V5"/>'
+                '<path d="M3 12A9 3 0 0 0 21 12"/>',
+    "money": '<circle cx="12" cy="12" r="10"/><path d="M16 8h-6a2 2 0 1 0 0 '
+             '4h4a2 2 0 1 1 0 4H8"/><path d="M12 18V6"/>',
+    "power": '<path d="M12 2v10"/><path d="M18.4 6.6a9 9 0 1 1-12.77.04"/>',
+    "log": '<path d="M15 12h-5"/><path d="M15 8h-5"/>'
+           '<path d="M19 17V5a2 2 0 0 0-2-2H4"/>'
+           '<path d="M8 21h12a2 2 0 0 0 2-2v-1a1 1 0 0 0-1-1H11a1 1 0 0 0-1 '
+           '1v1a2 2 0 1 1-4 0V5a2 2 0 1 0-4 0v2a1 1 0 0 0 1 1h3"/>',
+    "flag": '<path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-'
+            '4 1z"/><line x1="4" x2="4" y1="22" y2="15"/>',
+}
+
+
+def icon(name: str) -> str:
+    d = _ICONS.get(name)
+    if not d:
+        return "<span class='ico'></span>"
+    return (
+        "<svg class='ico' viewBox='0 0 24 24' width='16' height='16' "
+        "fill='none' stroke='currentColor' stroke-width='2' "
+        "stroke-linecap='round' stroke-linejoin='round' aria-hidden='true' "
+        f"focusable='false'>{d}</svg>"
+    )
+
+
+# --- what is in the sidebar, for whom --------------------------------------
+#
+# Grouped, because the flat strip this replaces put eight destinations in
+# one row of identical words: "where am I" and "what else is there" were
+# both answered by reading all eight. The groups are named for the JOB --
+# working a queue, running the bot, watching the money -- which is the
+# distinction an operator actually navigates by.
+#
+# /admin/service is under "Run the bot" and is NOT reference: it is the
+# stop button. It shipped with no link anywhere in the UI, so taking the
+# bot out of service meant knowing the URL by heart.
+#
+# Each group carries the role it belongs to. A librarian gets the two
+# groups that are their job and never sees the spend ladder or the kill
+# switch -- not because they are untrusted, but because a console that
+# shows you six controls you must not touch is a console you stop reading.
+NAV_GROUPS = (
+    (ROLE_LIBRARIAN, "", (
+        ("/librarian/", "Overview", None, "overview"),
+    )),
+    (ROLE_LIBRARIAN, "What people asked", (
+        ("/librarian/conversations", "Real questions", None, "chat"),
+    )),
+    (ROLE_LIBRARIAN, "When it is wrong", (
+        ("/librarian/ticket", "Report an answer", None, "flag"),
+    )),
+    (ROLE_OPERATOR, "", (
+        ("/admin/", "Overview", None, "overview"),
+    )),
+    (ROLE_OPERATOR, "Queues", (
+        # Conversations sits first because "what did people ask today" is
+        # the question asked most often, and until 2026-08-21 the only way
+        # to answer it was Flagged -> the `all` preset -> scroll and read
+        # timestamps.
+        #
+        # Flagged had its own entry here until 2026-08-27. It is the same
+        # page now -- Conversations grew the date range, the flag presets,
+        # the patron's rating and the classified intent -- so a second link
+        # would send two names to one destination and invite the reader to
+        # hunt for a difference that no longer exists. /admin/review still
+        # redirects, for the bookmarks.
+        ("/admin/conversations", "Conversations", None, "chat"),
+        ("/admin/tickets/view", "Tickets", "tickets", "inbox"),
+        ("/admin/corrections/view", "Corrections", None, "wrench"),
+    )),
+    (ROLE_OPERATOR, "Run the bot", (
+        ("/admin/etl", "Corpus review", None, "database"),
+        ("/admin/service", "Service", None, "power"),
+        ("/admin/audit", "Audit log", None, "log"),
+    )),
+    (ROLE_OPERATOR, "Money", (
+        ("/admin/cost", "Cost", None, "money"),
+    )),
 )
 
+# Kept for anything that still asks for the flat list.
+NAV = tuple(
+    (path, label, count_key)
+    for role, _lbl, items in NAV_GROUPS if role == ROLE_OPERATOR
+    for path, label, count_key, _ico in items
+)
 
-def nav(current: str, key: str = "", counts: Optional[dict] = None) -> str:
-    """Render the tab bar. `current` is the path prefix to highlight;
-    `counts` optionally puts a badge on the queues that need work."""
+_HOME = {ROLE_OPERATOR: "/admin/", ROLE_LIBRARIAN: "/librarian/"}
+
+
+def nav(current: str, key: str = "", counts: Optional[dict] = None,
+        role: str = ROLE_OPERATOR) -> str:
+    """The sidebar. `current` is the path to mark as where you are;
+    `counts` puts a badge on the queues that have work waiting."""
     kq = f"?key={e(key)}" if key else ""
     out = []
-    for path, label, count_key in NAV:
-        on = " class='on'" if current == path else ""
-        badge = ""
-        if counts and count_key and counts.get(count_key):
-            badge = f"<span class='badge'>{e(counts[count_key])}</span>"
-        out.append(f"<a href='{e(path)}{kq}'{on}>{e(label)}{badge}</a>")
-    return f"<nav class='tabs'>{''.join(out)}</nav>"
+    for grp_role, label, items in NAV_GROUPS:
+        if grp_role != role:
+            continue
+        rows = []
+        for path, text, count_key, ico in items:
+            on = " on" if current == path else ""
+            badge = ""
+            if counts and count_key and counts.get(count_key):
+                badge = f"<span class='badge'>{e(counts[count_key])}</span>"
+            aria = " aria-current='page'" if on else ""
+            rows.append(f"<a class='item{on}' href='{e(path)}{kq}'{aria}>"
+                        f"{icon(ico)}<span>{e(text)}</span>{badge}</a>")
+        head = f"<div class='lbl'>{e(label)}</div>" if label else ""
+        out.append(f"<div class='navgroup'>{head}{''.join(rows)}</div>")
+    return "".join(out)
+
+
+def _brand(key: str, role: str) -> str:
+    href = _HOME.get(role, "/admin/") + (f"?key={e(key)}" if key else "")
+    which = "Librarian console" if role == ROLE_LIBRARIAN else "Operator console"
+    return (f"<a class='brand' href='{href}'>"
+            f"<span class='mark' aria-hidden='true'>SC</span>"
+            f"<span class='name'>Smart Chatbot"
+            f"<span class='role'>{e(which)}</span></span></a>")
+
+
+def _signature(who) -> str:
+    """Who the console thinks you are, at the foot of the sidebar.
+
+    Worth the space: the passphrase on dangerous actions is dropped for a
+    signed-in caller and kept for one holding the shared key, so "which am
+    I right now" stops being a thing you deduce from whether a password box
+    appeared.
+    """
+    if who is None:
+        return ""
+    if getattr(who, "authenticated", False):
+        return (f"<div class='foot'>Signed in as"
+                f"<span class='who'>{e(who.uid)}</span>"
+                f"<a href='/admin/sso/logout'>Sign out</a></div>")
+    return ("<div class='foot'>Signed in with the"
+            "<span class='who'>shared key</span>"
+            "Dangerous actions still ask for the passphrase.</div>")
 
 
 def page(title: str, body: str, *, current: str = "", key: str = "",
-         counts: Optional[dict] = None, refresh_s: int = 0) -> str:
+         counts: Optional[dict] = None, refresh_s: int = 0,
+         role: str = "", who=None) -> str:
     """The shell every admin surface renders into.
 
     `refresh_s` makes the page reload itself while something is running.
@@ -263,7 +648,12 @@ def page(title: str, body: str, *, current: str = "", key: str = "",
     reader watched the console replace itself with a bare
     `{"detail":"Method Not Allowed"}` on an unstyled page. Reported
     2026-08-29. Point the refresh at the surface's own GET view instead.
+
+    `who` is the Caller from the guard. It picks which sidebar to draw and
+    signs the foot of it; passing nothing draws the operator console,
+    which is what every caller got before there were two.
     """
+    role = role or (getattr(who, "role", "") or ROLE_OPERATOR)
     meta_refresh = ""
     if refresh_s:
         where = f"{current}?key={e(key)}" if (current and key) else current
@@ -272,14 +662,18 @@ def page(title: str, body: str, *, current: str = "", key: str = "",
     return (
         "<!doctype html><html lang='en'><head><meta charset='utf-8'>"
         "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+        "<meta name='color-scheme' content='light dark'>"
         f"{meta_refresh}"
         f"<title>{e(title)} — Smart Chatbot admin</title>"
         f"<style>{STYLE}</style></head><body>"
-        "<header class='top'><div class='wrap'>"
-        "<b>Smart Chatbot</b><span style='opacity:.85'>operator console</span>"
-        "</div></header>"
-        f"{nav(current, key, counts)}"
-        f"<main>{body}</main></body></html>"
+        "<div class='shell'>"
+        "<aside class='sidebar'>"
+        f"{_brand(key, role)}"
+        f"{nav(current, key, counts, role)}"
+        f"{_signature(who)}"
+        "</aside>"
+        f"<main>{body}</main>"
+        "</div></body></html>"
     )
 
 
@@ -324,8 +718,8 @@ def empty(msg: str) -> str:
     return f"<div class='empty'>{e(msg)}</div>"
 
 
-__all__ = ["NAV", "STYLE", "action", "e", "empty", "nav", "page", "pill",
-           "stat_card"]
+__all__ = ["NAV", "NAV_GROUPS", "STYLE", "action", "e", "empty", "icon",
+           "nav", "page", "pill", "stat_card"]
 
 
 def pager(base: str, *, page: int, per: int, total: int,
