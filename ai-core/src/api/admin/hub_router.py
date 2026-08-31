@@ -211,7 +211,8 @@ def _live() -> dict:
     return presence.snapshot()
 
 
-def render_librarian_hub(code: str, caller=None) -> str:
+def render_librarian_hub(code: str, caller=None,
+                         marked: bool = False) -> str:
     """Staff hub. Deliberately has NO operator nav or counts.
 
     Changed 2026-08-08. The "Ask Us" card came out: it linked staff to
@@ -253,6 +254,25 @@ def render_librarian_hub(code: str, caller=None) -> str:
     # The testing link. Kept separate from the report card because it is a
     # different job: reporting is about one bad answer, this is about
     # keeping the usage numbers honest.
+    # Whether the marking is ON, said on the page.
+    #
+    # There was no way to find out. The link set a cookie and dropped you
+    # on the chat, so "did that work?" could only be answered by holding a
+    # conversation and going to look for it in the console -- and a
+    # conversation you never typed into does not appear there, which reads
+    # exactly like a broken link. Reported 2026-08-31.
+    if marked:
+        state = ("<p class='good'>This browser is marked as staff testing. "
+                 "Questions you ask are recorded as testing, not as a "
+                 "student's.</p>")
+        buttons = ui.action('/librarian/staff-test/off', 'Stop marking me')
+    else:
+        state = ("<p class='hint'>This browser is <b>not</b> marked. "
+                 "Anything you ask right now counts the same way a "
+                 "student's question does.</p>")
+        buttons = ui.action('/librarian/staff-test', 'Open in test mode',
+                            primary=True)
+
     testing = (
         "<h2>Trying the chatbot rather than using it?</h2>"
         "<p class='sub'>Start from this link and we can tell your testing "
@@ -262,10 +282,8 @@ def render_librarian_hub(code: str, caller=None) -> str:
         "</div><div><small class='dim'>The marking lasts until you close "
         "your browser. Without it, your testing counts as patron use and "
         "makes the bot look busier than it is.</small></div>"
-        f"<div class='acts'>"
-        f"{ui.action('/librarian/staff-test', 'Open in test mode', primary=True)}"
-        f"{ui.action('/librarian/staff-test/off', 'Stop marking me', ghost=True)}"
-        "</div></div>"
+        f"{state}"
+        f"<div class='acts'>{buttons}</div></div>"
     )
     # Only for somebody Miami has signed in AND who is on the librarian
     # list. The form below is reachable with a shareable code by any member
@@ -336,6 +354,10 @@ def build_hub_router(deps: dict):
                 detail="Missing or wrong access code. Ask the library web "
                        "services team for the staff-hub link.",
             )
-        return HTMLResponse(render_librarian_hub(supplied, caller))
+        from src.api.staff_test import STAFF, origin_from_cookie_header
+
+        marked = origin_from_cookie_header(
+            request.headers.get("cookie")) == STAFF
+        return HTMLResponse(render_librarian_hub(supplied, caller, marked))
 
     return router

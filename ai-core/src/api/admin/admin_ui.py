@@ -69,6 +69,11 @@ STYLE = """
   --primary:354 72% 42%;
   --primary-foreground:0 0% 100%;
   --ring:354 72% 42%;
+  /* The red WHEN IT IS TEXT rather than a fill. One token was doing both
+     jobs and the two want opposite things: white sitting on the red wants
+     it dark, the red sitting on the page wants it light. On white they
+     happen to agree, so this is the same value here and splits in dark. */
+  --primary-ink:354 72% 42%;
 
   /* Semantic, and deliberately NOT the accent: "this needs you" must not
      be the same colour as "this is a button". */
@@ -80,6 +85,11 @@ STYLE = """
   --radius:.65rem;
 }
 
+/* THE DARK PALETTE, WRITTEN ONCE.
+   Three states, not two: an explicit choice stamps data-theme on the
+   root, and the default "follow my system" setting stamps nothing. A
+   media query alone cannot serve a reader who has chosen dark on a
+   light machine, which is exactly what the toggle does. */
 @media (prefers-color-scheme: dark){
   :root:not([data-theme="light"]){
     --background:20 14% 7%;
@@ -92,16 +102,39 @@ STYLE = """
     --sidebar:20 13% 9%;
     --sidebar-border:20 10% 17%;
     --accent:20 10% 17%;
-
-    --primary:354 68% 54%;
+    
+    --primary:354 58% 40%;
     --primary-foreground:0 0% 100%;
-    --ring:354 68% 54%;
-
+    --ring:354 45% 58%;
+    --primary-ink:354 42% 66%;
+    
     --success:142 55% 62%;   --success-bg:142 40% 14%;
     --warning:38 82% 62%;    --warning-bg:34 55% 14%;
     --info:214 88% 70%;      --info-bg:217 60% 15%;
     --danger:0 78% 68%;      --danger-bg:0 50% 15%;
   }
+}
+:root[data-theme="dark"]{
+  --background:20 14% 7%;
+  --foreground:24 12% 94%;
+  --card:20 12% 10%;
+  --muted:20 10% 15%;
+  --muted-foreground:22 9% 62%;
+  --border:20 10% 19%;
+  --input:20 10% 26%;
+  --sidebar:20 13% 9%;
+  --sidebar-border:20 10% 17%;
+  --accent:20 10% 17%;
+  
+  --primary:354 58% 40%;
+  --primary-foreground:0 0% 100%;
+  --ring:354 45% 58%;
+  --primary-ink:354 42% 66%;
+  
+  --success:142 55% 62%;   --success-bg:142 40% 14%;
+  --warning:38 82% 62%;    --warning-bg:34 55% 14%;
+  --info:214 88% 70%;      --info-bg:217 60% 15%;
+  --danger:0 78% 68%;      --danger-bg:0 50% 15%;
 }
 
 *{box-sizing:border-box}
@@ -114,7 +147,7 @@ body{
        system-ui,"Helvetica Neue",sans-serif;
   -webkit-font-smoothing:antialiased;
 }
-a{color:hsl(var(--primary));text-underline-offset:2px}
+a{color:hsl(var(--primary-ink));text-underline-offset:2px}
 a:hover{text-decoration:underline}
 
 /* One visible focus treatment for the whole console. An operator working
@@ -170,7 +203,7 @@ a:hover{text-decoration:underline}
 .sidebar a.item:hover{background:hsl(var(--accent));text-decoration:none}
 .sidebar a.item.on{
   background:hsl(var(--primary) / .1);
-  color:hsl(var(--primary));font-weight:600;
+  color:hsl(var(--primary-ink));font-weight:600;
 }
 .sidebar a.item .ico{
   flex:0 0 1rem;width:1rem;text-align:center;opacity:.75;font-size:.95rem;
@@ -182,6 +215,30 @@ a:hover{text-decoration:underline}
   color:hsl(var(--danger));font-size:.72rem;font-weight:700;
   text-align:center;font-variant-numeric:tabular-nums;
 }
+/* Light / dark. Two icons, one shown at a time -- and the one shown is the
+   state you are IN, not the one the button would take you to. "Which does
+   this button mean?" is the entire confusion with these. */
+.themetoggle{
+  display:flex;align-items:center;gap:.55rem;width:100%;
+  margin-top:.6rem;padding:.45rem .5rem;height:auto;
+  border:1px solid transparent;border-radius:calc(var(--radius) - .2rem);
+  background:transparent;color:hsl(var(--muted-foreground));
+  font:inherit;font-size:.85rem;font-weight:500;cursor:pointer;
+}
+.themetoggle:hover{background:hsl(var(--accent));
+  color:hsl(var(--foreground))}
+.themetoggle .ico{flex:0 0 1rem;opacity:.8}
+.themetoggle .moon{display:none}
+:root[data-theme="dark"] .themetoggle .sun{display:none}
+:root[data-theme="dark"] .themetoggle .moon{display:inline}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]) .themetoggle .sun{display:none}
+  :root:not([data-theme="light"]) .themetoggle .moon{display:inline}
+}
+.topbar .themetoggle{width:auto;margin:0 0 0 auto}
+/* No script, no button. It would be a control that does nothing. */
+.themetoggle[hidden]{display:none}
+
 .sidebar .foot{
   margin-top:auto;padding:.85rem .5rem 0;
   border-top:1px solid hsl(var(--sidebar-border));
@@ -215,6 +272,8 @@ body.plain main{max-width:820px;margin:0 auto}
   .navgroup > .lbl{display:none}
   .sidebar a.item{white-space:nowrap}
   .sidebar .foot{display:none}
+  .themetoggle{width:auto;margin:0 0 0 auto}
+  .themetoggle span{display:none}
   main{padding:1.25rem 1rem 3rem}
 }
 
@@ -410,7 +469,7 @@ ul.sources li{display:flex;gap:.4rem;align-items:center;flex-wrap:wrap;
   border-radius:var(--radius);padding:.9rem 1.05rem;margin:.7rem 0}
 .msg-hd{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;
   margin-bottom:.4rem}
-.msg .role{font-weight:600;color:hsl(var(--primary));font-size:.86rem}
+.msg .role{font-weight:600;color:hsl(var(--primary-ink));font-size:.86rem}
 .msg .time{color:hsl(var(--muted-foreground));font-size:.8rem;
   font-variant-numeric:tabular-nums}
 
@@ -442,7 +501,7 @@ a.tag:hover{text-decoration:none;border-color:hsl(var(--input))}
 .filter-bar a.tag{padding:.3rem .75rem;border-color:hsl(var(--border))}
 .filter-bar a.tag:hover{background:hsl(var(--accent))}
 .filter-bar a.tag.active{background:hsl(var(--primary) / .1);
-  color:hsl(var(--primary));border-color:hsl(var(--primary) / .45);
+  color:hsl(var(--primary-ink));border-color:hsl(var(--primary) / .45);
   font-weight:600}
 .pager{display:flex;align-items:center;gap:.3rem;flex-wrap:wrap;
   font-size:.85rem}
@@ -506,6 +565,12 @@ _ICONS = {
            '<path d="M19 17V5a2 2 0 0 0-2-2H4"/>'
            '<path d="M8 21h12a2 2 0 0 0 2-2v-1a1 1 0 0 0-1-1H11a1 1 0 0 0-1 '
            '1v1a2 2 0 1 1-4 0V5a2 2 0 1 0-4 0v2a1 1 0 0 0 1 1h3"/>',
+    "sun": '<circle cx="12" cy="12" r="4"/><path d="M12 2v2"/>'
+           '<path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/>'
+           '<path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/>'
+           '<path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/>'
+           '<path d="m19.07 4.93-1.41 1.41"/>',
+    "moon": '<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>',
     "flag": '<path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-'
             '4 1z"/><line x1="4" x2="4" y1="22" y2="15"/>',
 }
@@ -639,9 +704,52 @@ def _signature(who) -> str:
             "Dangerous actions still ask for the passphrase.</div>")
 
 
+# The theme choice, applied BEFORE anything paints.
+#
+# In <head> and inline, because the alternative is the page rendering in
+# the system theme and then flipping -- a flash on every navigation, on
+# every page, for the reader who chose the other one. Wrapped in try:
+# localStorage throws outright in some privacy modes, and a console that
+# will not render because a colour preference could not be read is a
+# worse console than one that ignores the preference.
+_THEME_BOOT = (
+    "<script>(function(){try{var t=localStorage.getItem('mu-admin-theme');"
+    "if(t==='dark'||t==='light')"
+    "document.documentElement.setAttribute('data-theme',t);}"
+    "catch(e){}})();</script>"
+)
+
+# The button is rendered hidden and unhidden by its own script, so a
+# browser with JavaScript off never shows a control that cannot work. It
+# still follows the system theme there, which is what it did before.
+_THEME_TOGGLE = (
+    "<button type='button' class='themetoggle' id='theme-toggle' hidden"
+    " aria-live='polite'>"
+    + icon("sun").replace("class='ico'", "class='ico sun'")
+    + icon("moon").replace("class='ico'", "class='ico moon'")
+    + "<span class='lbl'></span></button>"
+    "<script>(function(){var b=document.getElementById('theme-toggle');"
+    "if(!b)return;b.hidden=false;"
+    "function cur(){var a=document.documentElement.getAttribute('data-theme');"
+    "if(a==='dark'||a==='light')return a;"
+    "return window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)')"
+    ".matches?'dark':'light';}"
+    "function paint(){var c=cur();"
+    "b.querySelector('.lbl').textContent=(c==='dark'?'Dark':'Light');"
+    # The label says which theme you are IN; the accessible name says what
+    # the button DOES -- a screen reader user gets no icon to read.
+    "b.setAttribute('aria-label','Switch to '+(c==='dark'?'light':'dark')+' mode');}"
+    "b.addEventListener('click',function(){var n=cur()==='dark'?'light':'dark';"
+    "document.documentElement.setAttribute('data-theme',n);"
+    "try{localStorage.setItem('mu-admin-theme',n);}catch(e){}paint();});"
+    "paint();})();</script>"
+)
+
+
 def page(title: str, body: str, *, current: str = "", key: str = "",
          counts: Optional[dict] = None, refresh_s: int = 0,
-         role: str = "", who=None, chrome: bool = True) -> str:
+         role: str = "", who=None, chrome: bool = True,
+         refresh_to: str = "") -> str:
     """The shell every admin surface renders into.
 
     `refresh_s` makes the page reload itself while something is running.
@@ -671,21 +779,33 @@ def page(title: str, body: str, *, current: str = "", key: str = "",
     role = role or (getattr(who, "role", "") or ROLE_OPERATOR)
     meta_refresh = ""
     if refresh_s:
-        where = f"{current}?key={e(key)}" if (current and key) else current
+        # An explicit destination wins: a page that exists to hand the
+        # reader on somewhere else is not reloading itself.
+        where = refresh_to or (
+            f"{current}?key={e(key)}" if (current and key) else current)
         content = f"{int(refresh_s)}; url={where}" if where else str(int(refresh_s))
         meta_refresh = f"<meta http-equiv='refresh' content='{content}'>"
+
+    # Staff-facing pages are NOT "admin". The report form and the test-mode
+    # link reach any member of library staff who has the link, and a browser
+    # tab reading "Smart Chatbot admin" tells them they are somewhere they
+    # are not -- which is how a link gets forwarded with an apology on it.
+    title_tag = (f"<title>{e(title)} — Smart Chatbot admin</title>" if chrome
+                 else f"<title>{e(title)} — Miami University Libraries</title>")
     return (
         "<!doctype html><html lang='en'><head><meta charset='utf-8'>"
         "<meta name='viewport' content='width=device-width,initial-scale=1'>"
         "<meta name='color-scheme' content='light dark'>"
+        f"{_THEME_BOOT}"
         f"{meta_refresh}"
-        f"<title>{e(title)} — Smart Chatbot admin</title>"
+        f"{title_tag}"
         f"<style>{STYLE}</style></head>"
         + ("<body>"
            "<div class='shell'>"
            "<aside class='sidebar'>"
            f"{_brand(key, role)}"
            f"{nav(current, key, counts, role)}"
+           f"{_THEME_TOGGLE}"
            f"{_signature(who)}"
            "</aside>"
            f"<main>{body}</main>"
@@ -696,6 +816,7 @@ def page(title: str, body: str, *, current: str = "", key: str = "",
            "<span class='mark' aria-hidden='true'>SC</span>"
            "<span class='name'>Smart Chatbot"
            "<span class='role'>Library staff</span></span>"
+           f"{_THEME_TOGGLE}"
            "</div></header>"
            f"<main>{body}</main></body></html>")
     )

@@ -85,7 +85,37 @@ def build_staff_test_router():
 
     @router.get("/librarian/staff-test")
     async def staff_test() -> Response:
-        resp = RedirectResponse(WIDGET_URL, status_code=302)
+        """Set the marker, SAY SO, then hand them to the widget.
+
+        This used to be a bare 302 straight onto the chat. It worked --
+        every conversation since has carried origin="staff" -- and it told
+        the person nothing, so the only way to find out whether the click
+        had taken was to hold a conversation and then go looking for it in
+        the admin console. A conversation you never typed into does not
+        appear there at all, which reads exactly like a broken link.
+        Reported 2026-08-31.
+
+        Three seconds and an explicit link: long enough to read, and it
+        does not cost a habitual user a click.
+        """
+        from src.api.admin import admin_ui as ui
+
+        resp = HTMLResponse(ui.page(
+            "Test mode on",
+            "<h1>This browser is now marked as staff testing</h1>"
+            "<p class='lede'>Everything you ask from here is recorded as "
+            "testing rather than as a student's question, so the usage "
+            "numbers stay honest. Same bot, same answers &mdash; nothing "
+            "about the chat changes.</p>"
+            "<div class='card'>"
+            "<p>The marking lasts until you close your browser. It does "
+            "<b>not</b> follow you to a different browser, a private "
+            "window, or another device.</p>"
+            f"<div class='acts'>{ui.action(WIDGET_URL, 'Open the chatbot', primary=True)}"
+            f"{ui.action('/librarian/staff-test/off', 'Stop marking me', ghost=True)}"
+            "</div></div>"
+            "<p class='hint'>Taking you to the chatbot in a moment.</p>",
+            chrome=False, refresh_s=3, refresh_to=WIDGET_URL))
         resp.set_cookie(
             COOKIE, STAFF,
             path="/",
@@ -99,16 +129,18 @@ def build_staff_test_router():
 
     @router.get("/librarian/staff-test/off")
     async def staff_test_off() -> Response:
-        resp = HTMLResponse(
-            "<!doctype html><meta charset='utf-8'>"
-            "<title>Staff test mode off</title>"
-            "<style>body{font:16px/1.6 system-ui,sans-serif;max-width:32rem;"
-            "margin:12vh auto;padding:0 1.2rem;color:#17161A}"
-            "a{color:#b61e2e}</style>"
-            "<h1 style='font-size:1.3rem'>Staff test mode is off</h1>"
-            "<p>Conversations from this browser are no longer marked as staff "
-            f"testing. <a href='{WIDGET_URL}'>Open the chatbot</a>.</p>"
-        )
+        from src.api.admin import admin_ui as ui
+
+        resp = HTMLResponse(ui.page(
+            "Test mode off",
+            "<h1>Staff test mode is off</h1>"
+            "<p class='lede'>Conversations from this browser are no longer "
+            "marked as staff testing. From now on they count the same way a "
+            "student's question does.</p>"
+            f"<div class='acts'>{ui.action(WIDGET_URL, 'Open the chatbot')}"
+            f"{ui.action('/librarian/staff-test', 'Turn it back on', ghost=True)}"
+            "</div>",
+            chrome=False))
         resp.delete_cookie(COOKIE, path="/")
         return resp
 

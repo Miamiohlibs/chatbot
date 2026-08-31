@@ -627,3 +627,104 @@ def test_every_operator_surface_passes_the_caller_to_the_shell():
     assert not offenders, (
         "these render the console shell without saying who is looking: "
         + ", ".join(offenders))
+
+
+# --- light / dark --------------------------------------------------------
+
+def test_the_theme_choice_is_applied_before_anything_paints():
+    """In <head> and inline. The alternative is the page rendering in the
+    system theme and then flipping -- a flash on every navigation, on every
+    page, for the reader who chose the other one."""
+    from src.api.admin import admin_ui as ui
+
+    body = ui.page("x", "y")
+    head = body[:body.index("</head>")]
+    assert "localStorage.getItem('mu-admin-theme')" in head
+    assert "data-theme" in head
+
+
+def test_reading_the_stored_theme_can_never_break_the_page():
+    """localStorage throws outright in some privacy modes. A console that
+    will not render because a colour preference could not be read is worse
+    than one that ignores the preference."""
+    from src.api.admin import admin_ui as ui
+
+    head = ui.page("x", "y").split("</head>")[0]
+    boot = head[head.index("localStorage") - 200:]
+    assert "try{" in boot and "catch(e){}" in boot
+
+
+def test_the_stylesheet_answers_all_three_theme_states():
+    """Three, not two: an explicit choice stamps data-theme on the root,
+    and the default 'follow my system' stamps nothing. A media query alone
+    cannot serve a reader who picked dark on a light machine -- which is
+    exactly what the toggle does."""
+    from src.api.admin import admin_ui as ui
+
+    assert "@media (prefers-color-scheme: dark)" in ui.STYLE
+    assert ':root:not([data-theme="light"])' in ui.STYLE
+    assert ':root[data-theme="dark"]{' in ui.STYLE
+
+
+def test_the_two_dark_blocks_carry_the_same_tokens():
+    """They are written twice because CSS cannot share a block. A token
+    that lands in one and not the other is a theme that half applies."""
+    import re
+
+    from src.api.admin import admin_ui as ui
+
+    def tokens(block: str) -> set:
+        return set(re.findall(r"(--[a-z-]+):\s*([^;]+);", block))
+
+    media = ui.STYLE.split('@media (prefers-color-scheme: dark){')[1]
+    media = media.split(":root:not([data-theme=\"light\"]){")[1].split("\n  }")[0]
+    explicit = ui.STYLE.split(':root[data-theme="dark"]{')[1].split("\n}")[0]
+    assert tokens(media) == tokens(explicit)
+
+
+def test_the_toggle_is_hidden_until_its_own_script_shows_it():
+    """No JavaScript, no button -- it would be a control that does
+    nothing. The page still follows the system theme there."""
+    from src.api.admin import admin_ui as ui
+
+    body = ui.page("x", "y")
+    assert "class='themetoggle' id='theme-toggle' hidden" in body
+    assert "b.hidden=false" in body
+
+
+def test_the_toggle_names_what_it_does_not_where_you_are():
+    """The visible label says which theme you are in; the accessible name
+    says what pressing it would do. A screen reader user gets no icon."""
+    from src.api.admin import admin_ui as ui
+
+    assert "aria-label','Switch to '" in ui.page("x", "y")
+
+
+def test_the_red_splits_into_a_fill_and_an_ink():
+    """One token was doing both jobs and they want opposite things: white
+    sitting ON the red wants it dark, the red sitting on the page wants it
+    light. Tuned for the text case, the fill was glaring -- reported
+    2026-08-31. They agree on white and split in dark."""
+    from src.api.admin import admin_ui as ui
+
+    light = ui.STYLE.split(":root{")[1].split("\n}")[0]
+    dark = ui.STYLE.split(':root[data-theme="dark"]{')[1].split("\n}")[0]
+    assert "--primary-ink:354 72% 42%" in light, "same as the fill on white"
+    assert "--primary:354 58% 40%" in dark
+    assert "--primary-ink:354 42% 66%" in dark
+    # The ink is the LESS saturated of the two in dark mode. That is the
+    # whole point: glare is saturation, not contrast.
+    assert 42 < 58
+
+
+def test_the_red_is_never_used_as_text_from_the_fill_token():
+    """Every text-role use has to read --primary-ink, or dark mode gets a
+    hard-to-read red on a dark ground again."""
+    from src.api.admin import admin_ui as ui
+
+    for line in ui.STYLE.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("border-color") or "border-color:hsl(var(--primary))" in stripped:
+            continue
+        assert "color:hsl(var(--primary));" not in stripped.replace(
+            "border-color:hsl(var(--primary));", ""), stripped
