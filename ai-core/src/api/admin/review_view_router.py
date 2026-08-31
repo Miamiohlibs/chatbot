@@ -90,6 +90,14 @@ def _page(title: str, body: str, *, current: str = "", key: str = "",
                    counts=counts, who=who)
 
 
+TAG_WHY = {
+    "bot": "a replay, or every question in it was asked first by somebody else",
+    "staff": "arrived through the staff-test link, or carries a staff address",
+    "local": "the old name for `bot`, on rows written before 2026-08-27",
+    "maybe-staff": "INFERRED from pace or repetition — not recorded",
+}
+
+
 def build_review_view_router(deps: dict) -> Any:
     """`deps` = {"db": prisma, "guard": token-dependency}."""
     try:
@@ -177,30 +185,79 @@ def build_review_view_router(deps: dict) -> Any:
         return RedirectResponse(target, status_code=307)
 
     @router.get("/admin/review/close-testing", response_class=HTMLResponse)
-    async def close_testing(key: str = "", who=Depends(guard)) -> Any:
-        """Close every flagged turn that came from testing.
+    async def close_testing_preview(key: str = "", who=Depends(guard)) -> Any:
+        """What a sweep would close, BEFORE it closes anything.
 
-        A GET because it is reached from a link the operator has just read
-        the count on, and it is reversible: closing a row sets reviewedAt,
-        and the `reviewed` tab still shows it.
+        This used to close on the GET. The docstring's defence was that
+        the operator had just read the count on the link they clicked --
+        except no page linked here at all, so the count they had read was
+        nothing. `reviewedAt` was null on all 324 rows: the sweep existed
+        for weeks and had never once been run, because there was no way to
+        reach it. Same fault the kill switch had until 2026-08-08.
+
+        Two steps now. A GET that changes 312 rows is the wrong shape
+        whatever links to it.
         """
+        r = await close_testing_rows(db, dry_run=True, by="operator")
+        kq = _kq_plain(key)
+        by = r["by_tag"] or {}
+        rows = "".join(
+            f"<tr><td><code>{_e(t)}</code></td><td>{_e(n)}</td>"
+            f"<td>{_e(TAG_WHY.get(t, ''))}</td></tr>"
+            for t, n in sorted(by.items(), key=lambda kv: -kv[1]))
+        guess = by.get("maybe-staff", 0)
+        caveat = ""
+        if guess:
+            caveat = (
+                f"<p class='warn'><b>{guess} of these are a guess.</b> "
+                f"<code>maybe-staff</code> is inferred from the pace and "
+                f"shape of a conversation, not recorded at the door. If the "
+                f"inference is wrong, a real patron's bad experience gets "
+                f"closed. Closing is reversible and these stay on the "
+                f"<b>reviewed</b> tab, so this is a judgement about how much "
+                f"reading you want to do, not a one-way door.</p>")
+        return HTMLResponse(_page(
+            "Sweep the queue",
+            f"<h1>Close {r['closed']} flagged turn(s) from our own testing"
+            f"</h1>"
+            f"<p class='lede'>A flagged turn says \"a patron may have had a "
+            f"bad experience here\". A turn from our own scripted run says "
+            f"nothing of the kind, and it buries the ones that do.</p>"
+            f"<div class='scroll-table'><table><thead><tr><th>Source</th>"
+            f"<th>Turns</th><th>Why we know</th></tr></thead>"
+            f"<tbody>{rows}</tbody></table></div>"
+            f"{caveat}"
+            f"<p><b>{r['kept']}</b> turn(s) stay in the queue — everything "
+            f"we cannot attribute to ourselves.</p>"
+            f"<p class='hint'>Nothing is deleted. Closing sets a reviewed "
+            f"date; the rows stay on the <b>reviewed</b> tab and un-marking "
+            f"one is a click.</p>"
+            f"<form method='post' action='/admin/review/close-testing{kq}'>"
+            f"<div class='acts'>"
+            f"<button type='submit'>Close {r['closed']} testing turn(s)"
+            f"</button>"
+            f"{ui.action('/admin/conversations' + kq, 'Not now', ghost=True)}"
+            f"</div></form>",
+            current="/admin/conversations", key=key, who=who))
+
+    @router.post("/admin/review/close-testing", response_class=HTMLResponse)
+    async def close_testing(key: str = "", who=Depends(guard)) -> Any:
         result = await close_testing_rows(db, dry_run=False, by="operator")
         logger.info("closed %d flagged rows from testing (%s), kept %d",
                     result["closed"], result["by_tag"], result["kept"])
-        back = "/admin/review" + (f"?key={_e(key)}" if key else "")
+        back = "/admin/conversations" + _kq_plain(key)
         return HTMLResponse(_page(
             "Queue swept",
             f"<h1>Closed {result['closed']} flagged turn(s)</h1>"
             f"<p class='lede'>They came from our own testing, so they were "
             f"never reports of a patron's bad experience. "
             f"<b>{result['kept']}</b> stayed in the queue.</p>"
-            f"<p class='dim'>Nothing was deleted. Everything closed here is "
+            f"<p class='hint'>Nothing was deleted. Everything closed here is "
             f"still on the <b>reviewed</b> tab, and marking a row reviewed "
             f"is reversible.</p>"
             f"<div class='acts'>{ui.action(back, '← back to the queue', primary=True)}"
-            f"{ui.action(back + ('&' if key else '?') + 'filter=reviewed', 'See what was closed', ghost=True)}"
-            f"</div>",
-            current="/admin/review", key=key))
+            "</div>",
+            current="/admin/conversations", key=key, who=who))
 
     @router.get("/admin/review/mark/{message_id}", response_class=HTMLResponse)
     async def review_mark(

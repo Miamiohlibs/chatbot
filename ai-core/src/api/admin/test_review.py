@@ -533,3 +533,72 @@ def test_a_user_message_gets_no_decision_badges() -> None:
         {"db": db, "guard": g, "require_librarian": g}))
     body = TestClient(app).get("/admin/review/c1?key=k").text
     assert "tag intent" not in body
+
+
+# --- sweeping the queue --------------------------------------------------
+#
+# The sweep existed for weeks and had never run: reviewedAt was null on all
+# 324 flagged rows, because no page linked to it and you had to know the
+# URL. Same fault the kill switch had until 2026-08-08.
+
+def test_the_queue_offers_the_sweep():
+    """It belongs where the queue is. A control you reach only by
+    remembering a URL is a control nobody uses -- reviewedAt was null on
+    all 324 rows, and that is why."""
+    import inspect
+
+    from src.api.admin import conversations_router as CR
+
+    src = inspect.getsource(CR)
+    # Inside the branch that runs when a flag filter is on, not somewhere
+    # a reader has to go looking for.
+    # index() from the sweep onwards: `body = (` appears three times in
+    # this file and the first one is far above the block being checked.
+    start = src.index('sweep = ""')
+    branch = src[start:src.index("body = (", start)]
+    assert "/admin/review/close-testing" in branch
+    assert "if flag:" in branch
+
+
+def test_the_hint_never_states_a_count_it_did_not_measure():
+    """The counts on that page are CONVERSATIONS in a date range, not
+    flagged TURNS. Using them read '761 of these came from our own
+    testing' above a queue of 324."""
+    import inspect
+
+    from src.api.admin import conversations_router as CR
+
+    src = inspect.getsource(CR)
+    hint = src[src.index("NO NUMBER HERE ON PURPOSE"):]
+    hint = hint[:hint.index("body = (")]
+    assert "{testing_waiting}" not in hint
+    assert "Most of this queue" in hint
+
+
+def test_closing_needs_a_post():
+    """A GET that changes 313 rows is the wrong shape whatever links to
+    it -- and the old defence, that the operator had just read the count
+    on the link, was hollow while nothing linked here."""
+    import inspect
+
+    from src.api.admin import review_view_router as RV
+
+    src = inspect.getsource(RV)
+    assert '@router.post("/admin/review/close-testing"' in src
+    get_block = src[src.index('@router.get("/admin/review/close-testing"'):]
+    get_block = get_block[:get_block.index("@router.post")]
+    assert "dry_run=True" in get_block, "the GET must only preview"
+    assert "dry_run=False" not in get_block
+
+
+def test_the_preview_says_which_part_is_a_guess():
+    """`maybe-staff` is inferred from pace and repetition, not recorded at
+    the door. Closing on an inference is a judgement the operator should
+    make with their eyes open."""
+    import inspect
+
+    from src.api.admin import review_view_router as RV
+
+    src = inspect.getsource(RV)
+    assert "maybe-staff" in src and "INFERRED" in src
+    assert "a guess" in src

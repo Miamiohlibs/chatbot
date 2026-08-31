@@ -358,12 +358,39 @@ def build_conversations_router(deps: dict) -> Any:
               f"<option value='bot'>what the bot said</option></select>"
               f"<button type='submit'>Search</button></form>"
         )
+        # The way to the sweep, which had no way in at all.
+        #
+        # The sweep has existed for weeks and `reviewedAt` was null on all
+        # 324 flagged rows -- not because nobody wanted it, but because no
+        # page linked to it and you had to know the URL. It belongs where
+        # the queue is, and it only appears when there is something to
+        # sweep, so it is an offer rather than a permanent button.
+        # NO NUMBER HERE ON PURPOSE.
+        #
+        # The obvious one to reach for is the source counts computed for
+        # the bar above -- and they count CONVERSATIONS in the whole date
+        # range, not flagged TURNS. It read "761 of these came from our own
+        # testing" above a queue of 324. A wrong number on the way to a
+        # right one is worse than no number, and the preview behind this
+        # link states the real one because it does the real query.
+        sweep = ""
+        if flag:
+            sweep = (
+                f"<p class='hint' style='margin:-.5rem 0 1rem'>"
+                f"Most of this queue is our own testing rather than a "
+                f"patron's bad experience. "
+                f"<a href='/admin/review/close-testing"
+                f"{('?key=' + _e(key)) if key else ''}'>"
+                f"See how many, and close them</a> — reversible, and "
+                f"nothing is deleted.</p>")
+
         body = (
             f"<h1>Conversations</h1>"
             f"{search_box}"
             f"<div style='margin:.6rem 0'>{nav}</div>"
             f"<div class='filter-bar'>{source_bar}</div>"
             f"<div class='filter-bar'>{flag_bar}</div>"
+            f"{sweep}"
             + (f"<p class='dim'>13 August is shown from 6:00pm, when the "
                f"bot went live to the public.</p>"
                if day == BETA_START_LOCAL[:10] else "")
