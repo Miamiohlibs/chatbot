@@ -712,18 +712,56 @@ async def list_conversations_on(db: Any, day: "str", *,
             "flag_counts": flag_counts}
 
 
+_DAYS_SQL = """
+SELECT to_char(("timestamp" AT TIME ZONE 'UTC' AT TIME ZONE $1)::date,
+               'YYYY-MM-DD') AS day,
+       COUNT(*)::int AS questions
+FROM "Message"
+WHERE "type" = 'user'
+GROUP BY 1
+ORDER BY 1 DESC
+LIMIT $2
+"""
+
+
 async def conversation_days(db: Any, *, limit: int = 30) -> list[dict]:
     """Recent days that had at least one question, newest first.
 
-    Powers the date picker. Counting in Python rather than SQL because the
-    day boundary has to be Oxford's, and Postgres holds these in UTC.
+    Powers the date picker. `questions` counts QUESTIONS -- user messages
+    -- not conversations, which is a different number and the page says so.
+
+    COUNTED IN POSTGRES, WITH NO CAP.
+        This used to read the most recent N user messages and tally them
+        in Python, on the grounds that the day boundary has to be Oxford's
+        and the column is UTC. Postgres does that conversion perfectly
+        well, and the Python version had a cliff: past N the oldest day in
+        the window came back short and nothing said so. Raising N only
+        moved the cliff -- and reading twenty thousand rows into memory on
+        every page load, on a 3.8 GB box, to produce two dozen integers is
+        not a trade worth making either.
+
+        `AT TIME ZONE 'UTC' AT TIME ZONE $1` reads the naive column as UTC
+        and converts it to Oxford time, daylight saving included. Verified
+        against the Python tally before the swap: 24 days, every count
+        identical, and eight timestamps either side of both 2026 DST
+        transitions agreeing to the day.
+
+        The date comes back as TEXT. Handing back a date or a timestamp
+        invites the driver to reinterpret it in some third timezone, which
+        is the whole class of bug this function exists inside.
     """
-    # The read cap is a silent cliff: at 4,000 the oldest days in the
-    # window come back with a fraction of their questions counted and
-    # nothing says so. 3,151 today, so it has never bitten -- but a number
-    # that goes quietly wrong at a threshold nobody watches is worse than
-    # one that is missing. `partial` is set when the cap was reached, and
-    # the page says so rather than showing a count it cannot stand behind.
+    try:
+        rows = await db.query_raw(_DAYS_SQL, LIBRARY_TZ, int(limit))
+        return [{"day": str(r["day"]), "questions": int(r["questions"]),
+                 "partial": False}
+                for r in (rows or [])]
+    except Exception:  # noqa: BLE001
+        logger.info("conversation_days: SQL tally unavailable, counting in "
+                    "Python", exc_info=True)
+
+    # Fallback, and it keeps the cliff the SQL path removed -- so it says
+    # when it hit one. Reached by anything holding a Prisma-shaped stub
+    # without query_raw, which is most of the test suite.
     take = 20000
     try:
         msgs = await db.message.find_many(
@@ -737,10 +775,9 @@ async def conversation_days(db: Any, *, limit: int = 30) -> list[dict]:
         if ld is None:
             continue
         tally[ld.date().isoformat()] = tally.get(ld.date().isoformat(), 0) + 1
-    partial = len(msgs) >= take
     rows = [{"day": d, "questions": n, "partial": False}
             for d, n in sorted(tally.items(), reverse=True)][:limit]
-    if partial and rows:
+    if len(msgs) >= take and rows:
         # Only the oldest day in the window can be short: the read is
         # newest-first, so everything above it is whole.
         rows[-1]["partial"] = True

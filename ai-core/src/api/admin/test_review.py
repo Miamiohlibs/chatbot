@@ -659,3 +659,92 @@ async def test_the_sweep_holds_back_a_rated_down_testing_row():
     assert r["closed"] == 1, "the unrated testing row is swept"
     assert r["rated_down"] == 1, "the rated-down one is held and counted"
     assert r["kept"] == 1
+
+
+# --- the day tally has no cliff ------------------------------------------
+
+@pytest.mark.asyncio
+async def test_the_day_tally_is_counted_in_postgres():
+    """It used to read the most recent N user messages into Python. Past N
+    the oldest day in the window came back short and nothing said so, and
+    raising N only moves the cliff. Postgres has no N."""
+    from src.api.admin import review_queries as RQ
+
+    seen = {}
+
+    class _DB:
+        @staticmethod
+        async def query_raw(sql, *params):
+            seen["sql"], seen["params"] = sql, params
+            return [{"day": "2026-08-30", "questions": 11},
+                    {"day": "2026-08-29", "questions": 4}]
+
+    got = await RQ.conversation_days(_DB(), limit=30)
+    assert [r["questions"] for r in got] == [11, 4]
+    assert not any(r["partial"] for r in got), "SQL cannot come back short"
+    assert seen["params"] == ("America/New_York", 30)
+    assert "GROUP BY" in seen["sql"]
+
+
+@pytest.mark.asyncio
+async def test_the_day_is_oxford_s_not_the_column_s():
+    """The column is naive UTC. A day boundary at UTC midnight cuts
+    Oxford's evening in half, and evening is when the building is
+    busiest."""
+    from src.api.admin import review_queries as RQ
+
+    assert "AT TIME ZONE 'UTC' AT TIME ZONE $1" in RQ._DAYS_SQL
+    # Text, not a date: handing back a date invites the driver to
+    # reinterpret it in some third timezone, which is the whole class of
+    # bug this lives inside.
+    assert "to_char(" in RQ._DAYS_SQL
+
+
+@pytest.mark.asyncio
+async def test_a_stub_without_query_raw_still_gets_counts():
+    """Most of the suite holds a Prisma-shaped stub. The fallback keeps
+    them working -- and keeps the cliff, so it says when it hit one."""
+    import datetime as _dt
+
+    from src.api.admin import review_queries as RQ
+
+    class _M:
+        def __init__(self, ts):
+            self.timestamp = ts
+
+    when = _dt.datetime(2026, 8, 20, 18, tzinfo=_dt.timezone.utc)
+
+    class _DB:
+        class message:
+            @staticmethod
+            async def find_many(**kw):
+                return [_M(when), _M(when)]
+
+    got = await RQ.conversation_days(_DB(), limit=30)
+    assert got == [{"day": "2026-08-20", "questions": 2, "partial": False}]
+
+
+@pytest.mark.asyncio
+async def test_the_fallback_marks_the_day_it_could_not_finish():
+    from src.api.admin import review_queries as RQ
+
+    import datetime as _dt
+
+    class _M:
+        def __init__(self, ts):
+            self.timestamp = ts
+
+    base = _dt.datetime(2026, 8, 20, 18, tzinfo=_dt.timezone.utc)
+
+    class _DB:
+        class message:
+            @staticmethod
+            async def find_many(**kw):
+                take = kw.get("take") or 0
+                # Exactly the cap, newest first, spanning two days.
+                return ([_M(base)] * (take - 1)
+                        + [_M(base - _dt.timedelta(days=1))])
+
+    got = await RQ.conversation_days(_DB(), limit=30)
+    assert got[0]["partial"] is False, "the newest day is whole"
+    assert got[-1]["partial"] is True, "the oldest one is where it ran out"
