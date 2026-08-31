@@ -1418,6 +1418,10 @@ async def close_testing_rows(db: Any, *, filter_preset: str = "flagged",
                              dry_run: bool = True) -> dict:
     """Mark flagged turns that came from testing as reviewed.
 
+    Returns `rated_down` alongside the counts: rows held back because a
+    human pressed thumbs-down on them, which the preview names so the
+    number is not silently absorbed into "kept".
+
     A flagged turn is a queue item that says "a patron may have had a bad
     experience here". A turn from our own scripted run says nothing of the
     kind, and 286 of the 300 sitting in the queue were exactly that -- the
@@ -1433,16 +1437,34 @@ async def close_testing_rows(db: Any, *, filter_preset: str = "flagged",
             where=flagged_where(filter_preset),
             order={"timestamp": "desc"}, take=2000)
     except Exception:  # noqa: BLE001
-        return {"closed": 0, "kept": 0, "by_tag": {}, "dry_run": dry_run}
+        return {"closed": 0, "kept": 0, "by_tag": {}, "rated_down": 0,
+                "dry_run": dry_run}
 
     sources = await sources_for_conversations(
         db, [getattr(r, "conversationId", None) for r in rows])
 
     from collections import Counter
-    hits, kept = [], 0
+    hits, kept, rated_down = [], 0, 0
     tally: Counter = Counter()
     for r in rows:
         tag = (sources.get(getattr(r, "conversationId", None)) or {}).get("tag")
+        # A THUMBS-DOWN IS NEVER SWEPT, WHOEVER PRESSED IT.
+        #
+        # Attribution answers "did a PATRON have a bad experience here".
+        # A thumbs-down answers a different question -- "is this answer
+        # bad" -- and that one does not care who pressed the button. A
+        # colleague pressing it on a wrong answer is doing review work,
+        # not making noise.
+        #
+        # Measured 2026-08-31: the queue held 15 thumbs-downs and the
+        # sweep took all fifteen. Three of them were the same
+        # Gardner-Harvey room booking failing three times. That is the
+        # most actionable thing in the queue and it was the first thing
+        # the broom reached.
+        if getattr(r, "isPositiveRated", None) is False:
+            kept += 1
+            rated_down += 1
+            continue
         if tag in TESTING_TAGS:
             hits.append(r)
             tally[tag] += 1
@@ -1461,7 +1483,7 @@ async def close_testing_rows(db: Any, *, filter_preset: str = "flagged",
                                exc_info=True)
 
     return {"closed": len(hits), "kept": kept, "by_tag": dict(tally),
-            "dry_run": dry_run}
+            "rated_down": rated_down, "dry_run": dry_run}
 
 
 SEARCH_SCAN_CAP = 4000

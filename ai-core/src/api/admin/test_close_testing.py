@@ -156,7 +156,13 @@ def test_a_database_failure_closes_nothing_rather_than_guessing():
             RuntimeError("down")))
     import asyncio
     res = asyncio.run(close_testing_rows(_Down(), dry_run=False))
-    assert res == {"closed": 0, "kept": 0, "by_tag": {}, "dry_run": False}
+    # Every count zero, whatever fields the shape grows. Naming them all
+    # made this fail on a field being ADDED, which is not the failure the
+    # test is here to catch -- it is here to catch a database outage being
+    # reported as "swept everything, found nothing".
+    assert res["closed"] == 0 and res["kept"] == 0
+    assert res["by_tag"] == {}
+    assert res["dry_run"] is False
 
 
 def test_only_testing_tags_are_swept():

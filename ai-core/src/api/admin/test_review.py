@@ -16,6 +16,8 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 _HERE = Path(__file__).resolve().parent
 _AI_CORE = _HERE.parent.parent.parent
 sys.path.insert(0, str(_AI_CORE))
@@ -602,3 +604,58 @@ def test_the_preview_says_which_part_is_a_guess():
     src = inspect.getsource(RV)
     assert "maybe-staff" in src and "INFERRED" in src
     assert "a guess" in src
+
+
+def test_a_thumbs_down_is_never_swept_whoever_pressed_it():
+    """Attribution answers whether a PATRON had a bad experience. A
+    thumbs-down answers whether the ANSWER was bad, and that question does
+    not care who asked it -- a colleague pressing the button on a wrong
+    answer is doing review work, not making noise.
+
+    Measured 2026-08-31: the queue held 15 thumbs-downs and the sweep took
+    all fifteen. Three were the same Gardner-Harvey room booking failing
+    three times -- the most actionable thing in there, and the first thing
+    the broom reached.
+    """
+    import inspect
+
+    from src.api.admin import review_queries as RQ
+
+    src = inspect.getsource(RQ.close_testing_rows)
+    guard = src[src.index("isPositiveRated"):]
+    assert "continue" in guard[:200], "a rated-down row must skip the sweep"
+    # And it is reported rather than folded into "kept", or the number
+    # disappears into a total nobody questions.
+    assert '"rated_down"' in src
+
+
+@pytest.mark.asyncio
+async def test_the_sweep_holds_back_a_rated_down_testing_row():
+    """The whole point, exercised rather than read off the source."""
+    from src.api.admin import review_queries as RQ
+
+    class _M:
+        def __init__(self, mid, rated):
+            self.id, self.conversationId = mid, "c1"
+            self.isPositiveRated, self.wasRefusal = rated, True
+            self.timestamp = None
+
+    class _DB:
+        class message:
+            @staticmethod
+            async def find_many(**kw):
+                return [_M("keep", False), _M("sweep", None)]
+
+            @staticmethod
+            async def update(**kw):
+                return None
+
+    async def _sources(db, ids):
+        return {"c1": {"tag": "bot", "why": "a replay"}}
+
+    import unittest.mock as mock
+    with mock.patch.object(RQ, "sources_for_conversations", _sources):
+        r = await RQ.close_testing_rows(_DB(), dry_run=True)
+    assert r["closed"] == 1, "the unrated testing row is swept"
+    assert r["rated_down"] == 1, "the rated-down one is held and counted"
+    assert r["kept"] == 1
