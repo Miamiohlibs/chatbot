@@ -17,11 +17,17 @@ panel, never a 500.
 """
 from __future__ import annotations
 
+import calendar
+import datetime as _dt
 import html
 import logging
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Any
+
+# Oxford, not UTC. A month boundary at UTC midnight puts the last four
+# hours of the 31st into the next month's purse.
+LIBRARY_TZ = "America/New_York"
 
 from src.api.admin.review_queries import local_dt as _local_dt
 from src.api.admin.review_view_router import make_token_guard  # reuse the guard
@@ -156,6 +162,84 @@ async def _aggregate(db: Any, days: int) -> dict:
     rows_out.sort(key=lambda x: (x["day"], -x["usd"]), reverse=True)
     days_out = [{"day": d, **v} for d, v in sorted(by_day.items(), reverse=True)]
     return {"window_days": days, "rows": rows_out, "days": days_out, "total": total}
+
+
+_MONTH_SQL = """
+SELECT to_char(("createdAt" AT TIME ZONE 'UTC' AT TIME ZONE $1)::date,
+               'YYYY-MM') AS month,
+       "llmModelName" AS model,
+       COALESCE("callSite", '') AS site,
+       SUM("promptTokens")::bigint      AS inp,
+       SUM("cachedInputTokens")::bigint AS cached,
+       SUM("completionTokens")::bigint  AS outp,
+       COUNT(*)::int                    AS calls
+FROM "ModelTokenUsage"
+GROUP BY 1, 2, 3
+"""
+
+
+async def _by_month(db: Any) -> list[dict]:
+    """Spend per calendar month, split into the two purses.
+
+    WHY THIS IS THE FIRST TABLE ON THE PAGE
+        The budget is a MONTHLY pair of purses and the guard enforces
+        month-to-date. This page had a 7-day window, a by-day table and an
+        all-time total, and no month anywhere -- so the number the money
+        is actually governed by was the one number you could not read.
+        Asked for 2026-08-31.
+
+    Grouped in Postgres on the Oxford month, so there is no read cap and
+    no day-boundary bug; priced in Python, because the price table is
+    Python and the grouped result is a few dozen rows either way.
+
+    Each month is measured against the purse that applied THAT month, not
+    today's -- the student purse went from $25 to $45 at launch on
+    2026-08-13, and holding July up against September's ceiling would say
+    something untrue about July.
+    """
+    from scripts.cost_rollup import compute_cost_usd
+    from src.config import budget as B
+    from src.observability.spend_ledger import DEV_CALL_SITES
+
+    try:
+        if not db.is_connected():
+            await db.connect()
+        rows = await db.query_raw(_MONTH_SQL, LIBRARY_TZ)
+    except Exception:  # noqa: BLE001 -- the page degrades, it never 500s
+        logger.warning("cost by-month aggregate failed", exc_info=True)
+        return []
+
+    months: dict = {}
+    for r in rows or []:
+        m = str(r["month"])
+        slot = months.setdefault(m, {"month": m, "serving": 0.0, "eval": 0.0,
+                                     "calls": 0})
+        usd = compute_cost_usd(str(r["model"] or ""), int(r["inp"] or 0),
+                               int(r["cached"] or 0), int(r["outp"] or 0))
+        key = "eval" if str(r["site"] or "") in DEV_CALL_SITES else "serving"
+        slot[key] += usd
+        slot["calls"] += int(r["calls"] or 0)
+
+    out = []
+    for m in sorted(months, reverse=True):
+        row = months[m]
+        y, mo = (int(x) for x in m.split("-"))
+        # THE PURSE AS THE GUARD SAW IT, NOT AS THE MONTH OPENED.
+        #
+        # The student purse moved from $25 to $45 on 2026-08-13, mid-month.
+        # Asking split_for() for the 1st gives August a $25 ceiling, while
+        # budget_guard has been enforcing $45 against the same month-to-date
+        # all along -- a table that contradicts the control it is reporting
+        # on is worse than no table. Take the purse in force when the month
+        # closed, and for the month still running, the one in force now.
+        last = _dt.date(y, mo, calendar.monthrange(y, mo)[1])
+        today = _dt.date.today()
+        purse_serving, purse_eval = B.split_for(min(last, today))
+        row["purse_serving"] = purse_serving
+        row["purse_eval"] = purse_eval
+        row["total"] = row["serving"] + row["eval"]
+        out.append(row)
+    return out
 
 
 async def _model_history(db: Any) -> list[dict]:
@@ -315,6 +399,27 @@ def build_cost_view_router(deps: dict) -> Any:
         _kq = f"&key={_e(key)}" if key else ""
         d = await _aggregate(db, days)
         history = await _model_history(db)
+        months = await _by_month(db)
+
+        def _month_row(r: dict) -> str:
+            def _against(spent: float, purse: float) -> str:
+                if not purse:
+                    return "<td class='muted'>—</td>"
+                pct = spent / purse * 100
+                cls = " class='warn'" if pct >= 95 else ""
+                return f"<td{cls}>{pct:.0f}% of ${purse:.0f}</td>"
+
+            this_month = r["month"] == _dt.date.today().strftime("%Y-%m")
+            lead = (f"<b>{_e(r['month'])}</b> <span class='muted'>so far"
+                    f"</span>" if this_month else _e(r["month"]))
+            return (
+                f"<tr><td>{lead}</td>"
+                f"<td>${r['serving']:.2f}</td>{_against(r['serving'], r['purse_serving'])}"
+                f"<td>${r['eval']:.2f}</td>{_against(r['eval'], r['purse_eval'])}"
+                f"<td>${r['total']:.2f}</td><td>{r['calls']:,}</td></tr>")
+
+        month_rows = "".join(_month_row(r) for r in months) or (
+            "<tr><td colspan='7' class='muted'>Nothing recorded yet.</td></tr>")
         t = d["total"]
         cards = (
             f"<div class='stat calm'><div class='muted'>Spend (last {days}d)</div>"
@@ -401,19 +506,39 @@ def build_cost_view_router(deps: dict) -> Any:
             )
             + f" · <a href='/admin/cost.json?days={days}{_kq}'>JSON</a></div>"
             f"<div class='stats'>{cards}</div>"
+            f"<h2>By month</h2>"
+            f"<div class='muted'>What the budget is actually measured on. "
+            f"Each month is held against the purse that applied THAT month "
+            f"— the student purse moved from $25 to $45 at launch.</div>"
+            f"<table><tr><th>Month</th><th>Students</th><th>of purse</th>"
+            f"<th>Dev &amp; eval</th><th>of purse</th><th>Total</th>"
+            f"<th>Calls</th></tr>{month_rows}</table>"
             f"<h2>By day</h2><table><tr><th>Day</th><th>USD</th><th>Turns</th>"
             f"<th>Input tok</th><th>Output tok</th><th>Cache hit</th></tr>{day_rows}</table>"
-            f"<h2>By day · model · call site</h2><table><tr><th>Day</th><th>Model</th>"
+            # FOLDED, NOT REMOVED.
+            #
+            # Three dense tables sat between the reader and nothing. They
+            # answer real questions -- which call site is expensive, is a
+            # model priced at all -- and none of them is the question
+            # somebody opens this page with, which is "how much have we
+            # spent this month". Operator, 2026-08-31: the rate card does
+            # not need to be that prominent.
+            f"<details><summary>By day · model · call site "
+            f"<span class='dim'>which call site the money went to</span>"
+            f"</summary>"
+            f"<table><tr><th>Day</th><th>Model</th>"
             f"<th>Call site</th><th>USD</th><th>Turns</th><th>Input</th>"
-            f"<th>Cached</th><th>Output</th></tr>{brk_rows}</table>"
-            f"<h2>Every model ever used — all time (${hist_total:.2f})</h2>"
+            f"<th>Cached</th><th>Output</th></tr>{brk_rows}</table></details>"
+            f"<details><summary>Every model ever used "
+            f"<span class='dim'>all time, ${hist_total:.2f}</span></summary>"
             f"<div class='muted'>Ignores the {days}-day window. Sorted by turns. "
             f"A dated snapshot (e.g. <code>-2026-03-17</code>) is priced at its "
             f"base model's rate.</div>"
             f"<table><tr><th>Model</th><th>USD</th><th>Turns</th><th>Input tok</th>"
             f"<th>Cached tok</th><th>Output tok</th><th>First used</th>"
-            f"<th>Last used</th></tr>{hist_rows}</table>"
-            f"<h2>Rate card — $ per 1M tokens</h2>"
+            f"<th>Last used</th></tr>{hist_rows}</table></details>"
+            f"<details><summary>Rate card "
+            f"<span class='dim'>$ per 1M tokens</span></summary>"
             f"<div class='muted'>From <code>PRICE_PER_1M_TOKENS</code>. One rate "
             f"per model applied to ALL history, so a price change also moves past "
             f"totals; treat old figures as indicative, not invoice-grade. "
@@ -421,7 +546,7 @@ def build_cost_view_router(deps: dict) -> Any:
             f"row, so its spend appears nowhere above (embeddings: roughly "
             f"$0.01 all-time, hence untracked rather than urgent).</div>"
             f"<table><tr><th>Model</th><th>Input</th><th>Cached input</th>"
-            f"<th>Output</th><th>Ever used here</th></tr>{card_rows}</table>"
+            f"<th>Output</th><th>Ever used here</th></tr>{card_rows}</table></details>"
         )
         return HTMLResponse(_page("Cost", body, key=key, who=who))
 
