@@ -812,3 +812,44 @@ def test_no_router_hardcodes_a_colour_in_an_inline_stylesheet():
             for hexcode in re.findall(r"#[0-9a-fA-F]{3,8}\b", block):
                 bad.append(f"{path.name}: {hexcode}")
     assert not bad, "hardcoded colours: " + ", ".join(sorted(set(bad)))
+
+
+# --- the mark ------------------------------------------------------------
+
+def test_the_mark_paints_from_tokens_not_a_fixed_red():
+    """The tile follows --primary, so it takes the softened dark red
+    rather than glaring the way the old flat one did."""
+    from src.api.admin import admin_ui as ui
+
+    assert "hsl(var(--primary))" in ui.LOGO_SVG
+    assert "hsl(var(--primary-foreground))" in ui.LOGO_SVG
+    assert "#" not in ui.LOGO_SVG, "no hex in the mark itself"
+
+
+def test_the_favicon_is_inline_and_carries_its_own_red():
+    """A favicon is drawn outside the page and has no tokens to read, so
+    that one red is frozen. Inline, so the tab icon costs no request and
+    cannot 404."""
+    from src.api.admin import admin_ui as ui
+
+    assert ui.FAVICON.startswith("<link rel='icon' href=")
+    assert "data:image/svg+xml" in ui.FAVICON
+    assert "%23b61e2e" in ui.FAVICON
+    assert ui.FAVICON in ui.page("x", "y")
+    assert ui.FAVICON in ui.page("x", "y", chrome=False)
+
+
+def test_the_mark_is_not_the_universitys_own():
+    """Miami's block M belongs to the University. This is a tool the
+    Libraries run, and a mark that borrows the institution's own is one
+    nobody here has the standing to approve."""
+    from src.api.admin import admin_ui as ui
+
+    assert "M</" not in ui.LOGO_SVG and "text" not in ui.LOGO_SVG
+
+
+def test_both_shells_wear_it():
+    from src.api.admin import admin_ui as ui
+
+    for kw in ({}, {"chrome": False}):
+        assert "class='logo'" in ui.page("x", "y", **kw)

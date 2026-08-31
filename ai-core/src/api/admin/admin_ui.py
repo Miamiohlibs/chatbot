@@ -178,11 +178,8 @@ a:hover{text-decoration:underline}
 .brand{display:flex;align-items:center;gap:.55rem;padding:.35rem .5rem 1rem;
   text-decoration:none;color:inherit}
 .brand:hover{text-decoration:none}
-.brand .mark,.topbar .mark{
-  width:1.85rem;height:1.85rem;border-radius:.5rem;flex:0 0 auto;
-  background:hsl(var(--primary));color:hsl(var(--primary-foreground));
-  display:grid;place-items:center;font-weight:700;font-size:.9rem;
-  letter-spacing:-.02em;
+.brand .logo,.topbar .logo{
+  width:1.9rem;height:1.9rem;flex:0 0 auto;display:block;
 }
 .brand .name,.topbar .name{font-weight:600;letter-spacing:-.01em;line-height:1.15}
 .brand .role,.topbar .role{display:block;font-weight:500;font-size:.72rem;
@@ -238,8 +235,12 @@ a:hover{text-decoration:underline}
 .topbar .themeswitch{margin:0 0 0 auto;width:auto}
 .themeswitch[hidden]{display:none}
 
+/* Everything that sits at the bottom, pushed there as one block. The
+   switch used to be pushed AFTER the last nav group with the page's whole
+   empty middle beneath it, which read as a stray control. */
+.sidebar-foot{margin-top:auto;display:flex;flex-direction:column}
 .sidebar .foot{
-  margin-top:auto;padding:.85rem .5rem 0;
+  padding:.85rem .5rem 0;
   border-top:1px solid hsl(var(--sidebar-border));
   font-size:.78rem;color:hsl(var(--muted-foreground));
 }
@@ -270,6 +271,7 @@ body.plain main{max-width:820px;margin:0 auto}
   .navgroup{margin:0;display:contents}
   .navgroup > .lbl{display:none}
   .sidebar a.item{white-space:nowrap}
+  .sidebar-foot{margin:0 0 0 auto}
   .sidebar .foot{display:none}
   .themeswitch{margin:0 0 0 auto;padding:.1rem}
   .themeswitch span{display:none}
@@ -593,6 +595,52 @@ _ICONS = {
 }
 
 
+# The mark.
+#
+# An open book in Miami red. Drawn, rendered and looked at rather than
+# reasoned about -- six candidates, then six more, screenshotted at 64,
+# 30, 24 and 16 pixels on both grounds, because every interesting idea
+# died at the small end and none of that was visible in the source.
+#
+# What the looking settled:
+#   * Interior detail is gone by 20px. Two candidates put a book's gutter
+#     inside a speech bubble; at sidebar size one read as a white blob and
+#     the other as a bubble with a crack in it.
+#   * A speech-bubble tail cannot survive being merged into another
+#     silhouette. The fused book-and-bubble read as a book with a spike.
+#   * Solid shapes hold at 16px where strokes start to thin.
+#
+# So it does not try to say "chat" at all. The word next to it does that,
+# and a mark that says one thing clearly beats one that says two things
+# illegibly. Miami's own block M is deliberately not used: this is a tool
+# the Libraries run, not the University's brand.
+LOGO_SVG = (
+    "<svg class='logo' viewBox='0 0 48 48' fill='none' aria-hidden='true' "
+    "focusable='false'>"
+    "<rect width='48' height='48' rx='12' fill='hsl(var(--primary))'/>"
+    "<path d='M23 17.5c-2.8-2.1-7-2.9-10.6-2.3a1.4 1.4 0 0 0-1.2 1.4v13.6"
+    "c0 .9.8 1.5 1.6 1.4 3.2-.5 7 .3 9.5 2.2a1.4 1.4 0 0 0 1.7 0"
+    "c2.5-1.9 6.3-2.7 9.5-2.2.8.1 1.6-.5 1.6-1.4V16.6a1.4 1.4 0 0 0-1.2-1.4"
+    "c-3.6-.6-7.8.2-10.6 2.3l-.6.4-.6-.4Z' "
+    "fill='hsl(var(--primary-foreground))'/>"
+    "</svg>"
+)
+
+# The same mark as a favicon. Inline data URI, so the tab icon costs no
+# request and cannot 404 -- and the red is frozen here, because a favicon
+# is drawn outside the page and has no tokens to read.
+FAVICON = (
+    "<link rel='icon' href=\"data:image/svg+xml,"
+    "%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E"
+    "%3Crect width='48' height='48' rx='12' fill='%23b61e2e'/%3E"
+    "%3Cpath d='M23 17.5c-2.8-2.1-7-2.9-10.6-2.3a1.4 1.4 0 0 0-1.2 1.4v13.6"
+    "c0 .9.8 1.5 1.6 1.4 3.2-.5 7 .3 9.5 2.2a1.4 1.4 0 0 0 1.7 0"
+    "c2.5-1.9 6.3-2.7 9.5-2.2.8.1 1.6-.5 1.6-1.4V16.6a1.4 1.4 0 0 0-1.2-1.4"
+    "c-3.6-.6-7.8.2-10.6 2.3l-.6.4-.6-.4Z' fill='white'/%3E"
+    "%3C/svg%3E\">"
+)
+
+
 def icon(name: str) -> str:
     d = _ICONS.get(name)
     if not d:
@@ -697,7 +745,7 @@ def _brand(key: str, role: str) -> str:
     href = _HOME.get(role, "/admin/") + (f"?key={e(key)}" if key else "")
     which = "Librarian console" if role == ROLE_LIBRARIAN else "Operator console"
     return (f"<a class='brand' href='{href}'>"
-            f"<span class='mark' aria-hidden='true'>SC</span>"
+            f"{LOGO_SVG}"
             f"<span class='name'>Smart Chatbot"
             f"<span class='role'>{e(which)}</span></span></a>")
 
@@ -827,6 +875,7 @@ def page(title: str, body: str, *, current: str = "", key: str = "",
         "<!doctype html><html lang='en'><head><meta charset='utf-8'>"
         "<meta name='viewport' content='width=device-width,initial-scale=1'>"
         "<meta name='color-scheme' content='light dark'>"
+        f"{FAVICON}"
         f"{_THEME_BOOT}"
         f"{meta_refresh}"
         f"{title_tag}"
@@ -836,15 +885,15 @@ def page(title: str, body: str, *, current: str = "", key: str = "",
            "<aside class='sidebar'>"
            f"{_brand(key, role)}"
            f"{nav(current, key, counts, role)}"
-           f"{_THEME_TOGGLE}"
-           f"{_signature(who)}"
+           f"<div class='sidebar-foot'>{_THEME_TOGGLE}"
+           f"{_signature(who)}</div>"
            "</aside>"
            f"<main>{body}</main>"
            "</div></body></html>"
            if chrome else
            "<body class='plain'>"
            "<header class='topbar'><div class='wrap'>"
-           "<span class='mark' aria-hidden='true'>SC</span>"
+           f"{LOGO_SVG}"
            "<span class='name'>Smart Chatbot"
            "<span class='role'>Library staff</span></span>"
            f"{_THEME_TOGGLE}"
