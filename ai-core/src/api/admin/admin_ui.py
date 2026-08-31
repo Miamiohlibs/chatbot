@@ -215,29 +215,28 @@ a:hover{text-decoration:underline}
   color:hsl(var(--danger));font-size:.72rem;font-weight:700;
   text-align:center;font-variant-numeric:tabular-nums;
 }
-/* Light / dark. Two icons, one shown at a time -- and the one shown is the
-   state you are IN, not the one the button would take you to. "Which does
-   this button mean?" is the entire confusion with these. */
-.themetoggle{
-  display:flex;align-items:center;gap:.55rem;width:100%;
-  margin-top:.6rem;padding:.45rem .5rem;height:auto;
-  border:1px solid transparent;border-radius:calc(var(--radius) - .2rem);
-  background:transparent;color:hsl(var(--muted-foreground));
-  font:inherit;font-size:.85rem;font-weight:500;cursor:pointer;
+/* Light / dark. Both options on screen, the active one filled -- what it
+   is and what it would do in the same glance. */
+.themeswitch{
+  display:flex;gap:.15rem;margin-top:.7rem;padding:.15rem;
+  border:1px solid hsl(var(--border));
+  border-radius:calc(var(--radius) - .15rem);
+  background:hsl(var(--muted) / .5);
 }
-.themetoggle:hover{background:hsl(var(--accent));
-  color:hsl(var(--foreground))}
-.themetoggle .ico{flex:0 0 1rem;opacity:.8}
-.themetoggle .moon{display:none}
-:root[data-theme="dark"] .themetoggle .sun{display:none}
-:root[data-theme="dark"] .themetoggle .moon{display:inline}
-@media (prefers-color-scheme: dark){
-  :root:not([data-theme="light"]) .themetoggle .sun{display:none}
-  :root:not([data-theme="light"]) .themetoggle .moon{display:inline}
+.themeswitch button{
+  flex:1 1 0;display:flex;align-items:center;justify-content:center;gap:.35rem;
+  height:1.85rem;padding:0 .5rem;font:inherit;font-size:.8rem;font-weight:500;
+  border:0;border-radius:calc(var(--radius) - .3rem);
+  background:transparent;color:hsl(var(--muted-foreground));cursor:pointer;
 }
-.topbar .themetoggle{width:auto;margin:0 0 0 auto}
-/* No script, no button. It would be a control that does nothing. */
-.themetoggle[hidden]{display:none}
+.themeswitch button:hover{color:hsl(var(--foreground))}
+.themeswitch button[aria-pressed="true"]{
+  background:hsl(var(--card));color:hsl(var(--foreground));font-weight:600;
+  box-shadow:0 1px 2px hsl(var(--foreground) / .12);
+}
+.themeswitch .ico{flex:0 0 .9rem;width:.9rem;height:.9rem}
+.topbar .themeswitch{margin:0 0 0 auto;width:auto}
+.themeswitch[hidden]{display:none}
 
 .sidebar .foot{
   margin-top:auto;padding:.85rem .5rem 0;
@@ -272,8 +271,8 @@ body.plain main{max-width:820px;margin:0 auto}
   .navgroup > .lbl{display:none}
   .sidebar a.item{white-space:nowrap}
   .sidebar .foot{display:none}
-  .themetoggle{width:auto;margin:0 0 0 auto}
-  .themetoggle span{display:none}
+  .themeswitch{margin:0 0 0 auto;padding:.1rem}
+  .themeswitch span{display:none}
   main{padding:1.25rem 1rem 3rem}
 }
 
@@ -506,6 +505,24 @@ a.tag:hover{text-decoration:none;border-color:hsl(var(--input))}
 .pager{display:flex;align-items:center;gap:.3rem;flex-wrap:wrap;
   font-size:.85rem}
 
+/* Folded groups -- the month-by-month day picker. The native element,
+   so it works with the keyboard and with JavaScript off. */
+details{border-bottom:1px solid hsl(var(--border))}
+details:last-of-type{border-bottom:0}
+details > summary{
+  cursor:pointer;padding:.5rem .1rem;font-size:.9rem;font-weight:500;
+  list-style:none;display:flex;align-items:center;gap:.5rem;
+}
+details > summary::-webkit-details-marker{display:none}
+details > summary::before{
+  content:"";width:.4rem;height:.4rem;flex:0 0 auto;
+  border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;
+  transform:rotate(-45deg);transition:transform .12s;opacity:.6;
+}
+details[open] > summary::before{transform:rotate(45deg)}
+details > summary:hover{color:hsl(var(--primary-ink))}
+details > summary .dim{font-weight:400;font-size:.82rem}
+
 /* --- rendered ETL diff ------------------------------------------------ */
 /* The report is markdown we generate, so it is shown as markdown rather
    than as the raw text an editor would see. */
@@ -719,29 +736,43 @@ _THEME_BOOT = (
     "catch(e){}})();</script>"
 )
 
-# The button is rendered hidden and unhidden by its own script, so a
-# browser with JavaScript off never shows a control that cannot work. It
-# still follows the system theme there, which is what it did before.
+# A TWO-POSITION SWITCH, NOT A LABEL.
+#
+# The first version showed one icon and the word for the theme you were
+# in, reasoning that "which does this button mean?" is the confusion with
+# these. It produced something that looks exactly like a nav item: the
+# operator read the whole sidebar and reported there was no toggle, with
+# it on screen. Reported 2026-08-31.
+#
+# Both options are visible now and the active one is filled, so what it is
+# and what it would do are the same glance. It is a group of two buttons
+# rather than one that flips, which also means a screen reader hears
+# "Light, pressed" / "Dark" instead of a name that changes under it.
+#
+# Rendered hidden and unhidden by its own script, so a browser with no
+# JavaScript never shows a control that cannot work -- it still follows
+# the system theme there, which is what it did before any of this.
 _THEME_TOGGLE = (
-    "<button type='button' class='themetoggle' id='theme-toggle' hidden"
-    " aria-live='polite'>"
-    + icon("sun").replace("class='ico'", "class='ico sun'")
-    + icon("moon").replace("class='ico'", "class='ico moon'")
-    + "<span class='lbl'></span></button>"
-    "<script>(function(){var b=document.getElementById('theme-toggle');"
-    "if(!b)return;b.hidden=false;"
+    "<div class='themeswitch' id='theme-switch' role='group' hidden "
+    "aria-label='Colour theme'>"
+    "<button type='button' data-theme-set='light' aria-pressed='false'>"
+    + icon("sun") + "<span>Light</span></button>"
+    "<button type='button' data-theme-set='dark' aria-pressed='false'>"
+    + icon("moon") + "<span>Dark</span></button>"
+    "</div>"
+    "<script>(function(){var g=document.getElementById('theme-switch');"
+    "if(!g)return;g.hidden=false;"
     "function cur(){var a=document.documentElement.getAttribute('data-theme');"
     "if(a==='dark'||a==='light')return a;"
     "return window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)')"
     ".matches?'dark':'light';}"
     "function paint(){var c=cur();"
-    "b.querySelector('.lbl').textContent=(c==='dark'?'Dark':'Light');"
-    # The label says which theme you are IN; the accessible name says what
-    # the button DOES -- a screen reader user gets no icon to read.
-    "b.setAttribute('aria-label','Switch to '+(c==='dark'?'light':'dark')+' mode');}"
-    "b.addEventListener('click',function(){var n=cur()==='dark'?'light':'dark';"
+    "[].forEach.call(g.querySelectorAll('button'),function(b){"
+    "b.setAttribute('aria-pressed',b.dataset.themeSet===c?'true':'false');});}"
+    "[].forEach.call(g.querySelectorAll('button'),function(b){"
+    "b.addEventListener('click',function(){var n=b.dataset.themeSet;"
     "document.documentElement.setAttribute('data-theme',n);"
-    "try{localStorage.setItem('mu-admin-theme',n);}catch(e){}paint();});"
+    "try{localStorage.setItem('mu-admin-theme',n);}catch(e){}paint();});});"
     "paint();})();</script>"
 )
 

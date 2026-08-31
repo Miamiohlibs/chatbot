@@ -167,12 +167,46 @@ def build_conversations_router(deps: dict) -> Any:
                for t, label in _FLAG_TAGS]
         )
 
-        recent = " ".join(
-            f"<a class='tag{' active' if d['day'] == day else ''}' "
-            f"href='/admin/conversations?day={_e(d['day'])}{kq}'>"
-            f"{_e(d['day'][5:])} <span class='dim'>{d['questions']}</span></a>"
-            for d in days[:14]
-        )
+        # GROUPED BY MONTH, AND FOLDED.
+        #
+        # A flat strip of every day with traffic was fourteen chips in
+        # August and will be three hundred by next summer. `<details>`
+        # rather than a script: it is native, keyboard-reachable, and it
+        # survives the console being read with JavaScript off.
+        #
+        # The number is QUESTIONS, not conversations. The header above
+        # this counts conversations, so the same day showed "3
+        # conversation(s)" and a chip reading 11 with nothing saying they
+        # measured different things. Reported 2026-08-31.
+        by_month: "dict[str, list]" = {}
+        for d in days:
+            by_month.setdefault(d["day"][:7], []).append(d)
+
+        def _month_block(month: str, rows: list, first: bool) -> str:
+            asked = sum(r["questions"] for r in rows)
+            chips = " ".join(
+                f"<a class='tag{' active' if r['day'] == day else ''}' "
+                f"href='/admin/conversations?day={_e(r['day'])}{kq}'>"
+                f"{_e(r['day'][8:])} <span class='dim'>{r['questions']}"
+                f"{'+' if r.get('partial') else ''}</span></a>"
+                for r in rows)
+            label = dt.date.fromisoformat(rows[0]["day"]).strftime("%B %Y")
+            return (
+                f"<details{' open' if first else ''}>"
+                f"<summary>{_e(label)} "
+                f"<span class='dim'>{len(rows)} day(s), {asked} question(s)"
+                f"</span></summary>"
+                f"<div class='filter-bar' style='margin:.5rem 0 .9rem'>"
+                f"{chips}</div></details>")
+
+        recent = "".join(
+            _month_block(m, rows, i == 0)
+            for i, (m, rows) in enumerate(sorted(by_month.items(),
+                                                 reverse=True)))
+        if any(r.get("partial") for d in days for r in [d]):
+            recent += ("<p class='hint'>A count marked <code>+</code> is "
+                       "short: that day sits at the edge of how far back "
+                       "this reads.</p>")
 
         pages = max(1, -(-total // per))
         if page > pages and total:
@@ -410,14 +444,23 @@ def build_conversations_router(deps: dict) -> Any:
             # Scoped under .convs: an unscoped `td.num` or `tr.needs td`
             # lands after the shared stylesheet and restyles every table in
             # the console, including the one on the page you navigate to next.
-            + f"<style>.convs tr.needs td{{background:#fffaf5}}"
+            # Tokens, not hex. This block said `background:#fffaf5` and
+            # `var(--miami)` -- names from the stylesheet as it stood
+            # before 2026-08-30. The tint became a white block in dark
+            # mode and the two variables became undefined, so the hover
+            # simply stopped happening. Anything that paints has to come
+            # from the shared tokens or it only works in one theme.
+            + f"<style>.convs tr.needs td"
+            f"{{background:hsl(var(--danger) / .09)}}"
             f".convs .setsrcs{{white-space:nowrap;margin-left:.35rem}}"
             f".convs .setsrc{{display:inline-block;width:1.15rem;"
             f"text-align:center;font-size:.7rem;line-height:1.15rem;"
-            f"border:1px solid var(--line);border-radius:3px;color:var(--muted);"
+            f"border:1px solid hsl(var(--border));border-radius:3px;"
+            f"color:hsl(var(--muted-foreground));"
             f"text-decoration:none;margin-left:.1rem}}"
-            f".convs .setsrc:hover{{background:var(--miami);color:#fff;"
-            f"border-color:var(--miami)}}"
+            f".convs .setsrc:hover{{background:hsl(var(--primary));"
+            f"color:hsl(var(--primary-foreground));"
+            f"border-color:hsl(var(--primary))}}"
             f".convs td.num{{text-align:right;white-space:nowrap;"
             f"font-variant-numeric:tabular-nums}}</style>"
             # "Flags" was a bare <th></th>. The column carries refusals,
@@ -430,6 +473,9 @@ def build_conversations_router(deps: dict) -> Any:
             + "".join(row(r) for r in rows) + "</table>"
             + pager()
             + f"<h2 style='font-size:.95rem;margin-top:1.4rem'>Other days</h2>"
+            f"<p class='hint' style='margin:-.3rem 0 .6rem'>The number "
+            f"beside each day is how many QUESTIONS were asked, which is "
+            f"not the count of conversations above.</p>"
             f"<div>{recent}</div>"
         )
         return HTMLResponse(ui.page(

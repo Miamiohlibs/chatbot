@@ -718,9 +718,16 @@ async def conversation_days(db: Any, *, limit: int = 30) -> list[dict]:
     Powers the date picker. Counting in Python rather than SQL because the
     day boundary has to be Oxford's, and Postgres holds these in UTC.
     """
+    # The read cap is a silent cliff: at 4,000 the oldest days in the
+    # window come back with a fraction of their questions counted and
+    # nothing says so. 3,151 today, so it has never bitten -- but a number
+    # that goes quietly wrong at a threshold nobody watches is worse than
+    # one that is missing. `partial` is set when the cap was reached, and
+    # the page says so rather than showing a count it cannot stand behind.
+    take = 20000
     try:
         msgs = await db.message.find_many(
-            where={"type": "user"}, order={"timestamp": "desc"}, take=4000,
+            where={"type": "user"}, order={"timestamp": "desc"}, take=take,
         )
     except Exception:  # noqa: BLE001
         return []
@@ -730,8 +737,14 @@ async def conversation_days(db: Any, *, limit: int = 30) -> list[dict]:
         if ld is None:
             continue
         tally[ld.date().isoformat()] = tally.get(ld.date().isoformat(), 0) + 1
-    return [{"day": d, "questions": n}
+    partial = len(msgs) >= take
+    rows = [{"day": d, "questions": n, "partial": False}
             for d, n in sorted(tally.items(), reverse=True)][:limit]
+    if partial and rows:
+        # Only the oldest day in the window can be short: the read is
+        # newest-first, so everything above it is whole.
+        rows[-1]["partial"] = True
+    return rows
 
 
 def _norm_q(text: str) -> str:

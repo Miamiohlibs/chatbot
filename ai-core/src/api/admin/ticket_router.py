@@ -671,11 +671,15 @@ def build_ticket_router(deps: dict):
             # All scoped under .tkt. `label{...}` unscoped would restyle
             # every form label in the console -- the corrections form, the
             # kill switch -- from a page that has nothing to do with them.
-            f"<style>.tkt .transcript{{border:1px solid #e3e3e3;"
+            # Tokens, not hex: three greys and a red that were fixed to
+            # the light theme, so on a dark console the transcript drew
+            # its borders in near-white.
+            f"<style>.tkt .transcript{{border:1px solid hsl(var(--border));"
             f"border-radius:8px;padding:.4rem .8rem;margin:.6rem 0}}"
-            f".tkt .turn{{padding:.5rem 0;border-bottom:1px solid #f0f0f0}}"
+            f".tkt .turn{{padding:.5rem 0;"
+            f"border-bottom:1px solid hsl(var(--border))}}"
             f".tkt .turn:last-child{{border-bottom:0}}"
-            f".tkt .turn.user b{{color:#8E1224}}"
+            f".tkt .turn.user b{{color:hsl(var(--primary-ink))}}"
             f".tkt .turn b{{display:block;font-size:.72rem;"
             f"letter-spacing:.05em;text-transform:uppercase}}"
             f".tkt label{{display:block;margin:.7rem 0 .2rem;"

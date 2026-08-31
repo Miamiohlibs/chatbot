@@ -72,11 +72,17 @@ _STYLE = (
     ".cost th:first-child,.cost td:first-child{text-align:left}"
     ".cost .big{font-size:1.7rem;font-weight:700;line-height:1.1;"
     "font-variant-numeric:tabular-nums}"
-    ".cost .muted{color:var(--muted);font-size:.78rem}"
-    ".cost .warn{color:var(--miami);font-weight:600}"
-    ".cost .alert{border:1px solid #e0b4b4;background:#fdf6f6;"
+    # Tokens, not hex, and not the pre-2026-08-30 variable names. As
+    # written these were `var(--muted)` and `var(--miami)`, which no
+    # longer exist, plus three hardcoded near-whites that turned into
+    # bright blocks the moment the console followed a dark system.
+    ".cost .muted{color:hsl(var(--muted-foreground));font-size:.78rem}"
+    ".cost .warn{color:hsl(var(--primary-ink));font-weight:600}"
+    ".cost .alert{border:1px solid hsl(var(--danger) / .35);"
+    "background:hsl(var(--danger-bg));color:hsl(var(--foreground));"
     "border-radius:8px;padding:.7rem 1rem;margin:.8rem 0;font-size:.85rem}"
-    ".cost code{background:#f4f4f4;padding:1px 4px;border-radius:3px}"
+    ".cost code{background:hsl(var(--muted));padding:1px 4px;"
+    "border-radius:3px}"
 )
 
 

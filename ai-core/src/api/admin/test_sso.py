@@ -682,22 +682,38 @@ def test_the_two_dark_blocks_carry_the_same_tokens():
     assert tokens(media) == tokens(explicit)
 
 
-def test_the_toggle_is_hidden_until_its_own_script_shows_it():
-    """No JavaScript, no button -- it would be a control that does
+def test_the_switch_is_hidden_until_its_own_script_shows_it():
+    """No JavaScript, no control -- it would be a button that does
     nothing. The page still follows the system theme there."""
     from src.api.admin import admin_ui as ui
 
     body = ui.page("x", "y")
-    assert "class='themetoggle' id='theme-toggle' hidden" in body
-    assert "b.hidden=false" in body
+    assert "id='theme-switch' role='group' hidden" in body
+    assert "g.hidden=false" in body
 
 
-def test_the_toggle_names_what_it_does_not_where_you_are():
-    """The visible label says which theme you are in; the accessible name
-    says what pressing it would do. A screen reader user gets no icon."""
+def test_both_themes_are_on_screen_at_once():
+    """The first version showed one icon and the name of the theme you
+    were in. It looked exactly like a nav item, and the operator read the
+    whole sidebar and reported there was no toggle -- with it on screen.
+    Reported 2026-08-31. What it is and what it would do have to be the
+    same glance."""
     from src.api.admin import admin_ui as ui
 
-    assert "aria-label','Switch to '" in ui.page("x", "y")
+    body = ui.page("x", "y")
+    assert "data-theme-set='light'" in body
+    assert "data-theme-set='dark'" in body
+    assert ">Light<" in body and ">Dark<" in body
+
+
+def test_the_active_theme_is_announced_not_just_drawn():
+    """`aria-pressed` on each half, so a screen reader hears which one is
+    on rather than being told about a filled background."""
+    from src.api.admin import admin_ui as ui
+
+    body = ui.page("x", "y")
+    assert "aria-pressed" in body
+    assert "aria-pressed" in ui.STYLE, "and the fill follows that state"
 
 
 def test_the_red_splits_into_a_fill_and_an_ink():
@@ -728,3 +744,71 @@ def test_the_red_is_never_used_as_text_from_the_fill_token():
             continue
         assert "color:hsl(var(--primary));" not in stripped.replace(
             "border-color:hsl(var(--primary));", ""), stripped
+
+
+# --- nothing paints outside the token system -----------------------------
+
+def _admin_sources():
+    import pathlib
+    here = pathlib.Path(__file__).resolve().parent
+    for path in sorted(here.glob("*_router.py")):
+        # sso_router's refusal page is deliberately standalone: it has to
+        # render when the console it belongs to has refused to admit you,
+        # so it carries its own colours and its own dark-mode block.
+        if path.name == "sso_router.py":
+            continue
+        yield path, path.read_text(encoding="utf-8")
+
+
+def _css_blocks(text: str):
+    """The strings in a router that end up inside a <style> tag.
+
+    Inline `<style>...</style>` and module-level stylesheet constants.
+    Comments explaining the CSS are not CSS.
+    """
+    import re
+
+    for block in re.findall(r"<style>(.*?)</style>", text, re.S):
+        yield block
+    for const in re.findall(r"^_STYLE = \((.*?)^\)", text, re.S | re.M):
+        yield "\n".join(ln for ln in const.splitlines()
+                         if not ln.strip().startswith("#"))
+
+
+def test_no_router_uses_a_token_the_stylesheet_does_not_define():
+    """The stylesheet was rebuilt on 2026-08-30 and the token names
+    changed. Three routers kept referring to the old ones from inline
+    <style> blocks -- `var(--miami)`, `var(--line)`, `var(--muted)` used
+    as a colour -- so those rules silently stopped applying. Nothing threw;
+    the page just quietly looked wrong, which is the only way CSS ever
+    fails.
+    """
+    import re
+
+    from src.api.admin import admin_ui as ui
+
+    defined = set(re.findall(r"(--[a-z-]+)\s*:", ui.STYLE))
+    bad = []
+    for path, text in _admin_sources():
+        # Only what actually reaches a browser. Scanning whole files
+        # flagged the comments that explain which names went away.
+        for block in _css_blocks(text):
+            for name in set(re.findall(r"var\((--[a-z-]+)", block)):
+                if name not in defined:
+                    bad.append(f"{path.name}: var({name})")
+    assert not bad, "undefined tokens: " + ", ".join(sorted(bad))
+
+
+def test_no_router_hardcodes_a_colour_in_an_inline_stylesheet():
+    """A hex in an inline style is a colour that cannot follow the theme.
+    `.convs tr.needs td{background:#fffaf5}` was a gentle tint in light
+    mode and a white block in dark. Reported 2026-08-31.
+    """
+    import re
+
+    bad = []
+    for path, text in _admin_sources():
+        for block in _css_blocks(text):
+            for hexcode in re.findall(r"#[0-9a-fA-F]{3,8}\b", block):
+                bad.append(f"{path.name}: {hexcode}")
+    assert not bad, "hardcoded colours: " + ", ".join(sorted(set(bad)))

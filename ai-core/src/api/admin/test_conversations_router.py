@@ -655,3 +655,43 @@ async def test_a_conversation_of_only_greetings_is_not_condemned():
     db = _DB([_msg("a", y, "user", "hi"), _msg("b", t, "user", "hi")])
     rows = (await list_conversations_on(db, "2026-08-21"))["rows"]
     assert all(r["source"]["tag"] == "unlabelled" for r in rows)
+
+
+# --- the day picker ------------------------------------------------------
+
+def test_the_days_are_grouped_by_month_and_folded():
+    """A flat strip of every day with traffic was fourteen chips in August
+    and will be three hundred by next summer. Reported 2026-08-31."""
+    import inspect
+
+    from src.api.admin import conversations_router as CR
+
+    src = inspect.getsource(CR)
+    block = src[src.index("GROUPED BY MONTH"):src.index("recent = \"\".join")]
+    assert "by_month" in block
+    assert "<details" in block, "native element, not a script"
+    assert "' open' if first" in block, "the current month starts open"
+
+
+def test_the_page_says_the_day_number_counts_questions():
+    """The header counts CONVERSATIONS and the chip counts QUESTIONS, so
+    the same day read "3 conversation(s)" beside a chip saying 11 with
+    nothing distinguishing them."""
+    import inspect
+
+    from src.api.admin import conversations_router as CR
+
+    assert "how many QUESTIONS" in inspect.getsource(CR)
+
+
+def test_a_count_at_the_edge_of_the_read_is_marked():
+    """A number that goes quietly wrong at a threshold nobody watches is
+    worse than one that is missing."""
+    import inspect
+
+    from src.api.admin import review_queries as RQ
+
+    src = inspect.getsource(RQ.conversation_days)
+    assert '"partial"' in src
+    assert "rows[-1][\"partial\"] = True" in src, \
+        "only the oldest day in a newest-first read can be short"
