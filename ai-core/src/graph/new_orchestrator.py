@@ -584,6 +584,39 @@ def _run_turn(
                 )
             # No liaison found -> leave the turn exactly as it was.
 
+    # --- 2.0266. A named colleague is not out of scope ---
+    #
+    # "Does Jerry Yarnetsky work here?" was answered "The question you
+    # asked is outside that scope" -- to Jerry Yarnetsky, whose job title
+    # is Web Services Librarian and who left a thumbs-down on it in
+    # August. Whether a named person works at the Libraries is exactly a
+    # library question and the staff export answers it in one lookup.
+    #
+    # BOTH halves are required: a surname from the roster AND a phrasing
+    # that is asking about a person. The surname alone would turn "where
+    # is the Brown building" into a staff answer, and there are four
+    # people here called Michael.
+    if classification.intent == "out_of_scope" and not booking_flow:
+        _who = _staff_person_rescue(request.user_message, scope)
+        if _who is not None:
+            _ans, _cites = _who
+            latency_ms = int((time.monotonic() - turn_start) * 1000)
+            record_request(endpoint="/chat", status="staff_person",
+                           latency_s=latency_ms / 1000)
+            log.info("2.0266: rescued out_of_scope -> staff person")
+            bind_request_context(intent="staff_directory",
+                                 margin=classification.margin)
+            return TurnResponse(
+                answer=_ans, is_refusal=False, refusal_trigger=None,
+                citations=_cites, confidence="high",
+                intent="staff_directory", scope=scope.as_filter(),
+                model_used="(none -- staff_person_short_circuit)",
+                tokens={"input": 0, "cached_input": 0, "output": 0},
+                fired_corrections=[],
+                agent_stopped_reason="staff_person_short_circuit",
+                latency_ms=latency_ms, cited_chunk_ids=[],
+            )
+
     # --- 2.027. "Book King 103 tomorrow 6pm" override ---
     # Naming the ROOM instead of saying the word "room" broke booking entirely.
     # Live simulation 2026-07-30:
@@ -7835,6 +7868,92 @@ def _campus_head(deps: "OrchestratorDeps", campus: str) -> "Optional[dict]":
 
 
 
+# Asking ABOUT a person, as opposed to mentioning a word that happens to
+# be somebody's surname. Deliberately narrow: this only ever rescues a
+# turn that was going to be refused, so a miss costs the refusal we would
+# have given anyway, and a false hit puts a colleague's desk phone in
+# front of somebody who did not ask for it.
+_ASKS_ABOUT_A_PERSON = re.compile(
+    r"\b(work(s|ing)?\s+(here|at|for|in)"
+    r"|still\s+(here|work|there)"
+    r"|who\s+is|who's|whos"
+    r"|is\s+there\s+(a|an|any)"
+    r"|employ(ed|ee|s)?"
+    r"|on\s+(the\s+)?staff"
+    r"|(his|her|their)\s+(email|phone|number|office|title)"
+    r"|contact\s+(details|info|information))\b",
+    re.IGNORECASE)
+
+
+def _staff_person_rescue(asked: str,
+                         scope: "Scope") -> "Optional[tuple[str, list[dict]]]":
+    """"Does <name> work here?" -> who they are, or None to refuse as before."""
+    text = (asked or "").strip()
+    if not text:
+        return None
+    try:
+        from src.api.admin.staff_directory import find_by_name
+
+        rows = [r for r in find_by_name(text) if r.get("email")]
+    except Exception:  # noqa: BLE001 -- never break a turn over a lookup
+        log.warning("staff person lookup failed for %r", text, exc_info=True)
+        return None
+    if not rows:
+        return None
+    # THE PHRASING GATE ONLY GUARDS THE WEAK MATCH.
+    #
+    # A full name in a sentence is unambiguous whatever the sentence says
+    # -- "what is Ken Irwin email" needs no permission slip. A bare
+    # surname does: seventy-five of them include ordinary English words
+    # and two of our own buildings.
+    if rows[0].get("match") != "full" and not _ASKS_ABOUT_A_PERSON.search(text):
+        return None
+    # "Yes —" only when something was actually asked yes-or-no. On a bare
+    # "Barry Zaslow" it answers a question nobody put.
+    yesno = bool(re.match(r"\s*(does|do|is|are|was|were)\b", text, re.I))
+    return _format_staff(rows, lead_with_person=True, yes_no=yesno)
+
+
+def _format_staff(rows: list, *, lead_with_person: bool = False,
+                  yes_no: bool = False) -> "tuple[str, list[dict]]":
+    """One sentence naming who, with the contact details already public on
+    the staff page.
+
+    `lead_with_person` is for "does X work here?", which is a yes/no
+    question: answering it with "Web Services Librarian is Jerry
+    Yarnetsky" reads as a non-answer to the thing that was asked.
+    """
+    def _one(r: dict) -> str:
+        phone = str(r.get("phone") or "").strip()
+        contact = f"{r['email']}, {phone}" if phone else r["email"]
+        where = f" at {r['campus']}" if r.get("campus") else ""
+        return f"{r['name']}{where} ({contact})"
+
+    shown = rows[:3]
+    listed = "; ".join(_one(r) for r in shown)
+    title_text = str(shown[0].get("title") or "").strip()
+    if lead_with_person and len(shown) == 1:
+        r = shown[0]
+        phone = str(r.get("phone") or "").strip()
+        contact = f"{r['email']}, {phone}" if phone else r["email"]
+        where = f" at {r['campus']}" if r.get("campus") else ""
+        opener = "Yes — " if yes_no else ""
+        body = (f"{opener}{r['name']} is the {title_text}{where} "
+                f"({contact})")
+    elif len(rows) == 1:
+        body = f"{title_text} is {listed}"
+    else:
+        body = f"{len(rows)} people hold that title: {listed}"
+        if len(rows) > len(shown):
+            body += f", and {len(rows) - len(shown)} more"
+    return (
+        f"{body} [1]. Source: Libraries staff directory.",
+        [{"n": 1, "url": _STAFF_DIRECTORY_URL,
+          "snippet": "; ".join(f"{r['name']} — {r.get('title') or ''}"
+                               for r in shown)}],
+    )
+
+
 def _staff_by_title(deps: "OrchestratorDeps", asked: str,
                     campus: str = "") -> "Optional[tuple[str, list[dict]]]":
     """Answer "who is the <job title>?" from the staff roster.
@@ -7851,47 +7970,44 @@ def _staff_by_title(deps: "OrchestratorDeps", asked: str,
     """
     if not (asked or "").strip():
         return None
-    try:
-        from src.agent.tool_registry import ToolCall
 
-        res = deps.tool_registry.dispatch(ToolCall(
-            id="staff-by-title", name="lookup_librarian",
-            arguments={"title": asked, "campus": campus or ""}))
+    # THE ROSTER, NOT `lookup_librarian`.
+    #
+    # This asked the tool for `{"title": ...}` and the tool takes only
+    # subject / name / campus -- so `title` was dropped, the "at least one
+    # filter" guard then rejected the call, and this function returned
+    # None on every question it was ever asked. It had never once
+    # produced an answer. Found 2026-08-31, from a thumbs-down a
+    # colleague left in August on "who are the web services librarians?".
+    #
+    # The tool could not have worked whatever it was passed: it is backed
+    # by LibrarianSubject, the subject-liaison table, and a job title is
+    # not a subject. The staff export is the only place titles live.
+    from src.api.admin.staff_directory import find_by_name, find_by_title
+
+    try:
+        rows = find_by_title(asked)
+        if not rows:
+            # "Does <person> work here?" is the same question wearing a
+            # different hat, and it was answered "that is outside my
+            # scope" -- to the colleague it was about.
+            rows = find_by_name(asked)
     except Exception:  # noqa: BLE001 -- never break a turn over a lookup
-        log.warning("title lookup failed for %r", asked, exc_info=True)
+        log.warning("staff roster lookup failed for %r", asked, exc_info=True)
         return None
-    if res is None or res.error or not res.data:
-        return None
-    data = res.data
-    rows = data.get("librarians") if isinstance(data, dict) else data
-    rows = [r for r in (rows or []) if isinstance(r, dict) and r.get("email")]
+    if campus:
+        want = campus.strip().lower()
+        narrowed = [r for r in rows
+                    if not r.get("campus")
+                    or want in str(r["campus"]).lower()]
+        # Narrowing to nothing means the person is real and works
+        # somewhere else. Say who they are rather than nobody.
+        rows = narrowed or rows
+    rows = [r for r in rows if r.get("email")]
     if not rows:
         return None
 
-    # More than three people share some titles (five Library Associates).
-    # Naming all five in a sentence is a list, not an answer; name the
-    # first three and say how many there are.
-    def _one(r: dict) -> str:
-        phone = str(r.get("phone") or "").strip()
-        contact = f"{r['email']}, {phone}" if phone else r["email"]
-        where = f" at {r['campus']}" if r.get("campus") else ""
-        return f"{r['name']}{where} ({contact})"
-
-    shown = rows[:3]
-    listed = "; ".join(_one(r) for r in shown)
-    title_text = str(shown[0].get("title") or asked).strip()
-    if len(rows) == 1:
-        body = f"{title_text} is {listed}"
-    else:
-        body = f"{len(rows)} people hold that title: {listed}"
-        if len(rows) > len(shown):
-            body += f", and {len(rows) - len(shown)} more"
-    return (
-        f"{body} [1]. Source: Libraries staff directory.",
-        [{"n": 1, "url": _STAFF_DIRECTORY_URL,
-          "snippet": "; ".join(f"{r['name']} — {r.get('title') or ''}"
-                               for r in shown)}],
-    )
+    return _format_staff(rows)
 
 
 def _subject_liaison_short_circuit(
