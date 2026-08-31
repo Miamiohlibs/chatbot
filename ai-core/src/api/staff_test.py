@@ -85,37 +85,21 @@ def build_staff_test_router():
 
     @router.get("/librarian/staff-test")
     async def staff_test() -> Response:
-        """Set the marker, SAY SO, then hand them to the widget.
+        """Set the marker and go. One click, straight to the chat.
 
-        This used to be a bare 302 straight onto the chat. It worked --
-        every conversation since has carried origin="staff" -- and it told
-        the person nothing, so the only way to find out whether the click
-        had taken was to hold a conversation and then go looking for it in
-        the admin console. A conversation you never typed into does not
-        appear there at all, which reads exactly like a broken link.
-        Reported 2026-08-31.
+        This briefly showed a confirmation page with a three-second
+        auto-continue, added on 2026-08-31 because the bare redirect told
+        the person nothing. The operator's answer the same day: the link
+        was already buried three sections down a hub, and an interstitial
+        on top of that is another step in front of a thing that should be
+        instant.
 
-        Three seconds and an explicit link: long enough to read, and it
-        does not cost a habitual user a click.
+        What replaces it is better placed anyway -- the hub says whether
+        this browser is marked, in a strip at the very top, before
+        anything else on the page. The state is readable without clicking
+        at all, which the confirmation never was.
         """
-        from src.api.admin import admin_ui as ui
-
-        resp = HTMLResponse(ui.page(
-            "Test mode on",
-            "<h1>This browser is now marked as staff testing</h1>"
-            "<p class='lede'>Everything you ask from here is recorded as "
-            "testing rather than as a student's question, so the usage "
-            "numbers stay honest. Same bot, same answers &mdash; nothing "
-            "about the chat changes.</p>"
-            "<div class='card'>"
-            "<p>The marking lasts until you close your browser. It does "
-            "<b>not</b> follow you to a different browser, a private "
-            "window, or another device.</p>"
-            f"<div class='acts'>{ui.action(WIDGET_URL, 'Open the chatbot', primary=True)}"
-            f"{ui.action('/librarian/staff-test/off', 'Stop marking me', ghost=True)}"
-            "</div></div>"
-            "<p class='hint'>Taking you to the chatbot in a moment.</p>",
-            chrome=False, refresh_s=3, refresh_to=WIDGET_URL))
+        resp = RedirectResponse(WIDGET_URL, status_code=302)
         resp.set_cookie(
             COOKIE, STAFF,
             path="/",

@@ -304,11 +304,42 @@ def render_librarian_hub(code: str, caller=None,
                               'Open the questions', primary=True))
         )
 
+    # THE TEST SWITCH, AT THE TOP, IN ONE LINE.
+    #
+    # It used to be three sections down, under two paragraphs of
+    # explanation. Somebody who has come here to try the bot has to read
+    # past the report form and the what-happens-next list to find the one
+    # control they need first. Operator, 2026-08-31: too deep, make it one
+    # click that just switches you.
+    #
+    # The fuller card stays where it is with the explanation in it. This
+    # is the shortcut for somebody who already knows what it does, and the
+    # state readout for everybody else -- which is also what replaced the
+    # confirmation page the link used to bounce through.
+    if marked:
+        strip = (
+            "<p class='good' style='display:flex;align-items:center;"
+            "gap:.75rem;flex-wrap:wrap'>"
+            "<span><b>Test mode is ON for this browser.</b> Your "
+            "questions are recorded as testing, not as a student's.</span>"
+            + ui.action('/librarian/staff-test/off', 'Turn it off',
+                        ghost=True) + "</p>")
+    else:
+        strip = (
+            "<p class='hint' style='display:flex;align-items:center;"
+            "gap:.75rem;flex-wrap:wrap;padding:.7rem .9rem;"
+            "border:1px solid hsl(var(--border));border-radius:.5rem'>"
+            "<span>Test mode is <b>off</b> — anything you ask counts "
+            "as a student's question.</span>"
+            + ui.action('/librarian/staff-test',
+                        'Turn it on and open the chatbot', primary=True)
+            + "</p>")
+
     body = (
         "<h1>Smart Chatbot &mdash; staff hub</h1>"
         "<p class='lede'>Found the chatbot giving a wrong or outdated "
         "answer? Tell us here and the maintainer will fix it.</p>"
-        f"{report}{reading}{after}{testing}"
+        f"{strip}{report}{reading}{after}{testing}"
         "<p><small class='dim'>Bookmark this page &mdash; the links carry "
         "the access code.</small></p>"
     )

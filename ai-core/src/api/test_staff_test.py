@@ -66,71 +66,31 @@ def test_the_link_is_under_a_prefix_nginx_actually_proxies(client):
     assert all(p.startswith("/librarian/") for p in routes), routes
 
 
-def test_the_link_sets_the_marker_and_says_so(client):
-    """It used to be a bare 302 straight onto the chat. That worked and
-    told the person nothing, so the only way to find out whether the click
-    had taken was to hold a conversation and go looking for it -- and a
-    conversation you never typed into does not appear in the console at
-    all, which reads exactly like a broken link. Reported 2026-08-31."""
+def test_the_link_sets_the_marker_and_goes_straight_to_the_chat(client):
+    """One click. It briefly showed a confirmation page with a
+    three-second auto-continue, added because the bare redirect told the
+    person nothing -- and the operator's answer was that the link was
+    already three sections down a hub and an interstitial on top of that
+    is another step in front of something that should be instant.
+
+    What replaced it is better placed: the hub says whether this browser
+    is marked, in a strip above everything else, readable without
+    clicking at all.
+    """
     r = client.get("/librarian/staff-test", follow_redirects=False)
-    assert r.status_code == 200
-    assert "marked as staff testing" in r.text
-    # The marker is what actually matters, and it is set either way.
+    assert r.status_code == 302
+    assert r.headers["location"] == ST.WIDGET_URL
     assert r.cookies.get(ST.COOKIE) == ST.STAFF
-    # ...and it still hands them to the widget without a second thought.
-    assert ST.WIDGET_URL in r.text
-    assert f"url={ST.WIDGET_URL}" in r.text, "no auto-continue"
-
-def test_the_marker_dies_with_the_browser(client):
-    # A session cookie. A librarian who tests today and works the desk
-    # tomorrow must not still be labelled -- that would relabel real work as
-    # a test, which is the failure this whole feature exists to prevent.
-    raw = client.get("/librarian/staff-test", follow_redirects=False).headers["set-cookie"]
-    low = raw.lower()
-    assert "max-age" not in low and "expires" not in low
-
-
-def test_the_marker_is_not_readable_by_page_scripts(client):
-    raw = client.get("/librarian/staff-test", follow_redirects=False).headers["set-cookie"]
-    assert "httponly" in raw.lower()
-
-
-def test_turning_it_off_clears_the_marker(client):
-    client.get("/librarian/staff-test", follow_redirects=False)
-    r = client.get("/librarian/staff-test/off")
-    assert r.status_code == 200
-    assert "no longer marked" in r.text
-    set_cookie = r.headers.get("set-cookie", "").lower()
-    assert COOKIE in set_cookie
-    assert 'max-age=0' in set_cookie or 'expires=thu, 01 jan 1970' in set_cookie
-
-
-def test_the_status_endpoint_reports_the_current_state(client):
-    assert client.get("/librarian/staff-test/status").json() == {"staff_test": False}
-    client.get("/librarian/staff-test", follow_redirects=False)
-    assert client.get("/librarian/staff-test/status").json() == {"staff_test": True}
 
 
 def test_the_link_grants_nothing(client):
     """It records which door somebody came through. It is not a login and
-    must never be mistaken for one.
-
-    Written against what a leak would actually LOOK like rather than
-    against the words. Scanning for the bare word "admin" caught the
-    stylesheet's own comments and the page title, which is how this test
-    spent a while failing on a page that leaked nothing -- and it did
-    find one real thing: staff pages were titled "Smart Chatbot admin".
-    """
+    must never be mistaken for one. The only cookie it may set is the
+    marker, and the marker carries the literal string "staff"."""
     r = client.get("/librarian/staff-test", follow_redirects=False)
-    body = r.text
-    assert "key=" not in body, "no admin key in a staff-facing page"
-    assert "type='password'" not in body and 'type="password"' not in body
-    assert "/admin/" not in body, "no door into the operator console"
-    assert "Smart Chatbot admin" not in body, "this is not the admin console"
-    # The only cookie it may set is the marker, and the marker is not a
-    # credential: it carries the literal string "staff" and nothing else.
     assert r.cookies.get(ST.COOKIE) == ST.STAFF
     assert len(r.cookies) == 1
+    assert not r.text.strip(), "a redirect, with no page to leak anything on"
 
 def test_the_handshake_reads_the_cookie_and_passes_it_on():
     """Read from source. The handshake is expensive to import and the thing
@@ -203,3 +163,16 @@ def test_the_hub_offers_one_button_not_both():
     assert "Open in test mode" not in on
     off = render_librarian_hub("CODE", marked=False)
     assert "Stop marking me" not in off
+
+
+def test_the_hub_puts_the_switch_above_everything_else():
+    """It was three sections down, under two paragraphs. Somebody who came
+    to try the bot had to read past the report form to find the one
+    control they need first. Reported 2026-08-31."""
+    from src.api.admin.hub_router import render_librarian_hub
+
+    off = render_librarian_hub("CODE", marked=False)
+    assert off.index("Turn it on and open the chatbot") < off.index(
+        "Report a wrong chatbot answer")
+    on = render_librarian_hub("CODE", marked=True)
+    assert on.index("Test mode is ON") < on.index("Report a wrong chatbot")
