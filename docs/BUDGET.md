@@ -1,12 +1,33 @@
 # The $100/month ceiling: how it is enforced
 
-Operator decision, 2026-08-04. One hundred dollars a month, split into two
-purses that fail differently and so are controlled differently:
+One hundred dollars a month, split into two purses that fail differently
+and so are controlled differently:
 
 | purse | amount | who spends it | control |
 |---|---|---|---|
-| students | **$75** | the running service | throttled in four stages |
-| eval | **$25** | `run_eval` during development | refused once empty |
+| students | **$40** | the running service | throttled in four stages |
+| testing | **$60** | the eval harness, scripted runs, and librarians testing through `/librarian/staff-test` | refused once empty |
+
+**The split has moved three times and this table shows today's.** The
+earlier ones are in `PURSE_HISTORY` in `src/config/budget.py`, dated, so a
+month that closed under a different ceiling still reports against the one
+it actually ran under:
+
+| in force from | students | testing |
+|---|---:|---:|
+| the build period | $75 | $25 |
+| 2026-08-04 (rebalanced for development) | $25 | $75 |
+| 2026-08-13 (public beta opened) | $45 | $75 |
+| **2026-09-01** | **$40** | **$60** |
+
+Changing it is two edits: the numbers in `.env`, and a row here and in
+`PURSE_HISTORY`. Skip the second and nothing breaks today — only the
+history of the month you just left stops being true.
+
+**Librarian testing moved purses on 2026-09-01.** It arrives in a real
+browser from our own host, so until then it was charged to the students':
+$0.38 of $2.30, seventeen per cent of that purse, and growing as the eight
+department heads start using the console.
 
 ## Why a daily line, not just a monthly one
 
@@ -16,8 +37,8 @@ $0.01379 per call that is **$397 a day** — the entire monthly ceiling in
 about six hours.
 
 A ceiling checked at the end of the month is not a control. The guard runs
-every 15 minutes and compares against `$75 / days-in-month` as well as
-against the monthly total. In a 31-day month that daily line is **$2.42**.
+every 15 minutes and compares against `students / days-in-month` as well as
+against the monthly total. In a 31-day month at $40 that daily line is **$1.29**.
 
 ## Why the service degrades before it denies
 
@@ -157,8 +178,11 @@ BUDGET_MONTHLY_EVAL_USD=5
 BUDGET_MONTHLY_SERVING_USD=95
 ```
 
-The ceiling stays $100. The daily student line rises from $2.42 to $3.17 in
-a 30-day month, and every rung on the ladder moves with it automatically.
+The ceiling stays $100. The daily student line rises with it and every
+rung on the ladder moves automatically — and the second edit still
+applies: add a row to `PURSE_HISTORY` recording what the purse was until
+that day, or the month you just left starts reporting against a ceiling
+it never ran under.
 
 ## Related controls added at the same time
 
@@ -166,7 +190,7 @@ a 30-day month, and every rung on the ladder moves with it automatically.
 |---|---|---|
 | Booking caps | `src/observability/booking_quota.py` | 2 rooms per conversation, 2 per email per day, **through this bot only** |
 | Alert tiers | `src/observability/incident_alerts.py` | only `health` and `budget_exhausted` interrupt a person; the rest go to `scripts/alert_digest.py` |
-| Eval purse gate | `src/eval/run_eval.py` | refuses a run that would breach the $25, before it spends |
+| Testing purse gate | `src/eval/run_eval.py` | refuses a run that would breach the testing purse, before it spends |
 
 ## The external watchdog
 

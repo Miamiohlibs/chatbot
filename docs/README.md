@@ -11,7 +11,7 @@ the retired v3.1 stack lives under [archive/](./archive/).
 
 | Doc | What it covers |
 |---|---|
-| [01-SYSTEM-OVERVIEW.md](./01-SYSTEM-OVERVIEW.md) | Architecture, turn pipeline, model tiers, data stores, quality loop |
+| [01-SYSTEM-OVERVIEW.md](./01-SYSTEM-OVERVIEW.md) | **Start here.** The whole system: what runs, one turn end to end, data stores, who can reach what, the schedule, the money. Chinese: [01-SYSTEM-OVERVIEW.zh.md](./01-SYSTEM-OVERVIEW.zh.md) |
 | [02-ENVIRONMENT-VARIABLES.md](./02-ENVIRONMENT-VARIABLES.md) | Every env var: model tiers, Springshare APIs, alerts, admin secrets |
 | [03-SUBJECT-LIBRARIAN-SYSTEM.md](./03-SUBJECT-LIBRARIAN-SYSTEM.md) | Subject → librarian data layer (Postgres tables, course codes, fuzzy match) |
 | [04-SERVER-MONITORING.md](./04-SERVER-MONITORING.md) | systemd, email alerts, probes, logs, cost cron |
