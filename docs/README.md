@@ -5,9 +5,9 @@
 corrected on that date, and everything that had been superseded was moved
 into [archive/](./archive/).
 
-Sixteen files at this level. All of them describe the system as it runs
-today. Nothing here is history — history is in `archive/`, and it says so
-on its first line.
+Sixteen files at this level besides this one, and all of them describe the
+system as it runs today. Nothing here is history — history is in
+`archive/`, and it says so on its first line.
 
 > The numbering skips 03. That file was retired, and renumbering the rest
 > would break every reference anybody has ever pasted into a ticket. A gap
