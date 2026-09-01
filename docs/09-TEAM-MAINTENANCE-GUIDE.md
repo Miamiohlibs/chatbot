@@ -9,9 +9,13 @@ and the output under it is copied, not written.** Run any of them
 yourself; if what you get differs from what is printed here, this
 document is wrong and I want to know.
 
-That matters because the rest of the docs folder contains prose you have
-no way to check. Section 8 lists the parts of it that are currently
-false, by name.
+That matters because the rest of the folder is prose you have no way to
+check by running it. All 56 files in `docs/` were read line by line on the
+date above and the wrong parts corrected — but an audit is a photograph,
+not a guarantee, and the things that go stale here are small: a port, a
+service name, a path, a dollar figure. **Section 8 says what the audit
+found, what is still only partly true, and the two habits that keep this
+from happening again.**
 
 What this guide does **not** do is tell you every button. It explains how
 the thing is put together well enough that you can work out an answer to
