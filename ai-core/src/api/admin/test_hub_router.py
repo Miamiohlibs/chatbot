@@ -130,3 +130,55 @@ def test_the_dashboard_no_longer_offers_flagged_as_its_own_place():
     body = _client().get("/admin/?key=admintok").text
     assert ">Flagged<" not in body
     assert "/admin/review" not in body
+
+
+# --- the headline stopped adding two different things together ----------
+
+def _hub(**counts):
+    from src.api.admin.hub_router import render_admin_hub
+
+    base = {"tickets": 0, "flagged": 0, "praised": 0, "corrections": 0}
+    base.update(counts)
+    return render_admin_hub("K", "CODE", None, base,
+                            presence_snapshot={
+                                "open": 0, "in_conversation": 0, "waiting": 0,
+                                "longest_wait_s": 0.0, "safe_to_restart": True,
+                                "verdict": "Nobody is connected.",
+                                "warm_up_s": 60, "active_window_s": 300})
+
+
+def test_a_flagged_turn_is_not_a_ticket():
+    """This summed them and called the total "items waiting on you". A
+    ticket is a colleague asking for something; a flagged turn MIGHT have
+    gone badly -- and on 2026-08-31 the queue held 326, of which 313 were
+    our own replays and staff testing."""
+    body = _hub(tickets=0, flagged=326)
+    assert "326 items waiting on you" not in body
+    assert "No tickets waiting" in body
+    assert "326 flagged turns" in body
+
+
+def test_both_are_named_when_both_exist():
+    body = _hub(tickets=3, flagged=12)
+    assert "3 tickets to work" in body
+    assert "12 flagged turns" in body
+    # The headline sentence itself, not the whole document -- a bare "15"
+    # matches the stylesheet's own `10% 15%`.
+    import re
+    lede = re.search(r"<p class='lede'>(.*?)</p>", body, re.S).group(1)
+    assert "15" not in lede, f"the two counts were summed: {lede}"
+
+
+def test_a_quiet_console_says_so():
+    assert "Nothing needs you right now" in _hub()
+
+
+def test_a_big_queue_offers_the_sweep():
+    body = _hub(flagged=326)
+    assert "/admin/review/close-testing" in body
+    assert "Most of that queue is our own testing" in body
+
+
+def test_a_swept_queue_does_not_nag():
+    """After a sweep it is around thirty, and the hint would be noise."""
+    assert "close-testing" not in _hub(flagged=27)

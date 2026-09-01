@@ -68,7 +68,6 @@ def render_admin_hub(admin_key: str, librarian_code: str, caller=None,
     flagged = int(c.get("flagged") or 0)
     praised = int(c.get("praised") or 0)
     corrections = int(c.get("corrections") or 0)
-    total_todo = tickets + flagged
 
     down = is_paused()
     banner = ""
@@ -94,11 +93,46 @@ def render_admin_hub(admin_key: str, librarian_code: str, caller=None,
         + ui.stat_card(f"/admin/corrections/view{k}", corrections,
                        "corrections live now")
     )
-    headline = (
-        "Nothing needs you right now."
-        if total_todo == 0 else
-        f"{total_todo} item{'s' if total_todo != 1 else ''} waiting on you."
-    )
+    # TWO DIFFERENT THINGS, NOT ONE SUM.
+    #
+    # This added tickets to flagged turns and called the total "items
+    # waiting on you". A ticket is a colleague asking for something. A
+    # flagged turn is a turn that MIGHT have gone badly -- and on
+    # 2026-08-31 the queue held 326 of them, of which 313 were our own
+    # replays and staff testing. The biggest, reddest number on the
+    # console was 96% not-work, and it said it was waiting on you.
+    #
+    # Said separately, so neither borrows the other's urgency.
+    def _n(n: int, one: str, many: str) -> str:
+        return f"{n} {one if n == 1 else many}"
+
+    if not tickets and not flagged:
+        headline = "Nothing needs you right now."
+    elif tickets and flagged:
+        headline = (f"{_n(tickets, 'ticket', 'tickets')} to work, and "
+                    f"{_n(flagged, 'flagged turn', 'flagged turns')} to look "
+                    f"through.")
+    elif tickets:
+        headline = f"{_n(tickets, 'ticket', 'tickets')} to work."
+    else:
+        headline = (f"No tickets waiting. "
+                    f"{_n(flagged, 'flagged turn', 'flagged turns')} to look "
+                    f"through.")
+
+    # The queue is mostly ours, and the way out of that is one click. No
+    # number here on purpose -- knowing the split costs a 2,000-row read
+    # and a classification pass, which is not a thing to do on every
+    # dashboard load. The sweep says the real figure because it does the
+    # real query. Shown only while the queue is big enough for it to be
+    # true; after a sweep it is around thirty and this would be noise.
+    sweep_hint = ""
+    if flagged >= 50:
+        sweep_hint = (
+            f"<p class='hint' style='margin:-.9rem 0 1.4rem'>Most of that "
+            f"queue is our own testing rather than a patron's bad "
+            f"experience. <a href='/admin/review/close-testing{k}'>See how "
+            f"many, and close them</a> — reversible, nothing is deleted."
+            f"</p>")
 
     # 0. What actually happened. Reading the day's traffic is the most
     #    frequent thing an operator does and used to be the hardest: it
@@ -191,6 +225,7 @@ def render_admin_hub(admin_key: str, librarian_code: str, caller=None,
     body = (
         f"{banner}<h1>Dashboard</h1><p class='lede'>{ui.e(headline)}</p>"
         f"<div class='stats'>{stats}</div>"
+        f"{sweep_hint}"
         f"{now_card}"
         f"{reading}{wrong}{running}{staff}"
         f"<p><small class='dim'>Bookmark this page — every link carries "
