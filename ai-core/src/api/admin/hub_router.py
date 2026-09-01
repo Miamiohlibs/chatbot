@@ -31,8 +31,9 @@ except Exception:  # noqa: BLE001
 from src.api.admin import admin_ui as ui
 
 
-def _card(title: str, desc: str, actions: str) -> str:
-    return (f"<div class='card'><div class='q'>{ui.e(title)}</div>"
+def _card(title: str, desc: str, actions: str, *, on: bool = False) -> str:
+    return (f"<div class='card{' on' if on else ''}'>"
+            f"<div class='q'>{ui.e(title)}</div>"
             f"<div><small class='dim'>{ui.e(desc)}</small></div>"
             f"<div class='acts'>{actions}</div></div>")
 
@@ -250,131 +251,66 @@ def render_librarian_hub(code: str, caller=None,
                          marked: bool = False) -> str:
     """Staff hub. Deliberately has NO operator nav or counts.
 
-    Changed 2026-08-08. The "Ask Us" card came out: it linked staff to
-    the public Ask Us page, which is where staff already work -- it told
-    them nothing they did not know and made the page look like a menu
-    when it only ever had one thing to do on it.
+    THREE THINGS, ONE SCREEN.
+        Operator, 2026-09-01: "字太多了 即使是图书馆员也需要读很多东西 太累".
+        It ran to five sections and about two hundred and fifty words for
+        three actions, and said whether test mode was on TWICE -- once in
+        a strip at the top and again inside the card below it.
 
-    What went in instead answers the question staff actually keep
-    asking, which is not "where do I report it" but "what does reporting
-    it cost me". So the page now states plainly that the report is the
-    whole job and nothing comes back to them.
+        A department head opens this to read what patrons asked, to say
+        an answer was wrong, or to mark their browser before trying the
+        bot. That is three cards with a line each.
+
+    Reading comes first because it is what the other two follow from: you
+    notice a bad answer by reading one, and you mark your browser before
+    going to look for one.
     """
-    k = f"?key={ui.e(code)}"
-    report = (
-        "<div class='card'><div class='q'>Report a wrong chatbot answer"
-        "</div><div><small class='dim'>Paste what the bot said and what "
-        "it should have said. Nothing else is required.</small></div>"
-        f"<div class='acts'>"
-        f"{ui.action(f'/librarian/ticket{k}', 'Open the form', primary=True)}"
-        "</div></div>"
-    )
-    # Written flat and without an SLA on purpose: staff worry that a bad
-    # bot answer becomes their follow-up work, and a promise we cannot
-    # keep would confirm it. These four lines are all true today.
-    # Two lines, not four. The point of this block is to answer "does this
-    # become my problem?" -- everything past that was reassurance nobody
-    # asked for, and length reads as a process.
-    after = (
-        "<h2>What happens after you send it</h2>"
-        "<p class='sub'>Reporting it is the whole job. Nothing comes back "
-        "to you.</p>"
-        "<div class='card'><ol style='margin:.2rem 0;padding-left:1.2rem'>"
-        "<li>The report is stored and emailed to the maintainer as you "
-        "send it.</li>"
-        "<li>The maintainer fixes the source page, or overrides the "
-        "answer directly.</li>"
-        "</ol></div>"
-    )
-    # The testing link. Kept separate from the report card because it is a
-    # different job: reporting is about one bad answer, this is about
-    # keeping the usage numbers honest.
-    # Whether the marking is ON, said on the page.
-    #
-    # There was no way to find out. The link set a cookie and dropped you
-    # on the chat, so "did that work?" could only be answered by holding a
-    # conversation and going to look for it in the console -- and a
-    # conversation you never typed into does not appear there, which reads
-    # exactly like a broken link. Reported 2026-08-31.
-    if marked:
-        state = ("<p class='good'>This browser is marked as staff testing. "
-                 "Questions you ask are recorded as testing, not as a "
-                 "student's.</p>")
-        buttons = ui.action('/librarian/staff-test/off', 'Stop marking me')
-    else:
-        state = ("<p class='hint'>This browser is <b>not</b> marked. "
-                 "Anything you ask right now counts the same way a "
-                 "student's question does.</p>")
-        buttons = ui.action('/librarian/staff-test', 'Open in test mode',
-                            primary=True)
+    k = f"?key={ui.e(code)}" if code else ""
 
-    testing = (
-        "<h2>Trying the chatbot rather than using it?</h2>"
-        "<p class='sub'>Start from this link and we can tell your testing "
-        "apart from a student's question. Nothing about the chatbot "
-        "changes &mdash; same bot, same answers.</p>"
-        "<div class='card'><div class='q'>Open the chatbot in test mode"
-        "</div><div><small class='dim'>The marking lasts until you close "
-        "your browser. Without it, your testing counts as patron use and "
-        "makes the bot look busier than it is.</small></div>"
-        f"{state}"
-        f"<div class='acts'>{buttons}</div></div>"
-    )
-    # Only for somebody Miami has signed in AND who is on the librarian
-    # list. The form below is reachable with a shareable code by any member
-    # of library staff, and offering all of them a link to real patron
-    # transcripts -- which this card is -- would hand out reading rights
-    # that the code was never meant to carry.
+    # WHO SEES THE TRANSCRIPTS.
+    #
+    # Anyone this console will actually admit to them -- an operator
+    # holding the admin key included, which is how the operator found this
+    # hidden from himself. It was gated on `authenticated`, so arriving by
+    # key hid the card while the page it links to would have opened
+    # perfectly well; a link missing for somebody who may follow it reads
+    # as a broken page.
+    #
+    # `is_librarian` is true for both roles and false for no caller at
+    # all, which is the code-only visitor: the shareable code reaches any
+    # member of library staff and was never meant to carry reading rights
+    # over real patron conversations.
     reading = ""
-    if getattr(caller, "is_librarian", False) and getattr(
-            caller, "authenticated", False):
-        reading = (
-            "<h2>What patrons have been asking</h2>"
-            "<p class='sub'>Real questions from the library website, in the "
-            "words people used. Our own testing is left out.</p>"
-            + _card("Read the last week",
-                    "The question, what the bot said back, and a way to "
-                    "report an answer from the turn it is on.",
-                    ui.action('/librarian/conversations',
-                              'Open the questions', primary=True))
-        )
+    if getattr(caller, "is_librarian", False):
+        reading = _card(
+            "What patrons asked",
+            "Every real question since the bot opened, and what it "
+            "answered. Our own testing is left out.",
+            ui.action("/librarian/conversations", "Open", primary=True))
 
-    # THE TEST SWITCH, AT THE TOP, IN ONE LINE.
-    #
-    # It used to be three sections down, under two paragraphs of
-    # explanation. Somebody who has come here to try the bot has to read
-    # past the report form and the what-happens-next list to find the one
-    # control they need first. Operator, 2026-08-31: too deep, make it one
-    # click that just switches you.
-    #
-    # The fuller card stays where it is with the explanation in it. This
-    # is the shortcut for somebody who already knows what it does, and the
-    # state readout for everybody else -- which is also what replaced the
-    # confirmation page the link used to bounce through.
+    report = _card(
+        "Report a wrong answer",
+        "Goes straight to the maintainer. Nothing comes back to you.",
+        ui.action(f"/librarian/ticket{k}", "Open the form",
+                  primary=not reading))
+
     if marked:
-        strip = (
-            "<p class='good' style='display:flex;align-items:center;"
-            "gap:.75rem;flex-wrap:wrap'>"
-            "<span><b>Test mode is ON for this browser.</b> Your "
-            "questions are recorded as testing, not as a student's.</span>"
-            + ui.action('/librarian/staff-test/off', 'Turn it off',
-                        ghost=True) + "</p>")
+        testing = _card(
+            "Test mode is ON for this browser",
+            "Questions you ask are recorded as testing, not as a "
+            "student's. It ends when you close the browser.",
+            ui.action("/librarian/staff-test/off", "Turn it off"), on=True)
     else:
-        strip = (
-            "<p class='hint' style='display:flex;align-items:center;"
-            "gap:.75rem;flex-wrap:wrap;padding:.7rem .9rem;"
-            "border:1px solid hsl(var(--border));border-radius:.5rem'>"
-            "<span>Test mode is <b>off</b> — anything you ask counts "
-            "as a student's question.</span>"
-            + ui.action('/librarian/staff-test',
-                        'Turn it on and open the chatbot', primary=True)
-            + "</p>")
+        testing = _card(
+            "Trying the bot rather than using it?",
+            "One click marks this browser so your questions are not "
+            "counted as a student's. Same bot, same answers.",
+            ui.action("/librarian/staff-test",
+                      "Turn on test mode and open the chatbot"))
 
     body = (
         "<h1>Smart Chatbot &mdash; staff hub</h1>"
-        "<p class='lede'>Found the chatbot giving a wrong or outdated "
-        "answer? Tell us here and the maintainer will fix it.</p>"
-        f"{strip}{report}{reading}{after}{testing}"
+        f"{reading}{report}{testing}"
         "<p><small class='dim'>Bookmark this page &mdash; the links carry "
         "the access code.</small></p>"
     )

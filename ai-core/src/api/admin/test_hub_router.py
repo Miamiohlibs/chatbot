@@ -111,15 +111,33 @@ def test_librarian_hub_scoped_to_staff():
 def test_staff_hub_drops_ask_us_and_says_what_reporting_costs_them():
     """Staff already live on the Ask Us page -- linking it told them
     nothing. What they actually want to know is whether reporting a bad
-    answer lands follow-up work on them."""
+    answer lands follow-up work on them.
+
+    The four-step list became two on 2026-08-21, and on 2026-09-01 the
+    whole section went: the page ran to five headings for three actions,
+    which is the cost this reassurance was competing with. The promise
+    survives as the line under the card. The wording has now changed
+    twice; what it says has not.
+    """
     c = _client()
     r = c.get("/librarian/?key=staffcode")
     assert "research-support/ask" not in r.text
-    assert "What happens after you send it" in r.text
-    # The four-step list was cut to two on 2026-08-21 -- length read as a
-    # process. The reassurance that matters moved to the line above it, and
-    # that is what this asserts: the wording changed, the promise did not.
     assert "Nothing comes back to you" in r.text
+
+
+def test_the_staff_hub_is_three_cards_and_stays_short():
+    """Operator, 2026-09-01: too much to read. Three actions, a line
+    each -- and the test-mode state said once, not once in a strip and
+    again in a card below it."""
+    import re
+
+    c = _client()
+    body = c.get("/librarian/?key=staffcode").text
+    main = body.split("<main>")[1]
+    words = len(re.sub(r"<[^>]+>", " ", main).split())
+    assert words < 130, f"{words} words of prose for three actions"
+    assert main.count("test mode") + main.count("Test mode") <= 1
+
 
 def test_the_dashboard_no_longer_offers_flagged_as_its_own_place():
     """It is the same page now. A second name for one destination is how

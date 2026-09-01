@@ -148,10 +148,10 @@ def test_the_hub_says_whether_this_browser_is_marked():
 
     on = render_librarian_hub("CODE", marked=True)
     off = render_librarian_hub("CODE", marked=False)
-    assert "is marked as staff testing" in on
-    assert "Stop marking me" in on
-    assert "not</b> marked" in off
-    assert "Open in test mode" in off
+    assert "Test mode is ON for this browser" in on
+    assert "Turn it off" in on
+    assert "Trying the bot rather than using it?" in off
+    assert "Turn on test mode and open the chatbot" in off
 
 
 def test_the_hub_offers_one_button_not_both():
@@ -160,19 +160,15 @@ def test_the_hub_offers_one_button_not_both():
     from src.api.admin.hub_router import render_librarian_hub
 
     on = render_librarian_hub("CODE", marked=True)
-    assert "Open in test mode" not in on
+    assert "Turn on test mode" not in on
     off = render_librarian_hub("CODE", marked=False)
-    assert "Stop marking me" not in off
+    assert "Turn it off" not in off
 
 
-def test_the_hub_puts_the_switch_above_everything_else():
-    """It was three sections down, under two paragraphs. Somebody who came
-    to try the bot had to read past the report form to find the one
-    control they need first. Reported 2026-08-31."""
+def test_the_state_is_said_once_not_twice():
+    """It appeared in a strip at the top AND inside the card below it,
+    which is half the reason the page was too long to read."""
     from src.api.admin.hub_router import render_librarian_hub
 
-    off = render_librarian_hub("CODE", marked=False)
-    assert off.index("Turn it on and open the chatbot") < off.index(
-        "Report a wrong chatbot answer")
-    on = render_librarian_hub("CODE", marked=True)
-    assert on.index("Test mode is ON") < on.index("Report a wrong chatbot")
+    body = render_librarian_hub("CODE", marked=True)
+    assert body.count("recorded as testing") == 1

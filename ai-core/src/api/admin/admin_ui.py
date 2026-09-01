@@ -326,6 +326,11 @@ small.dim,.dim{color:hsl(var(--muted-foreground))}
   border-radius:var(--radius);padding:1.1rem 1.2rem;margin-bottom:.75rem;
 }
 .card.attn{border-color:hsl(var(--danger) / .4)}
+/* A state the reader should not have to READ to know. The staff hub
+   says whether test mode is on; the colour says it first. */
+.card.on{border-left:3px solid hsl(var(--success));
+  background:hsl(var(--success-bg) / .35)}
+.card.on > .q:first-child{color:hsl(var(--success))}
 .card > h2:first-child{margin-top:0}
 .card .meta{color:hsl(var(--muted-foreground));font-size:.8rem;
   display:flex;gap:.55rem;flex-wrap:wrap;align-items:center;
