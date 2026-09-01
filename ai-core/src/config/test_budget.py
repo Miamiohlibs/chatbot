@@ -53,36 +53,62 @@ _POST = _dt.datetime(2026, 8, 20)        # after it
 def test_the_two_purses_are_real_and_separate():
     """No dollar figure here on purpose.
 
-    The split is an operator decision that has already changed once and is
-    documented in .env to change again (5/95 when development stops). A
-    test that names today's numbers fails on the day somebody follows
-    those instructions correctly, which teaches the next reader to ignore
-    it. What must hold is that both purses exist, neither is zero, and
-    they are not the same number read twice.
+    The split is an operator decision that has changed twice and .env
+    documents how to change it again. A test that names today's numbers
+    fails on the day somebody follows those instructions correctly, which
+    teaches the next reader to ignore it. What must hold is that both
+    purses exist, neither is zero, and they are not one number read twice.
     """
-    serving, evl = B._PRELAUNCH_SERVING_USD, B._PRELAUNCH_EVAL_USD
+    serving, evl = B.split_for()
     assert serving > 0 and evl > 0
     assert B.MONTHLY_TOTAL_USD == B.MONTHLY_SERVING_USD + B.MONTHLY_EVAL_USD
-    assert B.split_for(_PRE) == (serving, evl)
+    assert (B.MONTHLY_SERVING_USD, B.MONTHLY_EVAL_USD) == (serving, evl)
 
 
-def test_the_flip_takes_effect_at_launch_and_not_before():
-    """Only exercised when a launch moment is configured; with none set the
-    split never changes, which is the documented default."""
-    if B.LAUNCH_AT is None:
-        assert B.split_for(_PRE) == B.split_for(_POST)
-        return
-    before = B.split_for(_PRE if _PRE < B.LAUNCH_AT else B.LAUNCH_AT
-                         - _dt.timedelta(days=1))
-    after = B.split_for(B.LAUNCH_AT + _dt.timedelta(seconds=1))
-    assert before == (B._PRELAUNCH_SERVING_USD, B._PRELAUNCH_EVAL_USD)
-    # An unset post-launch figure leaves that purse alone, by design.
-    assert after[0] == (B._PRELAUNCH_SERVING_USD
-                        if B._POSTLAUNCH_SERVING_USD is None
-                        else B._POSTLAUNCH_SERVING_USD)
-    assert after[1] == (B._PRELAUNCH_EVAL_USD
-                        if B._POSTLAUNCH_EVAL_USD is None
-                        else B._POSTLAUNCH_EVAL_USD)
+def test_a_closed_month_keeps_the_purse_it_actually_ran_under():
+    """The cost page reports each month as a percentage of its purse. A
+    table saying August ran at 5% of $40 while the guard was enforcing
+    $45 all month contradicts the control it reports on.
+
+    .env holds only today's numbers, so the earlier periods live in
+    PURSE_HISTORY -- dated, in code, where a change is reviewed.
+    """
+    build = B.split_for(_dt.date(2026, 7, 1))
+    beta = B.split_for(_dt.date(2026, 8, 20))
+    now = B.split_for(_dt.date(2026, 9, 15))
+    assert build == (25.00, 75.00), "the whole build period"
+    assert beta == (45.00, 75.00), "public beta, before 2026-09-01"
+    assert now == (B.MONTHLY_SERVING_USD, B.MONTHLY_EVAL_USD), "from .env"
+    assert build != beta != now
+
+
+def test_each_change_takes_effect_on_its_own_day_and_not_before():
+    for since, serving, evl in B.PURSE_HISTORY:
+        assert B.split_for(since) == (serving, evl), since
+        day_before = B.split_for(since - _dt.timedelta(days=1))
+        if since > _dt.date(2020, 1, 1):
+            assert day_before != (serving, evl), f"{since} started early"
+    cur = B.PURSE_CURRENT_FROM
+    assert B.split_for(cur) == (B.MONTHLY_SERVING_USD, B.MONTHLY_EVAL_USD)
+    assert B.split_for(cur - _dt.timedelta(days=1)) == B.PURSE_HISTORY[-1][1:]
+
+
+def test_history_is_not_rewritten_when_the_current_purse_changes(monkeypatch):
+    """Editing .env must not restate what last month ran under. This is
+    the whole reason the table exists."""
+    before = B.split_for(_dt.date(2026, 8, 20))
+    monkeypatch.setattr(B, "_PRELAUNCH_SERVING_USD", 999.0)
+    monkeypatch.setattr(B, "_PRELAUNCH_EVAL_USD", 1.0)
+    assert B.split_for(_dt.date(2026, 8, 20)) == before
+    assert B.split_for(_dt.date(2026, 9, 15)) == (999.0, 1.0)
+
+
+def test_a_datetime_and_a_date_mean_the_same_day():
+    """The old mechanism flipped at a MOMENT because BUDGET_LAUNCH_AT was
+    a datetime. A monthly purse has no use for sub-day precision, and the
+    callers pass both shapes."""
+    d = _dt.date(2026, 8, 20)
+    assert B.split_for(d) == B.split_for(_dt.datetime(2026, 8, 20, 3, 14))
 
 
 def test_daily_line_divides_the_student_purse_by_the_real_month_length():
@@ -334,62 +360,6 @@ def test_every_rung_says_what_changes():
 # The failure this guards against is silent and in the worst direction: on
 # the first morning of term students meet a $25 ceiling while $75 sits
 # unspent in the eval purse, and nothing says so except complaints.
-
-
-def test_no_launch_date_means_the_split_never_moves() -> None:
-    """The default must be inert. A date nobody set must not flip anything."""
-    assert B._moment_env("BUDGET_NO_SUCH_VAR_AT_ALL") is None
-    saved = B.LAUNCH_AT
-    try:
-        B.LAUNCH_AT = None
-        assert B.split_for(_dt.date(2026, 9, 4)) == B.split_for(_dt.date(2026, 1, 1))
-    finally:
-        B.LAUNCH_AT = saved
-
-
-def test_the_split_flips_at_the_launch_MOMENT_not_that_midnight() -> None:
-    """The beta opens at 6pm on a day that is a test day until then, so the
-    student ceiling must not arrive eighteen hours early."""
-    saved = (B.LAUNCH_AT, B._POSTLAUNCH_SERVING_USD, B._POSTLAUNCH_EVAL_USD)
-    try:
-        B.LAUNCH_AT = _dt.datetime(2026, 8, 13, 18, 0)
-        B._POSTLAUNCH_SERVING_USD = 45.0
-        B._POSTLAUNCH_EVAL_USD = None          # eval purse deliberately untouched
-        pre = B._PRELAUNCH_SERVING_USD
-
-        assert B.split_for(_dt.datetime(2026, 8, 13, 17, 59))[0] == pre, \
-            "one minute before launch is still a test day"
-        assert B.split_for(_dt.datetime(2026, 8, 13, 18, 0))[0] == 45.0, \
-            "the flip happens AT the moment, not after it"
-        assert B.split_for(_dt.datetime(2026, 8, 13, 0, 1))[0] == pre, \
-            "midnight on launch day must NOT flip -- that is the whole point"
-        assert B.split_for(_dt.datetime(2026, 12, 25))[0] == 45.0, \
-            "the flip is permanent, not a one-day event"
-    finally:
-        B.LAUNCH_AT, B._POSTLAUNCH_SERVING_USD, B._POSTLAUNCH_EVAL_USD = saved
-
-
-def test_an_unset_post_launch_figure_leaves_that_purse_alone() -> None:
-    """Unset means UNCHANGED, not zero. The operator asked for the student
-    purse to move and the eval purse to be left alone; getting this wrong
-    would silently cut the eval purse to nothing at launch."""
-    saved = (B.LAUNCH_AT, B._POSTLAUNCH_SERVING_USD, B._POSTLAUNCH_EVAL_USD)
-    try:
-        B.LAUNCH_AT = _dt.datetime(2026, 8, 13, 18, 0)
-        B._POSTLAUNCH_SERVING_USD = 45.0
-        B._POSTLAUNCH_EVAL_USD = None
-        serving, evl = B.split_for(_dt.datetime(2026, 8, 14))
-        assert serving == 45.0
-        assert evl == B._PRELAUNCH_EVAL_USD, \
-            "the eval purse must be untouched, not zeroed"
-        # and the mirror case
-        B._POSTLAUNCH_SERVING_USD = None
-        B._POSTLAUNCH_EVAL_USD = 5.0
-        serving, evl = B.split_for(_dt.datetime(2026, 8, 14))
-        assert serving == B._PRELAUNCH_SERVING_USD
-        assert evl == 5.0
-    finally:
-        B.LAUNCH_AT, B._POSTLAUNCH_SERVING_USD, B._POSTLAUNCH_EVAL_USD = saved
 
 
 def test_a_bare_date_still_works_and_means_midnight() -> None:

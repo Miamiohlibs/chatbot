@@ -778,6 +778,10 @@ _conversation_turns: dict = {}
 # to know where a socket came from, not just that it exists.
 client_ips: dict = {}
 
+# Sockets that came through the staff-test link. Their spend belongs to
+# the testing purse, not the students' -- see _v2_connect.
+client_is_staff_test: dict = {}
+
 
 def _looks_like_dev_client(environ: dict) -> bool:
     origin = (environ.get("HTTP_ORIGIN") or environ.get("HTTP_REFERER") or "").strip()
@@ -867,6 +871,18 @@ async def _v2_connect(sid, environ):
                  f"{' [staff test]' if origin else ''}")
     conversation_id = await create_conversation(origin=origin)
     client_conversations[sid] = conversation_id
+    # WHICH PURSE THIS SOCKET SPENDS FROM.
+    #
+    # `dev` above is true only for a script or localhost -- no browser
+    # origin at all. A librarian testing through /librarian/staff-test
+    # arrives in a real browser from our own host, so every question she
+    # asked was charged to the STUDENT purse. Measured 2026-09-01: $0.38
+    # of $2.30, seventeen per cent of what that purse had spent, and it
+    # grows as more of the eight department heads start testing.
+    #
+    # The marker is already read at the door for attribution. It decides
+    # the purse too now.
+    client_is_staff_test[sid] = bool(origin == "staff")
     await sio_v2.emit(
         "status",
         {"status": "connected", "conversationId": conversation_id},
@@ -881,6 +897,7 @@ async def _v2_disconnect(sid):
     client_conversations.pop(sid, None)
     client_is_dev.pop(sid, None)
     client_ips.pop(sid, None)
+    client_is_staff_test.pop(sid, None)
     # Only the socket-keyed fallback entry is dropped here. Address-keyed
     # counts must OUTLIVE the socket, or a script that reconnects per message
     # resets its own abuse count and never trips the alert -- which is exactly
@@ -1121,7 +1138,14 @@ async def _v2_message(sid, data):
                     cached_input_tokens=int(_tok.get("cached_input", 0)),
                     # v2_turn_dev is charged to the DEVELOPMENT purse, not the
                     # students'. See _looks_like_dev_client.
+                    # Three labels, two purses. A script and a
+                    # librarian both spend from testing, and keeping
+                    # them apart in the record is what lets the cost
+                    # page answer "how much of that was us developing
+                    # versus us checking".
                     call_site=("v2_turn_dev" if client_is_dev.get(sid)
+                               else "v2_turn_staff"
+                               if client_is_staff_test.get(sid)
                                else "v2_turn"),
                 )
         except Exception as te:  # noqa: BLE001

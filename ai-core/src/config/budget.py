@@ -148,8 +148,8 @@ def _moment_env(name: str) -> "Optional[_dt.datetime]":
 # writes. Checked 2026-08-12; if that ever stops being true, these have to
 # become functions.
 
-_PRELAUNCH_SERVING_USD = _f_env("BUDGET_MONTHLY_SERVING_USD", 75.00)
-_PRELAUNCH_EVAL_USD = _f_env("BUDGET_MONTHLY_EVAL_USD", 25.00)
+_PRELAUNCH_SERVING_USD = _f_env("BUDGET_MONTHLY_SERVING_USD", 40.00)
+_PRELAUNCH_EVAL_USD = _f_env("BUDGET_MONTHLY_EVAL_USD", 60.00)
 
 # Either post-launch figure left unset means that purse does not change at
 # launch. The operator's instruction on 2026-08-12 was to move the student
@@ -209,42 +209,65 @@ def library_now() -> "_dt.datetime":
     return _dt.datetime.now(pytz.timezone(LIBRARY_TZ)).replace(tzinfo=None)
 
 
+# WHAT THE TWO PURSES WERE, WITH DATES.
+#
+# The purse has changed twice and .env holds only today's numbers, so a
+# month that closed under a different ceiling had nothing to be measured
+# against. The cost page reports each month as a percentage of its purse,
+# and a table saying August ran at 5% of $40 while the guard enforced $45
+# all month contradicts the control it reports on.
+#
+# Closed periods live here, dated, in code where a change is reviewed.
+# The CURRENT numbers stay in .env, because changing them is a restart
+# rather than a deploy and that is the property worth keeping.
+#
+# Adding a row is the deliberate act that goes with editing .env. Skip it
+# and nothing breaks today -- only the history of the month you just left
+# stops being true.
+PURSE_HISTORY: tuple = (
+    # (in force from, students, development + testing)
+    (_dt.date(2020, 1, 1), 25.00, 75.00),   # the whole build period
+    (_dt.date(2026, 8, 13), 45.00, 75.00),  # public beta opened
+)
+
+# The day the numbers now in .env took effect. From here on they are read
+# from the environment; before it, from the table above.
+PURSE_CURRENT_FROM = _dt.date(2026, 9, 1)
+
+
 def split_for(when: "Any" = None) -> "tuple[float, float]":
-    """(student purse, eval purse) at a given moment.
+    """The two purses in force on a given day: (students, development).
 
-    Accepts a datetime, a date (treated as midnight), or None for now. Kept
-    as a function so the flip can be tested either side of launch without
-    touching the clock; the module constants below are this, resolved at
-    import.
+    A function rather than a pair of constants so a past month can be
+    measured against the ceiling it actually ran under, and so a change
+    can be tested either side of its date without touching the clock.
 
-    An unset post-launch figure means that purse is unchanged rather than
-    zero -- see _POSTLAUNCH_*.
+    Replaced a single launch-day flip on 2026-09-01. That flip was this
+    with exactly one row, and there are three periods now.
     """
-    if LAUNCH_AT is None:
-        return _PRELAUNCH_SERVING_USD, _PRELAUNCH_EVAL_USD
     if when is None:
-        moment = library_now()
+        moment = library_today()
     elif isinstance(when, _dt.datetime):
+        moment = when.date()
+    else:
         moment = when
-    else:                                    # a plain date means midnight
-        moment = _dt.datetime(when.year, when.month, when.day)
-    if moment < LAUNCH_AT:
+
+    if moment >= PURSE_CURRENT_FROM:
         return _PRELAUNCH_SERVING_USD, _PRELAUNCH_EVAL_USD
-    return (
-        _PRELAUNCH_SERVING_USD if _POSTLAUNCH_SERVING_USD is None
-        else _POSTLAUNCH_SERVING_USD,
-        _PRELAUNCH_EVAL_USD if _POSTLAUNCH_EVAL_USD is None
-        else _POSTLAUNCH_EVAL_USD,
-    )
+
+    serving, evl = PURSE_HISTORY[0][1], PURSE_HISTORY[0][2]
+    for since, s_usd, e_usd in PURSE_HISTORY:
+        if moment >= since:
+            serving, evl = s_usd, e_usd
+    return serving, evl
 
 
 MONTHLY_SERVING_USD, MONTHLY_EVAL_USD = split_for()
 MONTHLY_TOTAL_USD = MONTHLY_SERVING_USD + MONTHLY_EVAL_USD
 
-if LAUNCH_AT is None:
-    log.warning("BUDGET_LAUNCH_AT is not set -- the budget split will never "
-                "change on its own (students $%.2f, eval $%.2f)",
-                MONTHLY_SERVING_USD, MONTHLY_EVAL_USD)
+log.info("budget purses in force: students $%.2f, testing $%.2f "
+         "(from %s; earlier periods in PURSE_HISTORY)",
+         MONTHLY_SERVING_USD, MONTHLY_EVAL_USD, PURSE_CURRENT_FROM)
 
 
 def days_in_month(when: "Optional[_dt.date]" = None) -> int:

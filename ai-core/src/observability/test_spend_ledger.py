@@ -84,3 +84,44 @@ def test_dev_call_sites_are_charged_to_development_not_students():
     assert SL.EVAL_CALL_SITE not in SL.DEV_CALL_SITES, (
         "the eval has its own call site and its own accounting path"
     )
+
+
+# --- a librarian testing spends from the testing purse --------------------
+
+def test_staff_test_traffic_is_charged_to_testing():
+    """`dev` is true only for a script or localhost -- no browser origin at
+    all. A librarian testing through /librarian/staff-test arrives in a
+    real browser from our own host, so every question she asked was
+    charged to the STUDENT purse. Measured 2026-09-01: $0.38 of $2.30,
+    seventeen per cent of what that purse had spent, and growing as the
+    eight department heads start testing."""
+    from src.observability.spend_ledger import DEV_CALL_SITES
+
+    assert "v2_turn_staff" in DEV_CALL_SITES
+    assert "v2_turn" not in DEV_CALL_SITES, "a patron still spends from theirs"
+
+
+def test_the_three_testing_labels_stay_distinct():
+    """One purse, three labels. Keeping them apart in the record is what
+    lets the cost page answer "how much of that was us developing versus
+    us checking"."""
+    from src.observability.spend_ledger import DEV_CALL_SITES
+
+    assert len(set(DEV_CALL_SITES)) == 3
+
+
+def test_the_socket_picks_the_label_from_the_marker():
+    """Read from source: the choice is made in the token-logging call and
+    there is no unit-testable seam around a live socket."""
+    # Read the FILE, do not import it. `import src.main` builds the whole
+    # application -- it opens logs/app.log, which root owns, so this test
+    # passed as root and failed as anybody else. A test that depends on
+    # who runs it is a test that reports the wrong thing half the time.
+    import pathlib
+
+    src = (pathlib.Path(__file__).resolve().parents[1] / "main.py").read_text(
+        encoding="utf-8")
+    i = src.index('call_site=("v2_turn_dev"')
+    block = src[i:i + 300]
+    assert "v2_turn_staff" in block
+    assert "client_is_staff_test" in block
