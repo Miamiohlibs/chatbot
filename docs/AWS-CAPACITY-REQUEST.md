@@ -36,10 +36,13 @@ an outage.
 Take the bot out of service for the length of the reindex, so the two never
 compete:
 
-1. Open `/admin/service?key=<ADMIN_API_TOKEN>` and click **Take the bot out of
+1. Open `/admin/service` — it needs no credentials, by design — and click **Take the bot out of
    service**. The widget on the library website keeps working and shows a
    maintenance notice pointing at Ask Us — nothing appears broken.
-2. Run the reindex (~20 minutes for ~19,600 chunks).
+2. Run the reindex. *(~20 minutes for ~19,600 chunks when this was
+   measured in July. The corpus was cut to 490 chunks on 30 Aug 2026 and
+   an `apply` now takes about 7 minutes. The memory ceiling this document
+   argues about is unchanged — it is set by the box, not the corpus.)*
 3. Click **Put the bot back in service**.
 
 Cost: nothing. Downtime: one maintenance window, schedulable at 3am. This is

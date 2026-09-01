@@ -15,10 +15,18 @@ it actually ran under:
 
 | in force from | students | testing |
 |---|---:|---:|
-| the build period | $75 | $25 |
-| 2026-08-04 (rebalanced for development) | $25 | $75 |
+| the build period | $25 | $75 |
 | 2026-08-13 (public beta opened) | $45 | $75 |
 | **2026-09-01** | **$40** | **$60** |
+
+*(Corrected 1 Sep 2026. This table used to show the build period as
+`$75 / $25` and add a `2026-08-04 (rebalanced for development)` row.
+**`PURSE_HISTORY` has neither** — it treats `$25 / $75` as in force from
+the beginning. Whatever happened on 4 August, the code does not model it,
+so every month before August is reported against `$25 / $75`. The table
+now says what the software will actually do, which is the only version
+worth having: all three of these purses are read back by the cost page,
+not just the current one.)*
 
 Changing it is two edits: the numbers in `.env`, and a row here and in
 `PURSE_HISTORY`. Skip the second and nothing breaks today — only the
@@ -55,13 +63,22 @@ service away.
 
 ## The four stages
 
+The percentages are of the **students' purse**, and the daily line is that
+purse divided by the days in the month — so the dollar figures move with
+both. Shown for **September 2026: $40 over 30 days, a $1.33 daily line.**
+
 | level | trigger (either one) | what changes for students |
 |---|---|---|
 | 0 normal | — | nothing |
-| 1 `alert` | day ≥ 1× line, or month ≥ 70% ($52.50) | nothing — email only |
-| 2 `cheap_model` | day ≥ 1.5× ($3.63), or month ≥ 85% ($63.75) | reasoning model forced to luna |
-| 3 `tightened` | day ≥ 2.5× ($6.05), or month ≥ 95% ($71.25) | rate limit 20→6/min, turns 80→20 |
-| 4 `refusing_new` | month ≥ 100% ($75.00) | new conversations declined, pointed at Ask Us; open ones finish |
+| 1 `alert` | day ≥ 1× line ($1.33), or month ≥ 70% ($28.00) | nothing — email only |
+| 2 `cheap_model` | day ≥ 1.5× ($2.00), or month ≥ 85% ($34.00) | reasoning model forced to luna |
+| 3 `tightened` | day ≥ 2.5× ($3.33), or month ≥ 95% ($38.00) | rate limit 20→6/min, turns 80→20 |
+| 4 `refusing_new` | month ≥ 100% ($40.00) | new conversations declined, pointed at Ask Us; open ones finish |
+
+*(Corrected 1 Sep 2026: these read $52.50 / $63.75 / $71.25 / $75.00 —
+the old $75 purse over a 31-day month. Do not hand-copy these numbers
+after a purse change. `budget_guard.py --dry-run` prints the live ones and
+is safe to run any time.)*
 
 Escalation is immediate. **Recovery needs 10% clearance below the trigger
 and steps down one rung at a time** — otherwise the guard flaps across a
@@ -89,7 +106,7 @@ broken cron cannot quietly un-throttle a runaway month.
 | `ai-core/src/observability/spend_ledger.py` | reads both purses; records eval spend |
 | `ai-core/scripts/budget_guard.py` | every 15 min: decide the level, alert on change |
 | `ai-core/scripts/budget_report.py` | the monthly report |
-| `ai-core/scripts/eval_budget_gate.py` | refuses an eval run that would breach $25 |
+| `ai-core/scripts/eval_budget_gate.py` | refuses an eval run when the testing purse has less left than one run costs — reads `MONTHLY_EVAL_USD` ($60) and `EVAL_RUN_ESTIMATE_USD` ($6); exit 3 = too low |
 | `/opt/chatbot/data/budget_state.json` | current level — the service reads this |
 | `/opt/chatbot/data/budget_events.jsonl` | append-only history of level changes |
 

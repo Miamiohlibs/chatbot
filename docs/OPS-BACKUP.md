@@ -43,8 +43,19 @@ fresh dump before running it.
 
 ## Weaviate — NOT covered
 
-The corpus (collection `Chunk_vv20260804_1110`) has no backup, and this is a
-known gap rather than an oversight.
+The corpus has no backup, and this is a known gap rather than an
+oversight.
+
+The collection being served is whatever `WEAVIATE_CHUNK_COLLECTION` names
+— do not trust a name written in a document, including this one. Ask the
+box:
+
+```bash
+grep WEAVIATE_CHUNK_COLLECTION /opt/chatbot/.env
+```
+
+On 1 Sep 2026 that is `Chunk_vv20260830_0302`. Every `apply` mints a new
+one and the old ones stay, so this changes without anybody editing a file.
 
 Weaviate's backup module is not enabled on this container
 (`ENABLE_MODULES=` is empty), so a consistent snapshot needs either a restart

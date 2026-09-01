@@ -1,5 +1,13 @@
 # Open work — answer quality
 
+> **Read 1 Sep 2026 and left standing — with one caveat.** Nothing in
+> here was found to be wrong. But the last row of the table below was
+> scored on **2026-08-21**, and code has changed since: the cross-campus
+> fix, the staff-title lookup, the librarian-purse split, single sign-on.
+> **The 171/28/7 is eleven days old and unrepeated.** Re-running all 206
+> against production is the first item in §4 for that reason. Until then,
+> quote it with its date attached.
+
 Written 2026-08-20, from scoring **206 distinct real questions** (66 browser
 conversations, 8/05–8/19) against gold rewritten from scratch. Not from the
 eval suite: these are the questions people actually typed.

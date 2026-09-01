@@ -9,7 +9,7 @@ HTML for offline view (Offline text 2)
 </a>
 <p></p>
 <div class="mu-bot">
-  <a class="mu-bot__cta" target="_blank" href="https://chatbot.lib.miamioh.edu/">
+  <a class="mu-bot__cta" target="_blank" href="https://chatbot.lib.miamioh.edu/smartchatbot/">
     <span class="mu-bot__badge">BETA</span>Ask the Library Chatbot
   </a>
   <p class="mu-bot__scope">

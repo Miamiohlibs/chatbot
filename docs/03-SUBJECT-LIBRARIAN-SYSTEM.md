@@ -1,6 +1,7 @@
 # Subject Librarian System Documentation
 
-**Last Updated**: December 17, 2025  
+**Last Updated**: August 21, 2026 (header corrected 1 Sep 2026 — it read
+"December 17, 2025" while the file had been edited eight months later)  
 **Version**: 2.0 (Enhanced)
 
 ---
