@@ -265,9 +265,18 @@ def split_for(when: "Any" = None) -> "tuple[float, float]":
 MONTHLY_SERVING_USD, MONTHLY_EVAL_USD = split_for()
 MONTHLY_TOTAL_USD = MONTHLY_SERVING_USD + MONTHLY_EVAL_USD
 
-log.info("budget purses in force: students $%.2f, testing $%.2f "
-         "(from %s; earlier periods in PURSE_HISTORY)",
-         MONTHLY_SERVING_USD, MONTHLY_EVAL_USD, PURSE_CURRENT_FROM)
+# WARNING, not INFO. The service's root level is WARNING, so an INFO line
+# here is dropped entirely -- which is what happened when this replaced
+# the old misconfiguration warning on 2026-09-01: the one line that says
+# which purse the running process actually loaded became invisible on the
+# only machine where somebody would want to read it. Same lesson as
+# data_health's "emailed N problem(s)" line.
+#
+# It is not a complaint. It is a startup fact that has to survive the log
+# level, and there is no level between the two that does.
+log.warning("budget purses in force: students $%.2f, testing $%.2f "
+            "(from %s; earlier periods in PURSE_HISTORY)",
+            MONTHLY_SERVING_USD, MONTHLY_EVAL_USD, PURSE_CURRENT_FROM)
 
 
 def days_in_month(when: "Optional[_dt.date]" = None) -> int:
