@@ -1378,8 +1378,8 @@ def main() -> int:
         "--with-judge", action="store_true",
         help=(
             "After each turn, run the LLM-as-judge against the bot's "
-            "response (using `judge_v1` prompt + gpt-5.4-mini). Skips "
-            "stubbed answers automatically. ~$0.02 per judged case."
+            "response (using the `judge_v2` prefix + the cheap tier, "
+            "gpt-5.6-luna). Skips stubbed answers automatically."
         ),
     )
     parser.add_argument(
@@ -1408,10 +1408,12 @@ def main() -> int:
         "--judge-model",
         default="",
         help=(
-            "Judge model override (e.g. gpt-5.4-mini). Default: the "
-            "cheap tier (gpt-5.4-nano). Back-to-back 2026-07-16 runs "
-            "measured 18%% verdict-flip noise on nano even with 5-vote "
-            "majorities; mini is ~3.7x judge cost for stabler verdicts."
+            "Judge model override (e.g. gpt-5.6-terra). Default: the "
+            "cheap tier (gpt-5.6-luna). Back-to-back 2026-07-16 runs "
+            "measured 18%% verdict-flip noise on IDENTICAL answers with "
+            "a 3-vote nano judge -- which is WHY the default is now 5 "
+            "votes. The residual rate at 5 has never been measured. A "
+            "stronger judge costs more per case for stabler verdicts."
         ),
     )
     parser.add_argument("--verbose", "-v", action="store_true")

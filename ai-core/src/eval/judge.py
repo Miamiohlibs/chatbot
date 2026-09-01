@@ -213,11 +213,12 @@ def judge_answer(
             rubric changes substantively (and update the eval gold
             set's expected verdicts in the same PR).
         model: which model to use. Default "" -> resolve_model("cheap")
-            (env LLM_MODEL_CHEAP, default gpt-5.4-nano). The judge is
-            high-volume mechanical rubric scoring once per question per
-            regression run -- nano is ~3.7x cheaper than mini and the
-            single biggest eval-cost line; consistency matters more
-            than reasoning depth here. Pass an explicit id to override.
+            (env LLM_MODEL_CHEAP -> gpt-5.6-luna; the module fallback
+            still reads gpt-5.4-nano). The judge is high-volume
+            mechanical rubric scoring once per question per regression
+            run and is the single biggest eval-cost line; consistency
+            matters more than reasoning depth here. Pass an explicit id
+            to override.
         samples: how many independent judge calls to take a majority
             vote across. Default 5 (was 3). Single-sample judging was
             empirically noisy on the 2026-05-22 wired-baseline run
@@ -245,7 +246,7 @@ def judge_answer(
     suffix = build_judge_dynamic_suffix(request)
     if not model:
         from src.config.models import resolve_model
-        model = resolve_model("cheap")  # nano: cheapest tier for the judge
+        model = resolve_model("cheap")  # cheapest tier; luna since 2026-07-30
 
     raws: list[str] = []
     verdicts: list[Verdict] = []

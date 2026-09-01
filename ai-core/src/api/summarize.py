@@ -13,7 +13,7 @@ router = APIRouter(tags=["summarize"])
 
 # Use o4-mini as specified in .env
 from src.config.models import resolve_model, is_reasoning_model  # noqa: E402
-OPENAI_MODEL = resolve_model("basic")  # env: LLM_MODEL_BASIC (default gpt-5.4-mini)
+OPENAI_MODEL = resolve_model("basic")  # env: LLM_MODEL_BASIC -> gpt-5.6-luna
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 
 

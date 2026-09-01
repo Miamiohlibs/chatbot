@@ -22,7 +22,7 @@ model Message {
   scopeCampus    String? // resolved scope.campus -- "oxford" | "hamilton" | "middletown"
   scopeLibrary   String? // resolved scope.library or null
   scopeSource    String? // "library_alias" | "campus_alias" | "session_origin" | "default"
-  modelUsed      String? // "gpt-5.4-mini" | "gpt-5.2"  (concrete ID, not tier)
+  modelUsed      String? // "gpt-5.6-luna" | "gpt-5.6-terra"  (concrete ID, not tier)
   confidence     String? // synthesizer self-reported: "high" | "medium" | "low"
   wasRefusal     Boolean           @default(false)
   refusalTrigger String? // matches a key in refusal_templates (no_results, low_confidence, ...)

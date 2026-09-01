@@ -18,7 +18,7 @@ root_dir = Path(__file__).resolve().parent.parent.parent.parent
 load_dotenv(dotenv_path=root_dir / ".env")
 
 from src.config.models import resolve_model, is_reasoning_model  # noqa: E402
-OPENAI_MODEL = resolve_model("basic")  # env: LLM_MODEL_BASIC (default gpt-5.4-mini)
+OPENAI_MODEL = resolve_model("basic")  # env: LLM_MODEL_BASIC -> gpt-5.6-luna
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 
 llm_kwargs = {"model": OPENAI_MODEL, "api_key": OPENAI_API_KEY}

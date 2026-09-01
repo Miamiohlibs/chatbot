@@ -2,8 +2,9 @@
 Stable cached prefix for clarification generation.
 
 Call site: ai-core/src/router/intent_knn.py (when kNN margin < threshold).
-Model: gpt-5.2 (used rarely; quality matters more than cost when we're
-already asking the user to disambiguate).
+Model: gpt-5.6-terra (the reasoning tier; used rarely -- quality
+matters more than cost when we're already asking the user to
+disambiguate).
 
 Per plan Layer 4: this is the ONLY LLM call in the routing path -- the
 kNN classifier itself uses no LLM. Used when:

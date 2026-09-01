@@ -32,8 +32,10 @@ Tests:
   9b. _tool_fact_evidence: get_hours/lookup_librarian/point_to_url
       SUCCESS -> trusted EvidenceChunk (kind, campus, source_url);
       failure / not-found -> []. search_kb crawled chunks come first.
- 10. Reasoning intent (cross_campus_comparison) routes to gpt-5.2.
- 11. Multi-hop evidence (>5 chunks, multi-topic) promotes to gpt-5.2.
+ 10. Reasoning intent (cross_campus_comparison) routes to the
+     reasoning tier (gpt-5.6-terra).
+ 11. Multi-hop evidence (>5 chunks, multi-topic) promotes to the
+     reasoning tier (gpt-5.6-terra).
  12. log_turn called with full telemetry payload.
  13. cited_chunk_ids surfaces from citations[] for librarian review join.
  14. Session origin URL resolves to campus default.
