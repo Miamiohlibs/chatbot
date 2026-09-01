@@ -39,6 +39,26 @@ cd ai-core && .venv/bin/python -m src.observability.alerting   # sends a test em
 | `/smoketest` | a full turn answers WITH a citation under the latency budget |
 | `/metrics` | Prometheus exposition (if prometheus-client installed) |
 
+**`/health/ready` is callable from a browser on another Miami page.**
+Since 2026-09-01 that ONE endpoint answers CORS for `https://*.miamioh.edu`,
+so a library page can `fetch()` it to show whether the bot is up:
+
+```js
+fetch("https://chatbot.lib.miamioh.edu/health/ready")
+  .then(r => r.json()).then(d => console.log(d.status));
+```
+
+The other three stay closed, deliberately. `/health` fans out to six
+external probes on every call, so a browser polling loop would spend our
+upstream quota; `/health/live` and `/health/service` nobody asked for.
+Opening endpoints "while we are here" is how a surface grows without
+anyone deciding to grow it — add to `_ALLOWED_PATHS` on purpose.
+
+And never with credentials. Widening the app-wide CORS list instead would
+have let any allowed origin make credentialed calls to `/admin/*` and read
+raw patron conversations with the visitor's session cookie. See
+`src/api/health_cors.py`.
+
 All also linked from the operator hub at `/admin/`. Reaching it needs a
 Miami sign-in since 2026-09-01 (see the banner at the top of this file);
 the four probe URLs themselves are unaffected and need no credentials.

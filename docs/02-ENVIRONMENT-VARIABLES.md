@@ -305,6 +305,8 @@ each month against its own purse. The ladder is in
 ## Limits, and who may stop the bot
 
 ```bash
+CORS_ALLOW_LOCALHOST=            # unset. "true" adds http://localhost:5173
+                                 # and :3000 as CREDENTIALED origins.
 CHAT_RATE_MAX=20                 # messages per window, per client
 CHAT_RATE_WINDOW_S=60
 CHAT_MAX_TURNS_PER_CONVERSATION=80
@@ -317,6 +319,17 @@ HEALTH_PROBE_TTL_S=30
 SERVICE_PAUSE_OPERATORS=<uid>@miamioh.edu,...
 SERVICE_PAUSE_PASSWORD=<secret>
 ```
+
+**`CORS_ALLOW_LOCALHOST` replaced a `NODE_ENV=="development"` check.** That
+check was live on this box — the production `.env` sets
+`NODE_ENV=development` — so production was accepting `http://localhost:5173`
+and `:3000` as credentialed cross-origin callers on **every** path,
+`/admin/*` included. Nobody chose that; it fell out of a dev convenience
+keyed to a variable nobody flipped. It is off unless set explicitly now.
+
+The same variable still decides socket.io's origin policy, where it
+currently evaluates to `"*"` — see the note in `src/main.py`. That one is
+**not** fixed; narrowing the patron-facing socket is an operator decision.
 
 The booking caps are the ones with real-world consequences: they are what
 stops a loop, or a bored student, from filling the room calendar.

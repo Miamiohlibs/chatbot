@@ -75,6 +75,7 @@ from src.api.admin.smoketest_router import build_smoketest_router
 from src.observability.request_id_middleware import RequestIdMiddleware
 from src.api.metrics_router import build_metrics_router
 from src.observability.metrics_middleware import MetricsMiddleware
+from src.api.health_cors import HealthCorsMiddleware
 from src.observability.sentry import init_sentry
 from src.api.rate_limit import (
     MessageRejected,
@@ -349,12 +350,24 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# Environment-based CORS configuration
-node_env = os.getenv("NODE_ENV", "development")
+# Environment-based CORS configuration.
+#
+# This one is CREDENTIALED and app-wide, so its origin list is the list of
+# places allowed to make authenticated cross-origin calls to ANY path --
+# including /admin/* and /librarian/*, which carry the mu_admin_sso cookie
+# and show raw patron conversations. Keep it to our own frontend.
+#
+# Cross-origin access to /health/ready is a SEPARATE, credential-free
+# middleware (src/api/health_cors.py). Do not widen this list to grant it.
 frontend_url = os.getenv("FRONTEND_URL", "https://new.lib.miamioh.edu")
+node_env = os.getenv("NODE_ENV", "development")  # still read by socket.io below
 
 cors_origins = [frontend_url]
-if node_env == "development":
+# Localhost used to be keyed off NODE_ENV=="development". The production
+# .env sets NODE_ENV=development, so production was allowing
+# http://localhost:5173 and :3000 as CREDENTIALED origins on every path.
+# Nobody chose that. It is an explicit opt-in now.
+if os.getenv("CORS_ALLOW_LOCALHOST", "").strip().lower() in {"1", "true", "yes"}:
     cors_origins.extend([
         "http://localhost:5173",
         "http://localhost:3000"
@@ -377,6 +390,12 @@ app.add_middleware(RequestIdMiddleware)
 # No-ops invisibly until prometheus-client is installed; excludes the
 # /metrics + /health/live infra polls so they don't skew the signal.
 app.add_middleware(MetricsMiddleware)
+# Cross-origin reads of /health/ready -- ONE path -- for library pages that
+# want to show whether the bot is up. Registered LAST on purpose ->
+# Starlette makes it the OUTERMOST middleware, so it answers the preflight
+# before the credentialed CORSMiddleware above can reject the origin.
+# Never credentialed; see src/api/health_cors.py.
+app.add_middleware(HealthCorsMiddleware)
 
 # Include health/monitoring routers
 app.include_router(health_router)
@@ -687,7 +706,20 @@ else:
 
 
 # Socket.IO server for real-time communication
-# Allow all origins in development for easier debugging
+#
+# !! THIS IS "*" ON THE PRODUCTION BOX RIGHT NOW. !!
+# The production .env sets NODE_ENV=development, so this evaluates to "*"
+# and any site on the internet may open a socket to the chat backend and
+# drive the bot -- on the students' purse. Nobody chose that; it fell out
+# of a dev convenience keyed to a variable that was never flipped.
+#
+# NOT changed here on purpose: this is the patron-facing path, and
+# narrowing it is a deploy that wants watching rather than a side effect
+# of a /health CORS fix. Two ways to close it, operator's call:
+#   * set NODE_ENV=production in /opt/chatbot/.env and restart, or
+#   * replace this line with `socketio_cors = cors_origins`.
+# The real widget is served from the same origin as the backend, so
+# same-origin traffic does not depend on this value at all.
 socketio_cors = "*" if node_env == "development" else cors_origins
 
 # Store conversation mappings for Socket.IO clients
