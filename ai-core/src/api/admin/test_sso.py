@@ -853,3 +853,49 @@ def test_both_shells_wear_it():
 
     for kw in ({}, {"chrome": False}):
         assert "class='logo'" in ui.page("x", "y", **kw)
+
+
+# --- the session reaches both consoles -----------------------------------
+
+def test_the_session_cookie_is_delivered_to_both_consoles():
+    """Scoped to /admin alone it is simply never sent to /librarian, so a
+    signed-in department head arrives there as a stranger. Nothing in the
+    sign-in is wrong; the browser was never told to send it there."""
+    from src.api.admin.sso import COOKIE_PATHS
+
+    assert set(COOKIE_PATHS) == {"/admin", "/librarian"}
+
+
+def test_it_is_not_delivered_to_the_patron_widget():
+    """The obvious repair is path "/", and it is the wrong one: the widget
+    is served from the same host at /smartchatbot/, so every patron page
+    load would carry an operator's session cookie. The blast radius of a
+    credential is where it travels, not where it is used."""
+    from src.api.admin.sso import COOKIE_PATHS
+
+    assert "/" not in COOKIE_PATHS
+    for path in COOKIE_PATHS:
+        assert not "/smartchatbot/".startswith(path)
+
+
+def test_the_two_paths_never_overlap():
+    """Same cookie name at two paths is fine only while exactly one can
+    match -- otherwise the header carries it twice."""
+    from src.api.admin.sso import COOKIE_PATHS
+
+    a, b = COOKIE_PATHS
+    assert not a.startswith(b) and not b.startswith(a)
+
+
+def test_signing_out_clears_every_path_it_was_ever_set_on():
+    """Including the single one used before 2026-09-01. A session left at
+    a path the logout forgot is a sign-out that did not sign anybody
+    out."""
+    import inspect
+
+    from src.api.admin import sso_router as R
+
+    src = inspect.getsource(R)
+    out = src[src.index('async def logout'):]
+    out = out[:out.index("@router.get")]
+    assert "COOKIE_PATHS" in out and "COOKIE_PATH" in out

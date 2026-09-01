@@ -42,6 +42,7 @@ Request = _FastAPIRequest
 
 from src.api.admin.sso import (
     COOKIE_PATH,
+    COOKIE_PATHS,
     SESSION_COOKIE,
     SSOConfig,
     display_name_from_attributes,
@@ -183,15 +184,17 @@ def build_sso_router(cfg: SSOConfig) -> Any:
         logger.info("SSO sign-in: uid=%s%s", uid, f" ({name})" if name else "")
 
         resp = RedirectResponse(target, status_code=303)
-        resp.set_cookie(
-            SESSION_COOKIE,
-            issue_session(uid, cfg),
-            max_age=cfg.session_hours * 3600,
-            path=COOKIE_PATH,
-            httponly=True,
-            secure=True,
-            samesite="lax",
-        )
+        token = issue_session(uid, cfg)
+        for path in COOKIE_PATHS:
+            resp.set_cookie(
+                SESSION_COOKIE,
+                token,
+                max_age=cfg.session_hours * 3600,
+                path=path,
+                httponly=True,
+                secure=True,
+                samesite="lax",
+            )
         return resp
 
     @router.get("/logout")
@@ -200,7 +203,11 @@ def build_sso_router(cfg: SSOConfig) -> Any:
             "Signed out.",
             'You are signed out of the chatbot dashboard. '
             '<a href="/admin/sso/login">Sign in again</a>.'))
-        resp.delete_cookie(SESSION_COOKIE, path=COOKIE_PATH)
+        # Every path it was ever set on, including the single one used
+        # before 2026-09-01 -- a session left behind at a path the logout
+        # forgot is a sign-out that did not sign anybody out.
+        for path in {*COOKIE_PATHS, COOKIE_PATH}:
+            resp.delete_cookie(SESSION_COOKIE, path=path)
         return resp
 
     @router.get("/whoami")

@@ -55,6 +55,31 @@ logger = logging.getLogger(__name__)
 # The cookie name is deliberately boring and scoped to /admin so it is never
 # sent with a patron's chat request.
 SESSION_COOKIE = "mu_admin_sso"
+
+# TWO PATHS, NOT ONE, AND NOT "/".
+#
+# The console lives at /admin and the librarian console at /librarian.
+# Scoped to /admin alone the cookie is simply never sent to /librarian,
+# so a signed-in department head arrives there as a stranger -- which is
+# what happened when the librarian console first started accepting a
+# session instead of the shared code. Nothing in the sign-in was wrong;
+# the browser had just never been told to send it there.
+#
+# The obvious repair is path "/", and it is the wrong one: the widget is
+# served from the same host at /smartchatbot/, so every patron's page
+# load and socket handshake would then carry an operator's session
+# cookie. It is HttpOnly and Secure and nothing reads it there, but the
+# blast radius of a credential is where it travels, not where it is used.
+#
+# The two prefixes do not overlap, so exactly one is ever sent, and
+# neither reaches a patron. Same name and same signed value: the token is
+# re-validated against the allowlist on every request either way, so this
+# is two deliveries of one credential rather than two credentials.
+COOKIE_PATHS = ("/admin", "/librarian")
+
+# The single path the cookie used to have. Kept because deleting a cookie
+# requires naming the path it was set on, and a deployment upgrading from
+# before 2026-09-01 has live sessions sitting at exactly this one.
 COOKIE_PATH = "/admin"
 
 # Attribute OIDs Miami's IdP releases (read off the sample assertions in
