@@ -210,10 +210,27 @@ def test_recovery_steps_down_one_rung_at_a_time():
 # --- state file ----------------------------------------------------------
 
 
+# THE MONTH IN A FIXTURE HAS TO BE THIS MONTH.
+#
+# read_state() deliberately voids a state file from a previous month --
+# the purse refilled at midnight on the 1st and nobody should still be
+# refusing students on last month's numbers. Two tests below wrote
+# `month="2026-08"` and asserted the level came back, which held for
+# thirty days and failed on the thirty-first: on 2026-09-01 they returned
+# level 0, reason "new month (2026-09)".
+#
+# A test that goes red one day a month is a test people learn to ignore,
+# and this is the second time this file has had one -- see the note about
+# the $75 purse further up. The rollover it was accidentally exercising is
+# real and worth pinning, so it has its own test now instead.
+_THIS_MONTH = _dt.date.today().strftime("%Y-%m")
+
+
 def test_state_roundtrips(tmp_path):
     p = tmp_path / "state.json"
     st = B.BudgetState(level=B.L_CHEAP, reason="because", serving_mtd=64.0,
-                       serving_today=1.0, eval_mtd=12.0, month="2026-08",
+                       serving_today=1.0, eval_mtd=12.0,
+                       month=_THIS_MONTH,
                        checked_at=_dt.datetime.now().astimezone().isoformat())
     B.write_state(st, p)
     back = B.read_state(p)
@@ -294,9 +311,9 @@ def test_current_state_is_cached_but_resettable(tmp_path, monkeypatch):
     p = tmp_path / "state.json"
     monkeypatch.setattr(B, "STATE_PATH", p)
     B.reset_cache()
-    B.write_state(B.BudgetState(level=B.L_NORMAL, month="2026-08"), p)
+    B.write_state(B.BudgetState(level=B.L_NORMAL, month=_THIS_MONTH), p)
     assert B.current_state().level == B.L_NORMAL
-    B.write_state(B.BudgetState(level=B.L_REFUSE, month="2026-08"), p)
+    B.write_state(B.BudgetState(level=B.L_REFUSE, month=_THIS_MONTH), p)
     assert B.current_state().level == B.L_NORMAL, "served from cache"
     B.reset_cache()
     assert B.current_state().level == B.L_REFUSE
@@ -413,3 +430,31 @@ def test_the_ceiling_actually_refuses_at_one_hundred_percent() -> None:
     lvl_under, _ = B.level_for(serving_today=0.0, serving_mtd=purse * 0.96,
                                when=_dt.date(2026, 8, 20))
     assert lvl_under < B.L_REFUSE
+
+
+def test_a_state_file_from_last_month_is_void_not_stale(tmp_path):
+    """The purse refills at midnight on the 1st, so a level carried over
+    from last month would refuse students on numbers that no longer apply.
+
+    This behaviour was real and unpinned -- the only thing exercising it
+    was two round-trip tests going red every 1st of the month, which is
+    the opposite of a test.
+    """
+    p = tmp_path / "state.json"
+    B.write_state(B.BudgetState(level=B.L_REFUSE, reason="spent",
+                                serving_mtd=99.0, month="2020-01"), p)
+    back = B.read_state(p)
+    assert back.level == B.L_NORMAL
+    assert "new month" in back.reason
+    assert back.month == _dt.date.today().strftime("%Y-%m")
+    # Void, not missing: the file was read fine, its contents just no
+    # longer apply. Reporting it as missing would send a "the guard has
+    # not run" alert on the 1st of every month.
+    assert back.missing is False
+
+
+def test_a_state_file_from_this_month_keeps_its_level(tmp_path):
+    p = tmp_path / "state.json"
+    B.write_state(B.BudgetState(level=B.L_REFUSE, reason="spent",
+                                month=_THIS_MONTH), p)
+    assert B.read_state(p).level == B.L_REFUSE
