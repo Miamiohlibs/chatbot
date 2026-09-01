@@ -267,32 +267,44 @@ def render_librarian_hub(code: str, caller=None,
     """
     k = f"?key={ui.e(code)}" if code else ""
 
-    # WHO SEES THE TRANSCRIPTS.
+    # WHO SEES THE TRANSCRIPTS, AND WHY THE CARD IS ALWAYS THERE.
     #
-    # Anyone this console will actually admit to them -- an operator
-    # holding the admin key included, which is how the operator found this
-    # hidden from himself. It was gated on `authenticated`, so arriving by
-    # key hid the card while the page it links to would have opened
-    # perfectly well; a link missing for somebody who may follow it reads
-    # as a broken page.
+    # Twice now this has been hidden from somebody who was looking for it.
+    # First it was gated on `authenticated`, which hid it from an operator
+    # holding the admin key. Then on `is_librarian`, which hid it from
+    # somebody holding the LIBRARIAN CODE -- and that is how everybody
+    # reaches this page today, because SSO is not finished. A code-holder
+    # has no caller at all: the code is neither a session nor the admin
+    # token, so `whoami` returns None and every attribute is False.
     #
-    # `is_librarian` is true for both roles and false for no caller at
-    # all, which is the code-only visitor: the shareable code reaches any
-    # member of library staff and was never meant to carry reading rights
-    # over real patron conversations.
-    reading = ""
-    if getattr(caller, "is_librarian", False):
-        reading = _card(
-            "What patrons asked",
-            "Every real question since the bot opened, and what it "
-            "answered. Our own testing is left out.",
-            ui.action("/librarian/conversations", "Open", primary=True))
+    # Hiding a card is the one thing that cannot tell the reader anything.
+    # It renders either way now, and says which it is.
+    #
+    # The code deliberately does NOT open it. That code is shareable to
+    # any member of library staff; the eight people meant to read real
+    # patron conversations are named in SSO_LIBRARIAN_UIDS. So the answer
+    # for a code-holder is "sign in", not "here you go" -- and the link
+    # below becomes a working button the moment the IdP is configured,
+    # with no change here.
+    may_read = getattr(caller, "is_librarian", False)
+    reading = _card(
+        "What patrons asked",
+        "Every real question since the bot opened, and what it answered. "
+        "Our own testing is left out."
+        if may_read else
+        "Every real question since the bot opened, and what it answered. "
+        "Reading these needs your Miami sign-in — the access code for this "
+        "page is shared with all library staff, and these are patrons' own "
+        "words.",
+        ui.action("/librarian/conversations", "Open", primary=True)
+        if may_read else
+        ui.action("/admin/sso/login?next=/librarian/conversations",
+                  "Sign in with Miami", primary=True))
 
     report = _card(
         "Report a wrong answer",
         "Goes straight to the maintainer. Nothing comes back to you.",
-        ui.action(f"/librarian/ticket{k}", "Open the form",
-                  primary=not reading))
+        ui.action(f"/librarian/ticket{k}", "Open the form"))
 
     if marked:
         testing = _card(

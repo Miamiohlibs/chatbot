@@ -103,8 +103,14 @@ def test_librarian_hub_scoped_to_staff():
     r = c.get("/librarian/?key=staffcode")
     assert r.status_code == 200
     assert "/librarian/ticket?key=staffcode" in r.text
-    # no admin surfaces leak into the staff page
-    assert "/admin/" not in r.text.replace("/admin/?", "")
+    # No admin SURFACES leak into the staff page. The sign-in endpoint is
+    # not one: it is the shared front door, it carries `next` back to the
+    # librarian console, and it is the link we want a department head to
+    # click. Everything else under /admin/ is still forbidden here.
+    import re
+    leaks = [u for u in re.findall(r"/admin/[a-z0-9/_.-]*", r.text)
+             if not u.startswith("/admin/sso/")]
+    assert not leaks, f"admin surfaces on the staff page: {set(leaks)}"
     assert "admintok" not in r.text
 
 

@@ -899,3 +899,31 @@ def test_signing_out_clears_every_path_it_was_ever_set_on():
     out = src[src.index('async def logout'):]
     out = out[:out.index("@router.get")]
     assert "COOKIE_PATHS" in out and "COOKIE_PATH" in out
+
+
+def test_the_reader_and_the_guard_agree_about_the_token():
+    """`whoami` accepted the shared key unconditionally while the guard
+    required allow_token_fallback. With the fallback off the two disagreed
+    about who somebody was, so the staff hub drew an Open button on a page
+    that would bounce the reader to sign-in. A control that is offered has
+    to work."""
+    import inspect
+
+    from src.api.admin import sso_router as R
+
+    src = inspect.getsource(R.make_caller_reader)
+    assert "cfg.allow_token_fallback" in src
+
+
+@pytest.mark.asyncio
+async def test_with_the_fallback_off_the_key_names_nobody():
+    from src.api.admin.sso_router import make_caller_reader
+
+    c = cfg(allow_token_fallback=False)
+    peek = make_caller_reader(cfg=c, token="tok")
+    assert await peek(_Req(query="key=tok")) is None
+
+    c_on = cfg(allow_token_fallback=True)
+    peek_on = make_caller_reader(cfg=c_on, token="tok")
+    who = await peek_on(_Req(query="key=tok"))
+    assert who is not None and who.is_operator

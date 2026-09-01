@@ -260,7 +260,13 @@ def make_caller_reader(*, cfg: SSOConfig, token: str = ""):
                 if uid:
                     return Caller(role=role_for(uid, cfg) or "", uid=uid,
                                   via="sso")
-            if token:
+            # `and cfg.allow_token_fallback`, the same condition the
+            # guard applies. Without it the two disagree about who somebody
+            # is: with the fallback switched off, this said "you are an
+            # operator" while the guard refused the same request, so the
+            # staff hub drew an Open button on a page that would bounce the
+            # reader to sign-in. A control that is offered has to work.
+            if token and cfg.allow_token_fallback:
                 supplied = (request.headers.get("x-admin-token")
                             or request.query_params.get("key") or "")
                 if supplied == token:
