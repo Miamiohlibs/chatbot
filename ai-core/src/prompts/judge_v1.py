@@ -2,7 +2,8 @@
 Stable cached prefix for the LLM-as-judge in the eval harness.
 
 Call site: ai-core/src/eval/run_eval.py.
-Model: gpt-5.4-mini (cheap; runs once per gold question per regression run).
+Model: gpt-5.6-luna (the cheap tier; runs once per gold question per
+regression run).
 
 Per plan: scoring rubric + exemplars of correct/incorrect/refusal.
 Used to score eval questions where exact-string-match against the gold

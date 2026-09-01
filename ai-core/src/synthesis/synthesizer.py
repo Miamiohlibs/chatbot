@@ -405,9 +405,11 @@ def synthesize(
             uses _default_llm_call which raises NotImplementedError.
         prefix_id: Which stable prefix in src/prompts/ to use. Versioned
             so prompt revisions don't collide on the cache.
-        model: OpenAI model id. Default `gpt-5.4-mini` per plan;
-            orchestrator promotes to `gpt-5.2` when the
-            multi-hop / comparative escalation conditions hit.
+        model: OpenAI model id. The orchestrator always passes one --
+            the basic tier (`gpt-5.6-luna`), promoted to the reasoning
+            tier (`gpt-5.6-terra`) when the multi-hop / comparative
+            escalation conditions hit. The signature default applies
+            only to direct callers.
 
     Returns:
         SynthesisResult with post_processor decision and telemetry.
