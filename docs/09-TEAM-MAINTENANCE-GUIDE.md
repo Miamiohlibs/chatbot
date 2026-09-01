@@ -296,7 +296,7 @@ on call. What was in it:
 | the service name | `smartchatbot-backend`, five times. The unit is `chatbot.service`. |
 | the deploy path | `/opt/chatbot/current/`, thirty times. It has never existed. |
 | Weaviate's port | 8888. It is 8080. |
-| the models | `gpt-5.4-mini` / `gpt-5.2`. Neither has been called in thirty days. |
+| the models | Two retired ids, neither called in thirty days. Everything is GPT-5.6 now. |
 | a healthy daily spend | "$5–30/day, concerning above $100". The students' purse is **$40 a month**. |
 | the cron jobs | a file, a path and a script that none exist — and it omitted the backup, the watchdog, the budget guard and the 09:30 timer. |
 

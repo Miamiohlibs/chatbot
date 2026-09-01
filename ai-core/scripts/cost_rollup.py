@@ -47,16 +47,16 @@ logger = logging.getLogger("cost_rollup")
 # (b) grep-ability matters -- "where did we get that $X number" should
 # resolve to a file, not a DB row.
 #
-# Rates re-read 2026-07-30 against the operator's OpenAI pricing pages.
+# Rates re-read 2026-09-01 against OpenAI's pricing pages.
 #
 # An UNKNOWN model -> compute_cost_usd returns $0 and logs a WARN: the
 # rollup still records the token counts, it just can't price them. A
 # guessed rate would be worse than a flagged $0, so that stays.
 #
-# What did NOT stay: this comment used to offer "o4-mini-2025-04-16" as
-# an example of a harmlessly-unknown model. It was not harmless. It was
-# the production model for 1,518 turns from 2025-12-17 to 2026-05-12,
-# and every cost report for that period read $0.00. Two consequences:
+# What did NOT stay: this comment used to offer a dated model snapshot as
+# an example of a harmlessly-unknown model. It was not harmless. That model
+# served 1,518 production turns from 2025-12-17 to 2026-05-12, and every
+# cost report for that period read $0.00. Two consequences:
 #   1. dated snapshots now normalise to their base model (normalise_model),
 #      so pinning a version no longer zeroes the bill;
 #   2. anything that shows money to a human must call is_priced() and
@@ -67,69 +67,57 @@ logger = logging.getLogger("cost_rollup")
 PRICE_PER_1M_TOKENS: dict[str, dict[str, float]] = {
     # $ per 1M tokens: input / cached input / output.
     #
-    # Read off the operator's OpenAI pricing pages on 2026-07-30. Covers every
-    # model this project has EVER recorded in ModelTokenUsage plus the rest of
-    # the current line-up, because an unpriced model is reported as $0 and that
-    # is how o4-mini ran for five months without appearing on any cost report.
+    # ONLY the GPT-5.6 line plus the embedding model. Operator ruling
+    # 2026-09-01: nothing below 5.6 is kept anywhere in this codebase, so the
+    # twenty legacy rows that used to live here are gone.
+    #
+    # Safe, and checked rather than assumed: every DailyCost row ever written
+    # by a pre-5.6 model totals $0.02, across three rows in July 2026 and one
+    # in May. `usd` is computed at rollup time and STORED,
+    # so dropping a price cannot move a number already banked, and the
+    # ModelTokenUsage rows behind those two days no longer exist (that table
+    # starts 2026-08-03) so a re-roll could not recompute them either.
+    #
+    # If a non-5.6 name ever reappears, compute_cost_usd returns 0.0 AND logs a
+    # warning, and is_priced() reports False so anything shown to a human reads
+    # "unpriced" rather than "$0". That safety net is why this table can be
+    # short -- it is what the old long table was compensating for.
+    #
+    # Rates read off OpenAI's pricing pages on 2026-09-01.
     #
     # KNOWN LIMITATION, worth saying out loud: this is ONE price per model, and
     # it prices historical rows at TODAY's rate. When a price changes, past
     # reports move with it. Proper reconciliation would need effective-dated
     # prices; until then, treat old totals as indicative, not invoice-grade.
-    # The 2026-07-30 repricing moved terra -20% and luna -80%.
 
-    # --- GPT-5.6 (current) ---------------------------------------------------
-    # Sol is deliberately ABSENT: nothing here calls it, and the operator's
-    # rule is that unused models stay out of the table. If it is ever wired,
-    # add it (5.00 / 0.50 / 30.00 as of 2026-07-30) or it bills as $0.
+    # --- GPT-5.6 -------------------------------------------------------------
+    # Sol is priced but NOT wired: no tier points at it. It is here so the
+    # operator can move REASONING onto it without the most expensive model on
+    # the menu silently billing $0 -- which is exactly how a retired model
+    # once ran five months unbilled.
+    #
+    # Sol FELL to this rate on 2026-08-21, from 5.00 / 0.50 / 30.00. OpenAI
+    # calls it promotional through at least 2026-11-21; if that lapses, this
+    # row goes back up and every past total moves with it (see above).
+    "gpt-5.6-sol": {"input": 4.00, "cached_input": 0.40, "output": 20.00},
     "gpt-5.6-terra": {"input": 2.00, "cached_input": 0.20, "output": 12.00},
     "gpt-5.6-luna": {"input": 0.20, "cached_input": 0.02, "output": 1.20},
 
-    # --- GPT-5.4 (previous serving family) -----------------------------------
-    "gpt-5.4": {"input": 2.50, "cached_input": 0.25, "output": 15.00},
-    "gpt-5.4-mini": {"input": 0.75, "cached_input": 0.08, "output": 4.50},
-    "gpt-5.4-nano": {"input": 0.20, "cached_input": 0.02, "output": 1.25},
-
-    # --- GPT-5.2 / 5.1 / 5 ---------------------------------------------------
-    # gpt-5.2 was in this table at 2.50 / 1.25 / 10.00. The pricing page reads
-    # 1.75 / 0.175 / 14.00 on 2026-07-30, so the old entry was either stale or
-    # wrong; it ran 46 turns here in Jun-Jul 2026 and its historical total will
-    # shift with this correction.
-    "gpt-5.2": {"input": 1.75, "cached_input": 0.175, "output": 14.00},
-    "gpt-5.2-pro": {"input": 21.00, "cached_input": 21.00, "output": 168.00},
-    "gpt-5.1": {"input": 1.25, "cached_input": 0.125, "output": 10.00},
-    "gpt-5": {"input": 1.25, "cached_input": 0.125, "output": 10.00},
-    "gpt-5-mini": {"input": 0.25, "cached_input": 0.025, "output": 2.00},
-    "gpt-5-nano": {"input": 0.05, "cached_input": 0.005, "output": 0.40},
-    "gpt-5-pro": {"input": 15.00, "cached_input": 15.00, "output": 120.00},
-
-    # --- GPT-4.1 / 4o --------------------------------------------------------
-    "gpt-4.1": {"input": 2.00, "cached_input": 0.50, "output": 8.00},
-    "gpt-4.1-mini": {"input": 0.40, "cached_input": 0.10, "output": 1.60},
-    "gpt-4.1-nano": {"input": 0.10, "cached_input": 0.025, "output": 0.40},
-    "gpt-4o": {"input": 2.50, "cached_input": 1.25, "output": 10.00},
-    "gpt-4o-mini": {"input": 0.15, "cached_input": 0.075, "output": 0.60},
-
-    # --- o-series ------------------------------------------------------------
-    # o4-mini is not an experiment: it served 1,518 turns from 2025-12-17 to
-    # 2026-05-12 -- the pre-rebuild bot -- and reported $0 the whole time
-    # because it was never in this table. That is the bug this row fixes.
-    "o4-mini": {"input": 1.10, "cached_input": 0.275, "output": 4.40},
-    "o3": {"input": 2.00, "cached_input": 0.50, "output": 8.00},
-    "o3-mini": {"input": 1.10, "cached_input": 0.55, "output": 4.40},
-
-    # --- embeddings ----------------------------------------------------------
+    # --- Embeddings ----------------------------------------------------------
+    # Input-only: embeddings have no output tokens, hence 0.0. cached_input is
+    # set EQUAL to input because OpenAI does not discount cached embedding
+    # input -- not because the number is unknown.
     "text-embedding-3-large": {
         "input": 0.13,
-        "cached_input": 0.13,  # embeddings don't cache
+        "cached_input": 0.13,
         "output": 0.0,
     },
 }
 
-# OpenAI pins dated snapshots ("o4-mini-2025-04-16", "gpt-5.4-mini-2026-03-17")
-# and both appear in our own history. They bill as the base model, so strip the
-# date rather than requiring a table row per snapshot -- otherwise every pin is
-# another silent $0.
+# OpenAI pins dated snapshots ("<model>-2026-08-21"), and pinned ids appear in
+# our own history. They bill as the base model, so strip the date rather than
+# requiring a table row per snapshot -- otherwise every pin is another silent
+# $0.
 _DATED_SNAPSHOT_RE = re.compile(r"^(.*?)-(\d{4}-\d{2}-\d{2})$")
 
 
@@ -159,7 +147,7 @@ class DailyCostRow:
     """One DailyCost row -- the output of rollup. One row per
     (date, model, call_site) to match the DailyCost @@unique key, so
     the dashboard answers "which part of the pipeline costs money"
-    (synthesizer vs judge vs agent), not just "gpt-5.4 in general"."""
+    (synthesizer vs judge vs agent), not just "terra in general"."""
 
     the_date: date
     model: str
@@ -198,8 +186,8 @@ def compute_cost_usd(
     as cost-free rather than crashing -- an experimental model
     mis-deployed shouldn't block the rollup for everyone else.
 
-    $0 is safe for the ROLLUP but dangerous as a REPORT: o4-mini served
-    1,518 turns unpriced and read as free on every cost page. Anything
+    $0 is safe for the ROLLUP but dangerous as a REPORT: a retired model
+    served 1,518 turns unpriced and read as free on every cost page. Anything
     that displays a total must call `is_priced()` and say "unpriced"
     out loud rather than printing a $0 that looks like a real zero.
 

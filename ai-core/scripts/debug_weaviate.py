@@ -200,7 +200,9 @@ try:
     from langchain_core.messages import HumanMessage
     
     openai_api_key = os.getenv("OPENAI_API_KEY")
-    openai_model = os.getenv("OPENAI_MODEL", "o4-mini")
+    # OPENAI_MODEL is deprecated and unset in .env, so this fallback is what
+    # actually runs. It used to name a retired model.
+    openai_model = os.getenv("OPENAI_MODEL", "gpt-5.6-luna")
     
     if not openai_api_key:
         print("❌ OPENAI_API_KEY not set")

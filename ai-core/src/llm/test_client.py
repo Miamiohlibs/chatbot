@@ -152,7 +152,7 @@ def test_completion_request_shape() -> None:
     text, usage = completion(
         prefix_id="test_client_prefix_v1",
         dynamic_suffix="hello",
-        model="gpt-5.4-mini",
+        model="gpt-5.6-luna",
     )
     assert text == "hi back"
     assert usage.input_tokens == 100
@@ -232,7 +232,7 @@ def test_completion_with_tools_parses_function_calls() -> None:
         prefix_id="test_client_prefix_v1",
         input_items=[{"role": "user", "content": "King hours?"}],
         tools=tools,
-        model="gpt-5.4-mini",
+        model="gpt-5.6-luna",
     )
     assert len(calls) == 1
     assert calls[0].id == "call_123"
@@ -259,7 +259,7 @@ def test_completion_with_tools_no_tool_calls_terminal() -> None:
         prefix_id="test_client_prefix_v1",
         input_items=[{"role": "user", "content": "King hours?"}],
         tools=[],
-        model="gpt-5.4-mini",
+        model="gpt-5.6-luna",
     )
     assert calls == []
     assert msg["content"] == "Final answer: 7am to 2am."

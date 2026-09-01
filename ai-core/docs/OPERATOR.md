@@ -156,20 +156,26 @@ documented in `docs/02-ENVIRONMENT-VARIABLES.md`.
 ```env
 LLM_MODEL_BASIC=gpt-5.6-luna       # default chat agent + synthesizer (prod 2026-07-17)
 LLM_MODEL_REASONING=gpt-5.6-terra  # promoted for multi-hop / ambiguous (prod 2026-07-17)
-LLM_MODEL_CHEAP=gpt-5.4-nano       # LLM-as-judge in eval, light tasks
+LLM_MODEL_CHEAP=gpt-5.6-luna       # LLM-as-judge in eval, light tasks
 LLM_MODEL_EMBEDDING=text-embedding-3-large
-LLM_ALLOW_TEMPERATURE_CHEAP=0      # opt-in: send temperature to nano
-                                   # (gpt-5.4 family otherwise omits it)
+LLM_ALLOW_TEMPERATURE_CHEAP=0      # opt-in: send temperature on the cheap
+                                   # tier (reasoning models omit it)
 ```
 
 The whole codebase reads through `src/config/models.py::resolve_model()`.
 Changing a model identifier in one of these vars + restart updates
 every call site. **Do not hard-code model strings.**
 
-The `gpt-5.4` family is a reasoning family; per OpenAI docs we don't
-send `temperature` to them by default. `supports_temperature(model)`
-gates that. The `LLM_ALLOW_TEMPERATURE_CHEAP` knob exists because the
-nano variant may accept temperature in some configs — leave at 0
+**GPT-5.6 only** since 2026-09-01: no older id remains in the code, the
+fallbacks or the rate card. All three tiers are reasoning models, so per
+OpenAI docs we don't send `temperature` by default;
+`supports_temperature(model)` gates that. The `LLM_ALLOW_TEMPERATURE_CHEAP`
+knob exists because a cheap-tier variant may accept temperature in some
+configs — leave at 0
+
+`gpt-5.6-sol` (4.00 / 0.40 / 20.00 per 1M) sits ABOVE terra and is priced
+in `cost_rollup.py` but wired to nothing. Pointing `LLM_MODEL_REASONING` at
+it is a one-line change that will bill correctly from the first call.
 unless you've tested it and have a measurable reason.
 
 ### Rate limit (PR #73)
@@ -228,9 +234,9 @@ After editing any `src/prompts/*_v1.py` file (or changing the
 ```bash
 cd ai-core
 python -m scripts.verify_prompt_cache --prefix synthesizer_v1
-python -m scripts.verify_prompt_cache --prefix agent_v1 --model gpt-5.4-mini
-python -m scripts.verify_prompt_cache --prefix judge_v1 --model gpt-5.4-nano
-python -m scripts.verify_prompt_cache --prefix clarifier_v1 --model gpt-5.4-mini
+python -m scripts.verify_prompt_cache --prefix agent_v1 --model gpt-5.6-luna
+python -m scripts.verify_prompt_cache --prefix judge_v1 --model gpt-5.6-luna
+python -m scripts.verify_prompt_cache --prefix clarifier_v1 --model gpt-5.6-terra
 ```
 
 Each makes a small number of real OpenAI calls (~$0.005) and exits

@@ -11,7 +11,7 @@ import os
 
 router = APIRouter(tags=["summarize"])
 
-# Use o4-mini as specified in .env
+# Model comes from LLM_MODEL_BASIC in .env
 from src.config.models import resolve_model, is_reasoning_model  # noqa: E402
 OPENAI_MODEL = resolve_model("basic")  # env: LLM_MODEL_BASIC -> gpt-5.6-luna
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
@@ -95,8 +95,8 @@ async def summarize_chat(request: ChatSummaryRequest):
         ChatSummaryResponse with the generated summary
     """
     try:
-        # Initialize OpenAI chat model using o4-mini pattern from system
-        # o4-mini doesn't support temperature parameter
+        # Initialize OpenAI chat model from the basic tier
+        # Reasoning models reject temperature -- see is_reasoning_model()
         llm_kwargs = {"model": OPENAI_MODEL, "api_key": OPENAI_API_KEY}
         if not is_reasoning_model(OPENAI_MODEL):  # reasoning models reject temperature
             llm_kwargs["temperature"] = 0.3  # Lower temperature for focused summaries

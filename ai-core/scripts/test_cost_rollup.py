@@ -61,21 +61,21 @@ from scripts.cost_rollup import (  # noqa: E402
 
 
 def test_no_cache_billed_input_plus_output() -> None:
-    # gpt-5.4-mini (verified 2026-05-19): input $0.75, output $4.50 /1M.
-    cost = compute_cost_usd("gpt-5.4-mini", input_tokens=1_000_000, cached_input_tokens=0, output_tokens=1_000_000)
-    assert abs(cost - (0.75 + 4.50)) < 1e-9
+    # gpt-5.6-terra (2026-09-01): input $2.00, output $12.00 /1M.
+    cost = compute_cost_usd("gpt-5.6-terra", input_tokens=1_000_000, cached_input_tokens=0, output_tokens=1_000_000)
+    assert abs(cost - (2.00 + 12.00)) < 1e-9
 
 
 def test_full_cache_only_cached_rate() -> None:
-    # gpt-5.4-mini cached_input $0.08 /1M (verified).
-    cost = compute_cost_usd("gpt-5.4-mini", input_tokens=1_000_000, cached_input_tokens=1_000_000, output_tokens=0)
-    assert abs(cost - 0.08) < 1e-9
+    # gpt-5.6-terra cached_input $0.20 /1M.
+    cost = compute_cost_usd("gpt-5.6-terra", input_tokens=1_000_000, cached_input_tokens=1_000_000, output_tokens=0)
+    assert abs(cost - 0.20) < 1e-9
 
 
 def test_partial_cache_weighted_blend() -> None:
     # 60% cached, 40% uncached on 1M input tokens; no output.
-    cost = compute_cost_usd("gpt-5.4-mini", input_tokens=1_000_000, cached_input_tokens=600_000, output_tokens=0)
-    expected = 0.4 * 0.75 + 0.6 * 0.08
+    cost = compute_cost_usd("gpt-5.6-terra", input_tokens=1_000_000, cached_input_tokens=600_000, output_tokens=0)
+    expected = 0.4 * 2.00 + 0.6 * 0.20
     assert abs(cost - expected) < 1e-9
 
 
@@ -87,14 +87,14 @@ def test_unknown_model_returns_zero() -> None:
 def test_cached_exceeds_input_caps_at_input() -> None:
     """If telemetry ever reports cached > input (it shouldn't), we
     must NOT bill negative tokens. Cap cached at input."""
-    cost = compute_cost_usd("gpt-5.4-mini", input_tokens=100, cached_input_tokens=10_000, output_tokens=0)
-    # Effectively all 100 input tokens are cached (verified $0.08/1M).
-    expected = 100 * 0.08 / 1_000_000
+    cost = compute_cost_usd("gpt-5.6-terra", input_tokens=100, cached_input_tokens=10_000, output_tokens=0)
+    # Effectively all 100 input tokens are cached ($0.20/1M).
+    expected = 100 * 0.20 / 1_000_000
     assert abs(cost - expected) < 1e-12
 
 
 def test_zero_tokens_returns_zero() -> None:
-    assert compute_cost_usd("gpt-5.4-mini", 0, 0, 0) == 0.0
+    assert compute_cost_usd("gpt-5.6-luna", 0, 0, 0) == 0.0
 
 
 def test_embedding_output_is_free() -> None:
@@ -111,24 +111,24 @@ def test_rollup_empty_returns_empty() -> None:
 
 
 def test_rollup_per_model_callsite() -> None:
-    """Option A: one row per (model, call_site) -- so gpt-5.4-mini
+    """Option A: one row per (model, call_site) -- so gpt-5.6-luna
     used by agent_loop AND synthesizer is TWO rows, not collapsed.
     call_count = #ModelTokenUsage rows in the bucket."""
     rows = [
-        UsageRow(model="gpt-5.4-mini", input_tokens=1000, cached_input_tokens=500, output_tokens=200, call_site="agent_loop"),
-        UsageRow(model="gpt-5.4-mini", input_tokens=900, cached_input_tokens=100, output_tokens=50, call_site="agent_loop"),
-        UsageRow(model="gpt-5.4-mini", input_tokens=2000, cached_input_tokens=1500, output_tokens=300, call_site="synthesizer"),
-        UsageRow(model="gpt-5.2", input_tokens=500, cached_input_tokens=400, output_tokens=100, call_site="synthesizer"),
+        UsageRow(model="gpt-5.6-luna", input_tokens=1000, cached_input_tokens=500, output_tokens=200, call_site="agent_loop"),
+        UsageRow(model="gpt-5.6-luna", input_tokens=900, cached_input_tokens=100, output_tokens=50, call_site="agent_loop"),
+        UsageRow(model="gpt-5.6-luna", input_tokens=2000, cached_input_tokens=1500, output_tokens=300, call_site="synthesizer"),
+        UsageRow(model="gpt-5.6-terra", input_tokens=500, cached_input_tokens=400, output_tokens=100, call_site="synthesizer"),
     ]
     out = rollup_by_model(rows, date(2026, 4, 25))
     assert len(out) == 3  # (mini,agent_loop) (mini,synth) (5.2,synth)
     by = {(r.model, r.call_site): r for r in out}
-    al = by[("gpt-5.4-mini", "agent_loop")]
+    al = by[("gpt-5.6-luna", "agent_loop")]
     assert al.input_tokens == 1900 and al.cached_input_tokens == 600
     assert al.output_tokens == 250 and al.call_count == 2
-    assert by[("gpt-5.4-mini", "synthesizer")].input_tokens == 2000
-    assert by[("gpt-5.4-mini", "synthesizer")].call_count == 1
-    assert by[("gpt-5.2", "synthesizer")].input_tokens == 500
+    assert by[("gpt-5.6-luna", "synthesizer")].input_tokens == 2000
+    assert by[("gpt-5.6-luna", "synthesizer")].call_count == 1
+    assert by[("gpt-5.6-terra", "synthesizer")].input_tokens == 500
 
 
 def test_rollup_usd_computed_on_aggregates_not_per_row() -> None:
@@ -137,12 +137,12 @@ def test_rollup_usd_computed_on_aggregates_not_per_row() -> None:
     accurate. This tests the design choice doesn't regress."""
     # Three rows that together sum to nice round numbers.
     rows = [
-        UsageRow(model="gpt-5.4-mini", input_tokens=333_333, cached_input_tokens=0, output_tokens=0),
-        UsageRow(model="gpt-5.4-mini", input_tokens=333_333, cached_input_tokens=0, output_tokens=0),
-        UsageRow(model="gpt-5.4-mini", input_tokens=333_334, cached_input_tokens=0, output_tokens=0),
+        UsageRow(model="gpt-5.6-luna", input_tokens=333_333, cached_input_tokens=0, output_tokens=0),
+        UsageRow(model="gpt-5.6-luna", input_tokens=333_333, cached_input_tokens=0, output_tokens=0),
+        UsageRow(model="gpt-5.6-luna", input_tokens=333_334, cached_input_tokens=0, output_tokens=0),
     ]
     out = rollup_by_model(rows, date(2026, 4, 25))[0]
-    # No call_site set -> all bucket to (gpt-5.4-mini, "unknown").
+    # No call_site set -> all bucket to (gpt-5.6-luna, "unknown").
     assert out.call_site == "unknown" and out.call_count == 3
     expected = 1_000_000 * 0.75 / 1_000_000  # verified input $0.75/1M
     assert abs(out.usd - expected) < 1e-12
@@ -150,7 +150,7 @@ def test_rollup_usd_computed_on_aggregates_not_per_row() -> None:
 
 def test_rollup_preserves_date() -> None:
     out = rollup_by_model(
-        [UsageRow(model="gpt-5.4-mini", input_tokens=1000, cached_input_tokens=0, output_tokens=0)],
+        [UsageRow(model="gpt-5.6-luna", input_tokens=1000, cached_input_tokens=0, output_tokens=0)],
         date(2026, 4, 25),
     )
     assert out[0].the_date == date(2026, 4, 25)
@@ -205,7 +205,7 @@ def test_price_table_covers_models_in_use() -> None:
 def test_daily_cost_row_serializes_to_dict() -> None:
     row = DailyCostRow(
         the_date=date(2026, 4, 25),
-        model="gpt-5.4-mini",
+        model="gpt-5.6-luna",
         call_site="synthesizer",
         input_tokens=1_000_000,
         cached_input_tokens=500_000,
@@ -215,7 +215,7 @@ def test_daily_cost_row_serializes_to_dict() -> None:
     )
     d = row.as_dict()
     assert d["date"] == "2026-04-25"
-    assert d["model"] == "gpt-5.4-mini"
+    assert d["model"] == "gpt-5.6-luna"
     assert d["call_site"] == "synthesizer"
     assert d["input_tokens"] == 1_000_000
     assert d["call_count"] == 42
@@ -261,36 +261,38 @@ if __name__ == "__main__":
     sys.exit(main())
 
 
-# --- dated snapshots, unpriced detection, and the o4-mini regression ---
+# --- dated snapshots and unpriced detection ---
 #
-# These pin the specific hole that let o4-mini bill as $0 for five months:
-# the model string in the DB was "o4-mini-2025-04-16", a dated snapshot, and
-# nothing normalised it or flagged it as unpriced.
+# These pin the specific hole that once let a model bill as $0 for five
+# months: the string in the DB was a dated snapshot ("<model>-YYYY-MM-DD")
+# and nothing normalised it or flagged it as unpriced. OpenAI still pins
+# snapshots, so the hole is still reachable -- with 5.6 ids now.
 
 
 def test_dated_snapshot_normalises_to_base_model():
-    assert normalise_model("o4-mini-2025-04-16") == "o4-mini"
-    assert normalise_model("gpt-5.4-mini-2026-03-17") == "gpt-5.4-mini"
+    assert normalise_model("gpt-5.6-luna-2026-08-21") == "gpt-5.6-luna"
+    assert normalise_model("gpt-5.6-terra-2026-03-17") == "gpt-5.6-terra"
 
 
 def test_undated_model_is_left_alone():
-    # gpt-5.2 / gpt-4.1 must not be mangled by the date-stripping regex.
-    for m in ("gpt-5.6-luna", "gpt-5.2", "gpt-4.1-nano", "text-embedding-3-large"):
+    # Nothing without a trailing date may be mangled by the regex.
+    for m in ("gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol",
+              "text-embedding-3-large"):
         assert normalise_model(m) == m
 
 
 def test_dated_snapshot_is_priced_at_base_rate():
-    """The real historical row: 2,692,981 in (no cache) + 817,527 out."""
-    snapshot = compute_cost_usd("o4-mini-2025-04-16", 2_692_981, 0, 817_527)
-    base = compute_cost_usd("o4-mini", 2_692_981, 0, 817_527)
+    """Real historical shape: 2,692,981 in (no cache) + 817,527 out."""
+    snapshot = compute_cost_usd("gpt-5.6-terra-2026-08-21", 2_692_981, 0, 817_527)
+    base = compute_cost_usd("gpt-5.6-terra", 2_692_981, 0, 817_527)
     assert snapshot == base
-    # ~$2.96 input + ~$3.60 output. The point is that it is NOT $0.
-    assert 6.0 < snapshot < 7.0, snapshot
+    # ~$5.39 input + ~$9.81 output. The point is that it is NOT $0.
+    assert 15.0 < snapshot < 15.5, snapshot
 
 
-def test_o4_mini_is_priced_because_it_served_1518_real_turns():
-    assert is_priced("o4-mini")
-    assert is_priced("o4-mini-2025-04-16")
+def test_a_pinned_snapshot_of_a_live_model_is_priced():
+    assert is_priced("gpt-5.6-terra")
+    assert is_priced("gpt-5.6-terra-2026-08-21")
 
 
 def test_is_priced_is_false_for_genuinely_unknown_model():
@@ -300,29 +302,42 @@ def test_is_priced_is_false_for_genuinely_unknown_model():
     assert compute_cost_usd("gpt-experimental-99", 1_000_000, 0, 1_000_000) == 0.0
 
 
-def test_sol_stays_out_of_the_table_while_unused():
-    """Operator's rule: models we don't call don't belong in the rate card.
+def test_sol_is_priced_but_not_wired():
+    """Reversed on 2026-09-01. The old rule was "models we don't call don't
+    belong in the rate card", which meant switching REASONING to Sol would
+    have billed the most expensive model on the menu at $0 until somebody
+    noticed. The operator wants the option available, so Sol is priced
+    ahead of use -- and the cost of a spare row is nothing.
 
-    If Sol is ever wired up, this test should fail loudly rather than let it
-    bill silently at $0 -- add the row (5.00/0.50/30.00 as of 2026-07-30)
-    and delete this test.
+    It is priced, NOT selected: no tier points at it.
     """
-    assert "gpt-5.6-sol" not in PRICE_PER_1M_TOKENS
+    assert is_priced("gpt-5.6-sol")
+    assert PRICE_PER_1M_TOKENS["gpt-5.6-sol"]["input"] == 4.00
+    from src.config.models import BASIC_MODEL, REASONING_MODEL, CHEAP_MODEL
+    assert "sol" not in (BASIC_MODEL + REASONING_MODEL + CHEAP_MODEL)
 
 
-def test_every_model_in_our_usage_history_is_priced():
-    """The six model strings ModelTokenUsage actually holds on 2026-07-31.
+def test_every_model_we_can_still_run_is_priced():
+    """Narrowed on 2026-09-01, deliberately.
 
-    Hard-coded rather than read from the DB so the test runs offline and so a
-    future unpriced model shows up as a failing assertion here first.
+    This used to assert that every model string ever seen in
+    ModelTokenUsage was priced. The rate card is GPT-5.6-only now, so that
+    assertion cannot hold and should not: a retired model must come back
+    "unpriced", not "$0".
+
+    What still has to hold is the property that mattered -- anything we can
+    actually reach today is priced, and anything we cannot is VISIBLY
+    unpriced rather than silently free.
     """
-    seen_in_production = [
-        "o4-mini-2025-04-16",       # 1,518 turns, 2025-12-17 ~ 2026-05-12
-        "gpt-5.6-luna",             #   457 turns, 2026-07-18 ~
-        "gpt-5.6-terra",            #   359 turns, 2026-07-17 ~
-        "gpt-5.4-mini",             #   158 turns, 2026-06-11 ~ 2026-07-17
-        "gpt-5.2",                  #    46 turns, 2026-06-12 ~ 2026-07-15
-        "gpt-5.4-mini-2026-03-17",  #    16 turns, 2026-05-24 ~ 2026-05-27
-    ]
-    unpriced = [m for m in seen_in_production if not is_priced(m)]
-    assert not unpriced, f"models with real usage but no price row: {unpriced}"
+    from src.config.models import (BASIC_MODEL, CHEAP_MODEL, EMBEDDING_MODEL,
+                                   REASONING_MODEL)
+
+    for m in (BASIC_MODEL, REASONING_MODEL, CHEAP_MODEL, EMBEDDING_MODEL,
+              "gpt-5.6-sol"):
+        assert is_priced(m), f"reachable model with no price row: {m}"
+
+    # A retired id must be unpriced AND say so. $0 alone is the failure
+    # mode this whole module exists to prevent.
+    retired = "gpt-5.5-retired"
+    assert not is_priced(retired)
+    assert compute_cost_usd(retired, 1_000_000, 0, 1_000_000) == 0.0

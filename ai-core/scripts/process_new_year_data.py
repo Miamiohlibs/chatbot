@@ -160,9 +160,9 @@ async def process_new_year_data(
         deleted_pairs = []
         filter_stats = {}
     else:
-        print_step(4, "AI-Assisted Smart Filtering (using o4-mini model)")
+        print_step(4, "AI-Assisted Smart Filtering (using gpt-5.6-luna)")
         
-        print(f"🤖 Using o4-mini model for intelligent filtering")
+        print(f"🤖 Using gpt-5.6-luna for intelligent filtering")
         print(f"📦 Batch Size: {ai_batch_size}")
         print(f"⏱️  Estimated Time: {len(high_quality) / (ai_batch_size * 3):.0f}-{len(high_quality) / (ai_batch_size * 2):.0f} minutes")
         print(f"\n🔍 Filtering Rules:")

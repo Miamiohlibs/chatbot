@@ -196,7 +196,7 @@ def test_conversation_detail_extracts_handoff_and_outcome() -> None:
     db = _StubDB(
         msgs=msgs,
         conv=SimpleNamespace(createdAt="c", updatedAt="u", toolUsed=[]),
-        toks=[SimpleNamespace(llmModelName="gpt-5.4-nano", callSite="judge",
+        toks=[SimpleNamespace(llmModelName="gpt-5.6-luna", callSite="judge",
                               promptTokens=10, cachedInputTokens=2,
                               completionTokens=3, totalTokens=13,
                               createdAt="t")],

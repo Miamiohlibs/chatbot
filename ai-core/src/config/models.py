@@ -56,31 +56,27 @@ from typing import Literal
 
 # --- Model identifiers (env-driven; one place; .env-managed) -----------------
 #
-# Operator preference (2026-05-19): 3 tiers, switchable in .env without
-# code edits. Defaults are the gpt-5.4 family, VERIFIED 2026-05-19
-# against the operator's OpenAI dashboard + developers.openai.com
-# (guides/reasoning, /text, /migrate-to-responses):
+# Three tiers, switchable in .env without code edits. **GPT-5.6 only.**
+# Operator ruling 2026-09-01: no model below 5.6 is to appear anywhere in this
+# codebase -- not as a tier, not as a fallback, not as a signature default.
 #
-#   id              reasoning  ctx      $/1M in / cached / out
-#   gpt-5.6-sol     5/5        1.05M    5.00 / 0.50 / 30.00
-#   gpt-5.6-terra   4/5        1.05M    2.00 / 0.20 / 12.00   <- REASONING since 2026-07-17
-#   gpt-5.6-luna    3/5        1.05M    0.20 / 0.02 /  1.20   <- BASIC since 2026-07-17,
-#                                                                CHEAP since 2026-07-30
-#   gpt-5.4         5/5        1.05M    2.50 / 0.25 / 15.00
-#   gpt-5.4-mini    4/5        400K     0.75 / 0.08 /  4.50
-#   gpt-5.4-nano    3/5        400K     0.20 / 0.02 /  1.25
+# Rates read off OpenAI's pricing pages on 2026-09-01, $/1M in / cached / out:
 #
-# REPRICED 2026-07-30, read off the operator's OpenAI models page that day.
-# Terra fell 20% and Luna 80%, and SOL appeared above Terra -- so Terra is now
-# the MIDDLE model of the 5.6 line, not the top, and our REASONING tier points
-# at a mid model. Whether that should move to Sol is a quality-per-dollar
-# decision for the operator, deliberately not taken here.
+#   id              reasoning  ctx      in   / cached / out
+#   gpt-5.6-sol     5/5        1.05M    4.00 / 0.40 / 20.00   priced, not wired
+#   gpt-5.6-terra   4/5        1.05M    2.00 / 0.20 / 12.00   <- REASONING
+#   gpt-5.6-luna    3/5        1.05M    0.20 / 0.02 /  1.20   <- BASIC and CHEAP
 #
-# The repricing makes Luna cheaper than gpt-5.4-nano outright (0.20/0.02/1.20
-# against 0.20/0.02/1.25) while carrying a 1.05M window instead of 400K and a
-# newer cutoff, so CHEAP moved from nano to luna: strictly better on every axis
-# that matters, at a marginally lower price. Nano is left in the price table
-# because historical rows were billed at it.
+# SOL sits ABOVE Terra, so our REASONING tier points at the middle model of
+# the line, not the top. Whether it should move up is a quality-per-dollar
+# decision for the operator and is deliberately not taken here -- but Sol is
+# now PRICED in cost_rollup so that switching cannot silently bill $0.
+#
+# Sol got cheaper on 2026-08-21 (was 5.00 / 0.50 / 30.00). OpenAI calls the
+# new rate promotional through at least 2026-11-21.
+#
+# BASIC and CHEAP are the SAME model today. The tiers stay separate so CHEAP
+# can be moved down later without dragging the agent loop with it.
 #
 # All three are REASONING models (reasoning-token support), expose both
 # /v1/chat/completions and /v1/responses, 128K max output, cutoff
@@ -88,18 +84,21 @@ from typing import Literal
 # `max_output_tokens` (NOT max_tokens), structured output via
 # `text.format`:{type:json_schema}, effort via `reasoning.effort`.
 
-BASIC_MODEL: str = os.getenv("LLM_MODEL_BASIC", "gpt-5.4-mini").strip()
+BASIC_MODEL: str = os.getenv("LLM_MODEL_BASIC", "gpt-5.6-luna").strip()
 """Easy / surface questions: agent loop default, light extraction.
 Env: LLM_MODEL_BASIC."""
 
-REASONING_MODEL: str = os.getenv("LLM_MODEL_REASONING", "gpt-5.4").strip()
+REASONING_MODEL: str = os.getenv("LLM_MODEL_REASONING", "gpt-5.6-terra").strip()
 """Hard / sophisticated questions: ambiguous synthesis, multi-step
 tool calls, clarification. Env: LLM_MODEL_REASONING."""
 
 CHEAP_MODEL: str = os.getenv("LLM_MODEL_CHEAP", "gpt-5.6-luna").strip()
 """High-volume MECHANICAL calls where weak instruction-following is
 low-risk: LLM-as-judge in eval, classifier-fallback, light
-extraction/normalization. ~3.7x cheaper than basic, ~12x vs reasoning.
+extraction/normalization. Currently the SAME model as BASIC (both
+luna), so there is no cost gap between them today -- the tiers are kept
+separate so CHEAP can be moved down without dragging the agent loop with
+it. ~10x cheaper than REASONING.
 NEVER route the grounded synthesizer or the tool-calling agent here --
 that reintroduces the hallucination/citation failures the rebuild
 exists to kill. Env: LLM_MODEL_CHEAP."""
@@ -121,17 +120,16 @@ def is_reasoning_model(model_id: str) -> bool:
     is via `reasoning.effort`). Sending temperature to a reasoning model
     risks a 400.
 
-    Basis (NOT a guess -- verified 2026-05-19): the o-series (o1/o3/o4
-    ...) and the entire gpt-5.x family (5.2, 5.4, 5.4-mini, 5.4-nano)
-    are reasoning models. Older gpt-4*/gpt-3* are not. Omitting
+    All three GPT-5.6 tiers (sol, terra, luna) are reasoning models, so
+    in practice this returns True for everything we run. Omitting
     temperature is superset-safe: correct for reasoning models AND
-    harmless for non-reasoning ones (they use their default). The 3
-    OpenAI guides were silent on temperature for 5.4 specifically, so
-    we deliberately take the can't-break direction.
+    harmless for non-reasoning ones (they use their default), so the
+    match stays deliberately broad -- a prefix, not a list.
 
-    Replaces the legacy `OPENAI_MODEL.startswith("o")` check, which
-    missed the gpt-5.x reasoning family and would 400 the live bot
-    once the default moved to gpt-5.4.
+    Kept broad ON PURPOSE even though only 5.6 is allowed here now: the
+    cost of matching something we never call is nothing, and the cost of
+    NOT matching a model somebody wires in later is a 400 on the live
+    bot. That is the direction to be wrong in.
     """
     m = (model_id or "").strip().lower()
     return m.startswith("o") or m.startswith("gpt-5")

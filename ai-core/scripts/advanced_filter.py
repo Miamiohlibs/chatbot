@@ -18,8 +18,8 @@ root_dir = Path(__file__).resolve().parent.parent.parent
 load_dotenv(dotenv_path=root_dir / ".env")
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-# 使用o4-mini模型（不支持temperature参数）
-llm = ChatOpenAI(model="o4-mini", api_key=OPENAI_API_KEY)
+# GPT-5.6 luna (reasoning model -- no temperature parameter)
+llm = ChatOpenAI(model="gpt-5.6-luna", api_key=OPENAI_API_KEY)
 
 # ============================================================================
 # 过滤规则定义

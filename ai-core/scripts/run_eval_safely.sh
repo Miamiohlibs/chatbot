@@ -14,7 +14,7 @@
 #   Usage:  bash scripts/run_eval_safely.sh [extra run_eval args...]
 #
 # Defaults match the 2026-07-18 baseline (92.7%) so the number is
-# comparable: real LLMs, judge on gpt-5.4-mini.
+# comparable: real LLMs, judge on the cheap tier (gpt-5.6-luna).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -35,5 +35,5 @@ exec systemd-run --scope --quiet \
   bash -c "echo 500 > /proc/self/oom_score_adj 2>/dev/null; \
     set -a; . /opt/chatbot/.env; set +a; \
     exec .venv/bin/python -m src.eval.run_eval \
-      --with-real-llm --with-judge --judge-model gpt-5.4-mini \
+      --with-real-llm --with-judge --judge-model gpt-5.6-luna \
       --results-out '$OUT' $*"

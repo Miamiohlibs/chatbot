@@ -102,10 +102,22 @@ Evidence goes to the synthesiser, and the turn is written to `Message`,
 
 ### Models
 
+**GPT-5.6 only.** Operator ruling, 1 September 2026: nothing below 5.6 is
+kept anywhere — not as a tier, not as a fallback, not in the rate card.
+
 | Role | Model | Per 1M tokens (in / cached / out) |
 |---|---|---|
+| *(none — priced, not wired)* | `gpt-5.6-sol` | 4.00 / 0.40 / 20.00 |
 | Reasoning | `gpt-5.6-terra` | 2.00 / 0.20 / 12.00 |
 | Basic + cheap | `gpt-5.6-luna` | 0.20 / 0.02 / 1.20 |
+| Embeddings | `text-embedding-3-large` | 0.13 — input only |
+
+Rates read off OpenAI on 1 September 2026. **Sol is the top of the line and
+sits above terra**, so our reasoning tier is the middle model, not the best
+one. It is deliberately priced but not selected: the rate is in the table so
+that switching to it can never bill $0 by surprise. Sol got *cheaper* on 21
+August (was 5.00 / 0.50 / 30.00) and OpenAI calls that promotional through
+at least 21 November.
 | Embeddings | `text-embedding-3-large` | — |
 
 Terra costs about **21× luna per call**. At 85% of the student purse the

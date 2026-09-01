@@ -44,7 +44,7 @@ def _resp(**over) -> TurnResponse:
         confidence="high",
         intent="hours",
         scope={"campus": "oxford", "library": "king"},
-        model_used="gpt-5.4-mini",
+        model_used="gpt-5.6-luna",
         tokens={"input": 10, "cached_input": 0, "output": 5},
         fired_corrections=[],
         agent_stopped_reason="answered",
@@ -95,10 +95,10 @@ def test_wire_carries_telemetry_passthrough() -> None:
     EMPTY for all v2 traffic (cost dashboards read $0)."""
     w = V.turnresponse_to_wire(
         _resp(tokens={"input": 120, "cached_input": 90, "output": 30},
-              model_used="gpt-5.4-mini", latency_ms=4321),
+              model_used="gpt-5.6-luna", latency_ms=4321),
         message_id="m", conversation_id="c",
     )
-    assert w["model_used"] == "gpt-5.4-mini"
+    assert w["model_used"] == "gpt-5.6-luna"
     assert w["tokens"] == {"input": 120, "cached_input": 90, "output": 30}
     assert w["latency_ms"] == 4321
     json.dumps(w)  # stays JSON-safe

@@ -1012,8 +1012,8 @@ def _percentile(values: list[int], pct: float) -> float:
 #     )
 #     result.judge_verdict = verdict["verdict"]
 #
-# Cost: ~$0.01 per gold question with gpt-5.4-mini, single regression
-# run = ~$2 for 184 cases.
+# Cost estimate omitted: this block is a superseded plan sketch, and the
+# figure in it was priced against a model no longer in use.
 
 
 # --- Reporting ------------------------------------------------------------
@@ -1302,8 +1302,8 @@ def _record_spend(report: "EvalReport") -> None:
     # Only flag something as unpriced if it actually had tokens to price. The
     # deterministic short-circuits report a placeholder model name with zero
     # tokens because no model ran; they cost $0 correctly, and warning about
-    # them buried the real signal (a genuinely unpriced model is how o4-mini
-    # ran unnoticed for five months).
+    # them buried the real signal (a genuinely unpriced model is how a
+    # retired one ran unnoticed for five months).
     unpriced = [v["model"] for v in per.values()
                 if not is_priced(v["model"])
                 and (v["input_tokens"] + v["output_tokens"]) > 0]

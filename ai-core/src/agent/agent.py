@@ -169,7 +169,7 @@ def run_agent(
     *,
     llm: Optional[AgentLLM] = None,
     prefix_id: str = "agent_v1",
-    model: str = "gpt-5.4-mini",
+    model: str = "gpt-5.6-luna",
     max_iterations: int = 6,
     max_tool_failures: int = 3,
 ) -> AgentOutcome:

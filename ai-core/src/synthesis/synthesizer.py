@@ -395,7 +395,7 @@ def synthesize(
     *,
     llm: Optional[SynthesizerLLM] = None,
     prefix_id: str = "synthesizer_v1",
-    model: str = "gpt-5.4-mini",
+    model: str = "gpt-5.6-luna",
 ) -> SynthesisResult:
     """Run synthesis end to end: corrections -> LLM -> post-processor.
 

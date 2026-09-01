@@ -213,8 +213,8 @@ def judge_answer(
             rubric changes substantively (and update the eval gold
             set's expected verdicts in the same PR).
         model: which model to use. Default "" -> resolve_model("cheap")
-            (env LLM_MODEL_CHEAP -> gpt-5.6-luna; the module fallback
-            still reads gpt-5.4-nano). The judge is high-volume
+            (env LLM_MODEL_CHEAP, falling back to gpt-5.6-luna).
+            The judge is high-volume
             mechanical rubric scoring once per question per regression
             run and is the single biggest eval-cost line; consistency
             matters more than reasoning depth here. Pass an explicit id

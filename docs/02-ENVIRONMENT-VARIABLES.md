@@ -87,9 +87,11 @@ LLM_MODEL_CHEAP=gpt-5.6-luna        # eval judge, mechanical extraction
 LLM_MODEL_EMBEDDING=text-embedding-3-large  # changing this invalidates the vector index
 ```
 - **OPENAI_API_KEY**: Your OpenAI API key (required)
-- Tier values above are the production settings as of 2026-09-01 (CHEAP
-  read `gpt-5.4-nano` here until then, which production had not used for
-  months); swap
+- Tier values above are the production settings as of 2026-09-01. **GPT-5.6
+  only** — the operator ruling that day removed every older id from the code,
+  the fallbacks and the rate card. `gpt-5.6-sol` is priced but not wired, so
+  moving REASONING onto it is a one-line change that cannot silently bill
+  $0. Swap
   models per tier without touching call sites (`src/config/models.py`).
 
 ---

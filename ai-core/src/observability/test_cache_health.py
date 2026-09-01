@@ -128,7 +128,7 @@ def test_dynamic_dynamic_only_returns_skipped() -> None:
 def test_call_site_rate_hit_rate() -> None:
     r = CallSiteRate(
         call_site="agent",
-        model="gpt-5.4-mini",
+        model="gpt-5.6-luna",
         call_count=100,
         total_input_tokens=10000,
         total_cached_tokens=7000,
@@ -140,7 +140,7 @@ def test_call_site_rate_hit_rate() -> None:
 def test_call_site_rate_below_gate() -> None:
     r = CallSiteRate(
         call_site="synthesizer",
-        model="gpt-5.4-mini",
+        model="gpt-5.6-luna",
         call_count=50,
         total_input_tokens=10000,
         total_cached_tokens=3000,
@@ -154,7 +154,7 @@ def test_call_site_rate_zero_input_returns_zero() -> None:
     shouldn't divide-by-zero."""
     r = CallSiteRate(
         call_site="judge",
-        model="gpt-5.4-mini",
+        model="gpt-5.6-luna",
         call_count=0,
         total_input_tokens=0,
         total_cached_tokens=0,
@@ -228,8 +228,8 @@ def test_to_jsonable_includes_per_call_site_rates() -> None:
         window_hours=24,
         avg_hit_rate=0.65,
         by_call_site=[
-            CallSiteRate("agent", "gpt-5.4-mini", 100, 10000, 7000),
-            CallSiteRate("synth", "gpt-5.4-mini", 50, 5000, 3000),
+            CallSiteRate("agent", "gpt-5.6-luna", 100, 10000, 7000),
+            CallSiteRate("synth", "gpt-5.6-luna", 50, 5000, 3000),
         ],
         ok=False,  # synth below 0.5
     )
@@ -277,7 +277,7 @@ def test_print_dynamic_with_traffic() -> None:
     rep = DynamicReport(
         window_hours=24,
         by_call_site=[
-            CallSiteRate("agent", "gpt-5.4-mini", 100, 10000, 7000),
+            CallSiteRate("agent", "gpt-5.6-luna", 100, 10000, 7000),
         ],
         avg_hit_rate=0.7,
         ok=True,

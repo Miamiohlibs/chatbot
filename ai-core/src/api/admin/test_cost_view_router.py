@@ -2,9 +2,14 @@
 Tests for the cost panel's model-history and rate-card helpers.
 
 WHY these exist: the panel's job is to make an unpriced model impossible to
-miss. o4-mini served 1,518 turns and reported $0.00 on every cost report for
-five months because nothing distinguished "free" from "no rate on file". These
-tests pin the distinction at the render boundary, where a human reads it.
+miss. A retired model once served 1,518 turns and reported $0.00 on every cost
+report for five months because nothing distinguished "free" from "no rate on
+file". These tests pin the distinction at the render boundary, where a human
+reads it.
+
+This matters MORE since 2026-09-01, not less: the rate card was cut to the
+GPT-5.6 line, so anything outside it is unpriced BY DESIGN and the flag is
+the only thing standing between that and a page saying "$0".
 
 The helpers are pure except for _model_history, which takes a fake db -- no
 Prisma, no network, so this runs in the offline sandbox.
@@ -65,23 +70,25 @@ def _group(model, turns, inp, cached, out, first, last):
     }
 
 
-# The real shape of ModelTokenUsage on 2026-07-31.
+# Real ModelTokenUsage shapes, with the ids updated to the 5.6-only world:
+# a dated snapshot of a live model, a plain live model, and one retired id
+# that no longer has a rate.
 _REAL_HISTORY = [
-    _group("o4-mini-2025-04-16", 1518, 2_692_981, 0, 817_527,
+    _group("gpt-5.6-terra-2026-08-21", 1518, 2_692_981, 0, 817_527,
            "2025-12-17T03:25:42.285Z", "2026-05-12T14:07:38.056Z"),
     _group("gpt-5.6-luna", 457, 4_741_401, 4_297_107, 112_503,
            "2026-07-18T07:05:01.015Z", "2026-07-31T15:52:18.729Z"),
-    _group("gpt-5.4-mini-2026-03-17", 16, 40_668, 0, 1_313,
+    _group("gpt-5.5-retired", 16, 40_668, 0, 1_313,
            "2026-05-24T20:22:17.813Z", "2026-05-27T17:10:15.079Z"),
 ]
 
 
 @pytest.mark.asyncio
-async def test_history_prices_the_pre_rebuild_model_instead_of_reporting_zero():
+async def test_history_prices_a_pinned_snapshot_instead_of_reporting_zero():
     hist = await _model_history(_FakeDb(groups=_REAL_HISTORY))
-    o4 = next(h for h in hist if h["model"] == "o4-mini-2025-04-16")
-    assert o4["priced"] is True
-    assert 6.0 < o4["usd"] < 7.0, o4["usd"]  # was $0.00 for five months
+    snap = next(h for h in hist if h["model"] == "gpt-5.6-terra-2026-08-21")
+    assert snap["priced"] is True
+    assert 15.0 < snap["usd"] < 15.5, snap["usd"]  # a pin must not read $0
 
 
 @pytest.mark.asyncio
@@ -93,17 +100,17 @@ async def test_history_sorted_by_turns_so_the_workhorse_is_first():
 @pytest.mark.asyncio
 async def test_history_reports_first_and_last_use_as_dates():
     hist = await _model_history(_FakeDb(groups=_REAL_HISTORY))
-    o4 = hist[0]
-    assert o4["first_seen"] == "2025-12-17"
-    assert o4["last_seen"] == "2026-05-12"
+    top = hist[0]
+    assert top["first_seen"] == "2025-12-17"
+    assert top["last_seen"] == "2026-05-12"
 
 
 @pytest.mark.asyncio
 async def test_history_shows_which_base_rate_a_dated_snapshot_used():
     """Otherwise "why is this row $1.20" has no answer on the page."""
     hist = await _model_history(_FakeDb(groups=_REAL_HISTORY))
-    snap = next(h for h in hist if h["model"] == "gpt-5.4-mini-2026-03-17")
-    assert snap["priced_as"] == "gpt-5.4-mini"
+    snap = next(h for h in hist if h["model"] == "gpt-5.6-terra-2026-08-21")
+    assert snap["priced_as"] == "gpt-5.6-terra"
     luna = next(h for h in hist if h["model"] == "gpt-5.6-luna")
     assert luna["priced_as"] is None  # no annotation when the id is already base
 
@@ -148,15 +155,15 @@ def test_rate_card_shows_only_models_we_actually_call():
     """Operator ruling 2026-08-21: the page lists what we spend on.
 
     It used to print all ~21 priced models with a used/never column, which
-    buried the two rows this service runs on. The price table still covers
-    every model -- that is what catches an unpriced one -- but the PAGE is
-    now the short list.
+    buried the two rows this service runs on. Since 2026-09-01 the table
+    itself is short (5.6 only), and the PAGE is shorter still: only what we
+    actually call. Sol is priced but never called, so it stays off.
     """
-    hist = [{"model": "gpt-5.6-luna"}, {"model": "o4-mini-2025-04-16"}]
+    hist = [{"model": "gpt-5.6-luna"}, {"model": "gpt-5.6-terra-2026-08-21"}]
     names = {c["model"] for c in _rate_card(hist)}
     assert "gpt-5.6-luna" in names
-    assert "o4-mini" in names          # matched via the snapshot's base model
-    assert "gpt-4o-mini" not in names  # priced, never called -- not shown
+    assert "gpt-5.6-terra" in names   # matched via the snapshot's base model
+    assert "gpt-5.6-sol" not in names  # priced, never called -- not shown
     assert all(c["used"] or c["unlogged"] for c in _rate_card(hist))
 
 
@@ -206,4 +213,4 @@ def test_rate_card_does_not_claim_embeddings_were_never_used():
     assert emb["used"] is False      # genuinely absent from ModelTokenUsage
     assert emb["unlogged"] is True   # ...but we do call it, so don't say "never"
     # A model we neither call nor log is simply not on the page any more.
-    assert "gpt-4o-mini" not in card
+    assert "gpt-5.6-sol" not in card

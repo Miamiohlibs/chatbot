@@ -87,7 +87,7 @@ def test_record_tool_call_no_op_when_prom_missing() -> None:
 def test_record_llm_call_no_op_when_prom_missing() -> None:
     m = _fresh_metrics_module(prom_block=True)
     m.record_llm_call(
-        model="gpt-5.4-mini", call_site="agent", status="ok",
+        model="gpt-5.6-luna", call_site="agent", status="ok",
         latency_s=0.4, input_tokens=100, cached_input_tokens=80, output_tokens=20,
     )
 
@@ -114,7 +114,7 @@ def test_record_llm_call_zero_tokens_is_safe() -> None:
     Counter.inc(0)."""
     m = _fresh_metrics_module(prom_block=True)
     m.record_llm_call(
-        model="gpt-5.4-mini", call_site="agent", status="ok", latency_s=0.1,
+        model="gpt-5.6-luna", call_site="agent", status="ok", latency_s=0.1,
     )
 
 

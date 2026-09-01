@@ -101,7 +101,7 @@ python -m scripts.advanced_filter \
 **Features**:
 - Removes simple greetings
 - Filters API-redundant content (Primo, LibCal already handle these)
-- AI quality assessment using o4-mini
+- AI quality assessment using gpt-5.6-luna
 - Batch processing for efficiency
 
 #### `ingest_transcripts_optimized.py`
@@ -238,7 +238,8 @@ python -m scripts.delete_weaviate_records --query "outdated policy"
 
 ## 🚨 Important Notes
 
-- All scripts use `o4-mini` model for AI operations (no temperature parameter)
+- All scripts use `gpt-5.6-luna` for AI operations (a reasoning model, so no
+  temperature parameter). GPT-5.6 only since 2026-09-01.
 - Always backup before running cleanup scripts (`delete_weaviate_records.py`, `weaviate_cleanup.py`)
 - Run scripts from project root: `python -m scripts.<script_name>`
 - Check `.env` file has required API keys (OPENAI_API_KEY, WEAVIATE_URL, etc.)

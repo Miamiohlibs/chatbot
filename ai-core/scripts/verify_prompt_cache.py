@@ -26,7 +26,7 @@ per call uncached, ~$0.00026 per call when cached. 3 calls ≈ $0.005.
 Usage:
     .venv/bin/python -m scripts.verify_prompt_cache
     .venv/bin/python -m scripts.verify_prompt_cache --prefix agent_v1
-    .venv/bin/python -m scripts.verify_prompt_cache --calls 5 --model gpt-5.4-nano
+    .venv/bin/python -m scripts.verify_prompt_cache --calls 5 --model gpt-5.6-luna
 """
 
 from __future__ import annotations
@@ -152,8 +152,9 @@ def main(argv: Optional[list[str]] = None) -> int:
     )
     parser.add_argument(
         "--model",
-        default="gpt-5.4-nano",
-        help="Model to use. Default nano (cheapest verification).",
+        default="gpt-5.6-luna",
+        help="Model to use. Default luna, the cheap tier since 2026-07-30 "
+             "(cheapest verification; it undercut nano outright).",
     )
     parser.add_argument(
         "--sleep-ms",

@@ -281,7 +281,7 @@ def _run_turn(
 
     Models default to the configured tiers (LLM_MODEL_BASIC /
     LLM_MODEL_REASONING). They were hardcoded strings until 2026-07-17,
-    which silently pinned PRODUCTION to gpt-5.4-mini/gpt-5.2 -- the
+    which silently pinned PRODUCTION to two now-retired models -- the
     serving path never passes these params, so .env model upgrades
     only ever reached the eval harness (which resolves its own).
     """

@@ -87,12 +87,12 @@ def test_bind_request_context_merges_fields() -> None:
     _reset()
     bind_request_context(request_id="r1", intent="hours")
     bind_request_context(scope_campus="oxford")
-    bind_request_context(model_used="gpt-5.4-mini")
+    bind_request_context(model_used="gpt-5.6-luna")
     ctx = _request_context_var.get()
     assert ctx["request_id"] == "r1"
     assert ctx["intent"] == "hours"
     assert ctx["scope_campus"] == "oxford"
-    assert ctx["model_used"] == "gpt-5.4-mini"
+    assert ctx["model_used"] == "gpt-5.6-luna"
 
 
 def test_context_isolated_across_asyncio_tasks() -> None:

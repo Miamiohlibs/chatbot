@@ -227,7 +227,7 @@ def completion(
     *,
     prefix_id: str,
     dynamic_suffix: str,
-    model: str = "gpt-5.4-mini",
+    model: str = "gpt-5.6-luna",
     max_output_tokens: int = 800,
 ) -> tuple[str, LLMUsage]:
     """Plain text completion via the Responses API.
@@ -264,7 +264,7 @@ def structured_completion(
     dynamic_suffix: str,
     response_schema: dict,
     schema_name: str = "structured_output",
-    model: str = "gpt-5.4-mini",
+    model: str = "gpt-5.6-luna",
 ) -> tuple[dict, LLMUsage]:
     """Completion that returns JSON matching `response_schema`. This is
     the call the synthesizer makes -- the schema is
@@ -318,7 +318,7 @@ def completion_with_tools(
     prefix_id: str,
     input_items: list[dict],
     tools: list[dict],
-    model: str = "gpt-5.4-mini",
+    model: str = "gpt-5.6-luna",
 ) -> tuple[dict, list[ToolCall], LLMUsage]:
     """Tool-calling completion via the Responses API.
 

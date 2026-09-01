@@ -34,16 +34,16 @@ def _reload_clean():
     importlib.reload(M)
 
 
-def test_defaults_are_gpt54_family() -> None:
-    """The BASIC/REASONING fallbacks are still the 5.4 family on purpose --
-    they are what runs if .env is missing, and a conservative fallback is the
-    point. CHEAP moved to luna on 2026-07-30 because the repricing made luna
-    cheaper than nano outright (0.20/0.02/1.20 against 0.20/0.02/1.25) with a
-    1.05M window instead of 400K, so the cheap fallback is now also the better
-    model."""
+def test_defaults_are_the_56_family() -> None:
+    """Every tier falls back to GPT-5.6. Operator ruling 2026-09-01: no
+    model below 5.6 belongs in this codebase.
+
+    BASIC and CHEAP are deliberately the same model. The tiers stay
+    separate so CHEAP can move down later without dragging the agent loop
+    with it."""
     _reload_clean()
-    assert M.BASIC_MODEL == "gpt-5.4-mini", M.BASIC_MODEL
-    assert M.REASONING_MODEL == "gpt-5.4", M.REASONING_MODEL
+    assert M.BASIC_MODEL == "gpt-5.6-luna", M.BASIC_MODEL
+    assert M.REASONING_MODEL == "gpt-5.6-terra", M.REASONING_MODEL
     assert M.CHEAP_MODEL == "gpt-5.6-luna", M.CHEAP_MODEL
     assert M.EMBEDDING_MODEL == "text-embedding-3-large"
 
@@ -65,8 +65,8 @@ def test_cheap_default_is_not_dearer_than_basic() -> None:
 
 def test_resolve_model_three_tiers() -> None:
     _reload_clean()
-    assert M.resolve_model("basic") == "gpt-5.4-mini"
-    assert M.resolve_model("reasoning") == "gpt-5.4"
+    assert M.resolve_model("basic") == "gpt-5.6-luna"
+    assert M.resolve_model("reasoning") == "gpt-5.6-terra"
     assert M.resolve_model("cheap") == "gpt-5.6-luna"
     try:
         M.resolve_model("bogus")  # type: ignore[arg-type]
@@ -76,24 +76,30 @@ def test_resolve_model_three_tiers() -> None:
 
 
 def test_env_override() -> None:
-    os.environ["LLM_MODEL_BASIC"] = "gpt-5.4-mini-2099"
+    # Arbitrary strings on purpose -- this asserts the env WINS, not that
+    # any particular model exists.
+    os.environ["LLM_MODEL_BASIC"] = "gpt-5.6-luna-2099"
     os.environ["LLM_MODEL_REASONING"] = "gpt-6"
-    os.environ["LLM_MODEL_CHEAP"] = "gpt-5.4-nano-x"
+    os.environ["LLM_MODEL_CHEAP"] = "gpt-5.6-luna-x"
     try:
         importlib.reload(M)
-        assert M.resolve_model("basic") == "gpt-5.4-mini-2099"
+        assert M.resolve_model("basic") == "gpt-5.6-luna-2099"
         assert M.resolve_model("reasoning") == "gpt-6"
-        assert M.resolve_model("cheap") == "gpt-5.4-nano-x"
+        assert M.resolve_model("cheap") == "gpt-5.6-luna-x"
     finally:
         _reload_clean()  # restore real config for any later import
 
 
 def test_is_reasoning_model() -> None:
     _reload_clean()
-    for yes in ("o4-mini", "o1", "o3-mini", "gpt-5.2", "gpt-5.4",
-                "gpt-5.4-mini", "gpt-5.4-nano", "GPT-5.4-NANO"):
+    for yes in ("gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna",
+                "GPT-5.6-LUNA", "gpt-5.6-luna-2026-08-21"):
         assert M.is_reasoning_model(yes) is True, yes
-    for no in ("gpt-4o", "gpt-4", "gpt-4o-mini", "gpt-3.5-turbo",
+    # NOT models we keep -- inputs the matcher must REJECT, so that a
+    # non-reasoning id can never be handed `temperature` by accident. The
+    # match is a prefix and stays deliberately broad; these prove it is
+    # not TOO broad.
+    for no in ("gpt-4o", "gpt-3.5-turbo",
                "text-embedding-3-large", "", None):
         assert M.is_reasoning_model(no) is False, no  # must not raise
 

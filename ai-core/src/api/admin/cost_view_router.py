@@ -248,11 +248,15 @@ async def _model_history(db: Any) -> list[dict]:
     Uses a single group_by aggregate rather than scanning ModelTokenUsage, so
     this stays cheap as the table grows (2,554 rows on 2026-07-31).
 
-    This panel exists because o4-mini-2025-04-16 served 1,518 turns between
-    2025-12-17 and 2026-05-12 -- the whole pre-rebuild era -- and was absent
-    from the price table, so every cost report read $0.00. A model you have
-    forgotten you ran is exactly the one you cannot see the bill for, hence
-    all-time and hence the explicit `priced` flag.
+    This panel exists because a retired model served 1,518 turns across the
+    whole pre-rebuild era (2025-12 to 2026-05) while absent from the price
+    table, so every cost report read $0.00. A model you have forgotten you
+    ran is exactly the one you cannot see the bill for, hence all-time and
+    hence the explicit `priced` flag.
+
+    That matters MORE now, not less: the price table was cut to GPT-5.6 only
+    on 2026-09-01, so anything outside that line is unpriced by design and
+    this flag is the thing that makes it visible.
     """
     try:
         if not db.is_connected():
