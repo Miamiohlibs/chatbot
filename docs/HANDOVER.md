@@ -70,8 +70,14 @@ Procedure: `ai-core/scripts/etl/FIRST_RUN.md`.
 **You leave with** a place on the emergency email list, for one reason: the
 month's allowance running out means students start being turned away.
 
-**Where it stands:** real student use costs about **$3 a month against a $45
-allowance**. It has never come close.
+**Where it stands:** real student use costs about **$3 a month**. It has
+never come close to the allowance.
+
+The allowance itself changed on **1 Sep 2026**: the total is now a fixed
+**$100/month — $40 for students, $60 for testing**. The figures in section
+3 below predate that and are read against the old $45. The ratio is the
+point, not the number: students are a small fraction of what we spend
+testing.
 
 **It does not fail straight to off.** As spend climbs the bot gets cheaper and
 terser in stages, and only refuses at the very top. You would be warned long
@@ -193,7 +199,7 @@ faults, each verified in production.
 | — evaluation runs | $7.04 |
 | — scripted testing (no browser) | $5.92 |
 | — **real users** | **$2.76** |
-| Monthly purse for serving | $45.00 |
+| Monthly purse for serving | $45.00 *(the purse in force that month; $40 from 1 Sep 2026)* |
 
 Real student traffic is costing about **6% of its budget**. Most of this
 month's spend is us testing it.
@@ -204,11 +210,18 @@ month's spend is us testing it.
 
 Sections A, B and C above. Not repeated here so the two cannot drift apart.
 
-Everything all three share: the admin surfaces need `ADMIN_API_TOKEN`. **The
-token travels in the URL query string, so it is written to the web-server
-access log** — checked 2026-08-21, `key=` appears 203 times in the current log.
-It is not a secret once used. Treat it as rotatable, and do not paste an admin
-URL into a ticket or an email.
+Everything all three share: **how you get into the console changed on
+2026-09-01.** It is Miami single sign-on now — `SSO_ALLOW_TOKEN_FALLBACK=false`,
+so `ADMIN_API_TOKEN` is refused. Miami IT has not finished their side, so
+today nobody can get in at all; see
+[09-TEAM-MAINTENANCE-GUIDE.md](./09-TEAM-MAINTENANCE-GUIDE.md) §7.
+
+The reason for the move, kept because it explains why we are not going
+back: **the token travelled in the URL query string, so it was written to
+the web-server access log** — checked 2026-08-21, `key=` appeared 203 times
+in the log then. It is not a secret once used. If the fallback is ever
+switched back on, that is true again: treat it as rotatable, and do not
+paste an admin URL into a ticket or an email.
 
 ## 5. What you can change without a developer
 

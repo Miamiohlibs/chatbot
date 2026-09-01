@@ -1,8 +1,18 @@
 # SSO setup request — Libraries Smart Chatbot
 
 TeamDynamix, System **10357 — Shibboleth**. Send the metadata as a **URL**,
-not a file: it carries a short `validUntil` that a Shibboleth IdP refreshes
-on its own.
+not a file, so their IdP re-reads it when we change it. Ours advertises
+`cacheDuration="PT604800S"` (7 days) and deliberately carries **no
+`validUntil`** — an expiry we forget to bump is an outage nobody can
+diagnose.
+
+> **Correction outstanding (1 Sep 2026).** The message below was sent with
+> the line *"AuthnRequests are signed"*. **That is false and always was.**
+> Our metadata says `AuthnRequestsSigned="false"` and publishes **zero
+> certificates** — we have no signing key. If Miami IT configured their
+> side to require a signed AuthnRequest, every sign-in fails, which is
+> consistent with what we are seeing. Corrected wording is in §"What to
+> send instead" below; send it before debugging anything else.
 
 ---
 
@@ -45,26 +55,69 @@ side is deployed, so any time suits.
 
 Meng Qu, Miami University Libraries — qum@miamioh.edu
 
+*(Above is the message as sent, kept verbatim as the record. The signing
+claim in the second-to-last paragraph is wrong — see the correction.)*
+
+---
+
+## What to send instead
+
+Two things changed since that message: the signing claim was wrong, and the
+console grew a second, larger group of users.
+
+> Two corrections to my earlier ticket.
+>
+> **We do not sign AuthnRequests.** Our metadata publishes
+> `AuthnRequestsSigned="false"` and no certificate. We do require signed
+> assertions (`WantAssertionsSigned="true"`). If your side was configured
+> to expect a signed request from us, that would explain the failures.
+>
+> **Scope is larger than five accounts.** The same SP now also protects
+> `/librarian/*`, a read-only console for department heads and the dean's
+> office. Thirteen accounts total, still only a few sign-ins a week. No
+> change to attributes, bindings or endpoints — the ACS, EntityID and
+> metadata URL are all unchanged.
+
 ---
 
 ## For us, not the ticket
 
-**Before sending**, confirm the deployed metadata is the corrected one:
+**Before sending**, confirm the deployed metadata matches what the ticket
+claims. Checked 1 Sep 2026:
 
 ```bash
-curl -s https://chatbot.lib.miamioh.edu/admin/sso/metadata | grep -c SingleLogoutService
+curl -s https://chatbot.lib.miamioh.edu/admin/sso/metadata | grep -Eo 'AuthnRequestsSigned="[a-z]+"|WantAssertionsSigned="[a-z]+"'; curl -s https://chatbot.lib.miamioh.edu/admin/sso/metadata | grep -c SingleLogoutService
 ```
 
-Must print `0`. An earlier draft advertised an SLS endpoint that does not
-exist; `1` means the fix is not deployed and IT would configure a dead
-endpoint.
+```
+AuthnRequestsSigned="false"
+WantAssertionsSigned="true"
+0
+```
 
-**When IT is done:** set `SSO_ENABLED=true` in `.env` and restart (~80s of
-502 while it warms up). Nothing else changes.
+`SingleLogoutService` must be `0`. An earlier draft advertised an SLS
+endpoint that does not exist; `1` means the fix is not deployed and IT
+would configure a dead endpoint.
 
-**After all five have signed in once:** set
-`SSO_ALLOW_TOKEN_FALLBACK=false`. Not before.
+### Current state (1 Sep 2026)
 
-Access list is `SSO_ALLOWED_UIDS`: `qum, bomholmm, maderir, irwinkr,
-yarnete`. Removals take effect on that person's next request. The kill
-switch at `/admin/service` sits outside SSO and is unaffected throughout.
+- `SSO_ENABLED=true` — **done**, deployed.
+- `SSO_ALLOW_TOKEN_FALLBACK=false` — **done**. The original plan here was
+  to flip this only after all five had signed in once; it was flipped
+  first, deliberately, so Miami IT tests against pure SSO with no second
+  door open. The consequence is real and current: **nobody can reach
+  `/admin/*` until IT finishes.** Setting it back to `true` and
+  restarting reopens the shared key in about a minute — no deploy.
+- **Nobody has ever completed a sign-in**, so nothing about the IdP side
+  is confirmed working.
+
+### Who is on the list
+
+| Variable | Who | Reaches |
+|---|---|---|
+| `SSO_ALLOWED_UIDS` | `qum, bomholmm, maderir, irwinkr, yarnete` | everything |
+| `SSO_LIBRARIAN_UIDS` | 8 department heads / dean's office | `/librarian/*` only |
+
+Operator is a superset of librarian. Removals take effect on that person's
+next request. The kill switch at `/admin/service` sits outside SSO and is
+unaffected throughout.

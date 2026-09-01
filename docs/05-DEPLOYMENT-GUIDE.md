@@ -10,8 +10,17 @@ pre-migration guide is archived at
 `build.sh` restarts the service. That drops every open socket and the bot
 cannot answer for about a minute while it warms up.
 
-`/admin/` shows this at the top, and so does `/admin/service`. From a
-terminal:
+`/admin/` shows this at the top, and so does `/admin/service`.
+
+> **Since 1 Sep 2026 the terminal version of this check does not work.**
+> `SSO_ALLOW_TOKEN_FALLBACK=false`, so `?key=` is refused and single
+> sign-on is not finished — there is currently **no way to read presence
+> from a shell**. The count lives inside the serving process, so
+> `presence.snapshot()` in a fresh Python process prints zero: that is a
+> trap, not a reading. Until SSO completes, either deploy at a quiet hour
+> and accept the risk, or set `SSO_ALLOW_TOKEN_FALLBACK=true` and restart
+> to get the console back. The command below is kept for when one of
+> those doors is open again.
 
 ```bash
 curl -s "https://chatbot.lib.miamioh.edu/admin/presence.json?key=$ADMIN_API_TOKEN" | jq
@@ -68,7 +77,10 @@ curl -s localhost:8081/health/ready | python3 -m json.tool   # 5 probes healthy
 curl -s localhost:8081/smoketest                              # passed: true
 sudo systemctl is-active chatbot.service
 ```
-Then open the operator hub (`/admin/?key=…`) and click through the pages.
+Then open the operator hub and click through the pages. Signed in through
+Miami, the links carry no key; on the shared-key fallback they carry
+`?key=…`. If neither door is open (the state on 1 Sep 2026) this step has
+to be skipped — say so rather than recording it as done.
 
 ## Pieces OUTSIDE the repo (re-create if the host is rebuilt)
 

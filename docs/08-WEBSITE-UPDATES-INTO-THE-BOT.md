@@ -6,6 +6,15 @@ terminal, or anybody from the dev side.
 Written 2026-08-27, when the web team asked for a way to do this themselves
 after their Saturday content updates.
 
+> **How you get in changed on 1 Sep 2026, and right now you cannot.**
+> `/admin/etl` moved behind Miami single sign-on, and Miami IT has not
+> finished configuring their side. Ken (`irwinkr`) and Jerry (`yarnete`)
+> are both on the access list, so when it is finished you will sign in
+> with your normal Miami account and **there is no passphrase to
+> remember**. Until then the page is unreachable for everybody — ask Meng,
+> who can reopen the shared key in about a minute if a Saturday update
+> cannot wait. Everything below about *what the page does* is unchanged.
+
 ---
 
 ## The short version
@@ -18,8 +27,11 @@ Three things happen, in order, on one page — **`/admin/etl`**:
 | **2. Read + sign** | You check the report and put your name to it | as long as you like |
 | **3. It goes live** | Starts by itself the moment you sign | about seven minutes |
 
-You need the shared passphrase and your `@miamioh.edu` address. The same
-two the page already asks for.
+Signed in through Miami, the page knows who you are and asks for
+**neither** a passphrase nor your address — your name goes on the signature
+from your account. On the shared-key fallback it still asks for both,
+because that caller is anonymous and a signature nobody can be traced to
+is not a signature.
 
 ---
 

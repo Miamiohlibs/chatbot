@@ -260,24 +260,34 @@ That switch exists for exactly this. Ask Meng before flipping it.
 
 ---
 
-## 8. What is stale in the rest of the docs
+## 8. How much to trust the rest of the docs
 
-Checked on 1 September 2026. These are wrong **now**, and the list is
-here rather than in each file so you can distrust them precisely rather
-than generally.
+**Every file in `/docs` was read line by line on 1 September 2026 and the
+wrong parts were corrected.** So this section is shorter than it was that
+morning. What remains is the residue: files that are still partly true,
+and files that were never meant to describe today.
 
-| File | What is wrong |
+| File | Where you stand |
 |---|---|
-| `06-CORRECTION-TICKETS.md` | Tells you to open the queue at `?key=<ADMIN_API_TOKEN>`. That key is switched off; you will be bounced to sign-in. |
-| `04-SERVER-MONITORING.md` | Written 17 July. Predates the 09:30 timer and the daily digest entirely; the cron facts in it are still true. |
-| `MAINTENANCE-2026-07-17-overnight.md`, `HANDOFF-2026-07-29-overnight.md`, `STUDENT-SIM-2026-07-30.md`, `REPORT-pre-launch-testing-2026-07-30.md` | Dated records of one night's work. Accurate for their date, not descriptions of the system now. Read them as history. |
-| `librarian-services-truthtable-ask.md` | 20 May. Predates the current subject-librarian system. |
+| `04-SERVER-MONITORING.md` | Written 17 July. The cron jobs, probes and log paths in it are still right; the mail schedule is not — it predates the 09:30 timer and the daily digest. Carries a banner saying so. |
+| `06-CORRECTION-TICKETS.md` | How a ticket works is accurate. Its URLs still say `?key=…`, which is switched off — see §7. Banner at the top. |
+| `librarian-services-truthtable-ask.md` | 20 May. Predates the current subject-librarian system. Nothing operational in it. |
+| The dated files — `MAINTENANCE-2026-07-17`, `HANDOFF-2026-07-29`, `STUDENT-SIM-2026-07-30`, `REPORT-pre-launch-testing-2026-07-30`, `FINDING-compound-questions-2026-07-30`, `STUDENT-TEST-2026-07` | **History, deliberately left as written.** They are the record of a day, and rewriting them would destroy the only account of why some things are the way they are. Do not follow them as procedure. |
 
-Trustworthy today: [01-SYSTEM-OVERVIEW.md](./01-SYSTEM-OVERVIEW.md) (and
-its Chinese peer), [02-ENVIRONMENT-VARIABLES.md](./02-ENVIRONMENT-VARIABLES.md),
-[05-DEPLOYMENT-GUIDE.md](./05-DEPLOYMENT-GUIDE.md), [BUDGET.md](./BUDGET.md),
-[08-WEBSITE-UPDATES-INTO-THE-BOT.md](./08-WEBSITE-UPDATES-INTO-THE-BOT.md),
-and this file.
+Two corrections from that pass are worth knowing about even if you never
+open the file:
+
+- **`SSO-REQUEST-TO-IT.md`** — the ticket we sent Miami IT states that we
+  sign AuthnRequests. **We do not**, and never did. If their side was
+  configured to require it, that alone would explain why nobody has ever
+  signed in. A corrected message is drafted in that file, unsent.
+- **`OPS-BACKUP.md`** — named a Weaviate collection that was three
+  rebuilds out of date. It now tells you to ask the box instead. Treat any
+  collection name written in any document the same way.
+
+Everything else in the folder describes the system as it stands. Where two
+files disagree, [01-SYSTEM-OVERVIEW.md](./01-SYSTEM-OVERVIEW.md) and this
+one win — they were measured, not remembered.
 
 ---
 
