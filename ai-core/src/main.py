@@ -658,6 +658,10 @@ if _admin_token or _sso_cfg.enabled:
     from src.api.admin.hub_router import build_hub_router
     app.include_router(build_hub_router({
         "admin_token": _admin_token,
+        # The landing page went through the shared guard last: it compared
+        # the key by hand, so with SSO on it 401'd while every other
+        # surface redirected to Miami sign-in.
+        "guard": _guard,
         "librarian_code": _ticket_code,
         # Decides whether the staff hub offers the transcripts, never
         # whether it answers -- the code still gates the page itself.

@@ -182,3 +182,103 @@ def test_a_big_queue_offers_the_sweep():
 def test_a_swept_queue_does_not_nag():
     """After a sweep it is around thirty, and the hint would be noise."""
     assert "close-testing" not in _hub(flagged=27)
+
+
+# --- the landing page went through the shared guard last -----------------
+
+def _app(guard=None, *, token="TOK", code="CODE"):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from src.api.admin.hub_router import build_hub_router
+
+    deps = {"admin_token": token, "librarian_code": code, "db": None}
+    if guard is not None:
+        deps["guard"] = guard
+    app = FastAPI()
+    app.include_router(build_hub_router(deps))
+    return TestClient(app)
+
+
+def test_the_hub_uses_the_shared_guard_when_it_is_given_one():
+    """It compared the key by hand and never asked SSO, so with SSO on
+    /admin/conversations bounced to Miami sign-in and /admin/ -- the page
+    everybody opens first -- answered raw JSON. Miami IT hit exactly that
+    on 2026-09-01."""
+    from src.api.admin.sso import Caller, ROLE_OPERATOR
+
+    async def _signed_in():
+        return Caller(role=ROLE_OPERATOR, uid="qum", via="sso")
+
+    r = _app(_signed_in).get("/admin/")
+    assert r.status_code == 200
+    assert "Dashboard" in r.text
+
+
+def test_a_signed_in_operator_gets_keyless_links():
+    """The console must not paste a shared secret into the address bar of
+    somebody who did not need it."""
+    from src.api.admin.sso import Caller, ROLE_OPERATOR
+
+    async def _signed_in():
+        return Caller(role=ROLE_OPERATOR, uid="qum", via="sso")
+
+    body = _app(_signed_in).get("/admin/?key=TOK").text
+    assert "key=TOK" not in body
+
+
+def test_a_guard_that_names_nobody_still_carries_the_key():
+    """A deployment without SSO, or a test double, returns no caller.
+    Asking whether they came `via token` rather than whether they are
+    AUTHENTICATED renders a whole nav that drops the key -- the dead-link
+    bug test_nav_carries_the_key exists to catch."""
+    async def _anonymous():
+        return None
+
+    body = _app(_anonymous).get("/admin/?key=TOK").text
+    assert "key=TOK" in body
+
+
+def test_the_key_still_works_and_still_rides_the_links():
+    from src.api.admin.sso import Caller, ROLE_OPERATOR
+
+    async def _by_key():
+        return Caller(role=ROLE_OPERATOR, via="token")
+
+    body = _app(_by_key).get("/admin/?key=TOK").text
+    assert "key=TOK" in body
+
+
+def test_with_no_guard_wired_in_it_is_key_only_as_before():
+    c = _app()
+    assert c.get("/admin/").status_code == 401
+    assert c.get("/admin/?key=TOK").status_code == 200
+
+
+def test_a_signed_in_librarian_needs_no_shared_code():
+    """Making a department head paste a code they have no reason to know,
+    on a console their own sign-in already admits them to, is a step that
+    exists for nobody."""
+    from src.api.admin.sso import Caller, ROLE_LIBRARIAN
+
+    async def _lib():
+        return Caller(role=ROLE_LIBRARIAN, uid="messnekr", via="sso")
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from src.api.admin.hub_router import build_hub_router
+
+    app = FastAPI()
+    app.include_router(build_hub_router(
+        {"admin_token": "TOK", "librarian_code": "CODE", "db": None,
+         "whoami": _lib}))
+    r = TestClient(app).get("/librarian/")
+    assert r.status_code == 200
+    assert "staff hub" in r.text
+
+
+def test_a_stranger_still_needs_the_code():
+    c = _app()
+    assert c.get("/librarian/").status_code == 401
+    assert c.get("/librarian/?key=CODE").status_code == 200

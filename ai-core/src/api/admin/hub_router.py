@@ -386,6 +386,19 @@ def build_hub_router(deps: dict):
     from fastapi.responses import HTMLResponse  # type: ignore
 
     admin_token: str = (deps.get("admin_token") or "").strip()
+
+    async def _key_only(request: Request):
+        """Fallback for a deployment with no SSO guard wired in -- the
+        shape this had before 2026-09-01."""
+        from src.api.admin.sso import Caller, ROLE_OPERATOR
+
+        supplied = request.query_params.get("key", "")
+        if not admin_token or supplied != admin_token:
+            raise HTTPException(status_code=401,
+                                detail="admin token required")
+        return Caller(role=ROLE_OPERATOR, via="token")
+
+    guard = deps.get("guard") or _key_only
     librarian_code: str = (deps.get("librarian_code") or "").strip()
 
     async def _nobody():
@@ -399,10 +412,29 @@ def build_hub_router(deps: dict):
 
     @router.get("/admin/", response_class=HTMLResponse)
     @router.get("/admin", response_class=HTMLResponse, include_in_schema=False)
-    async def admin_hub(request: Request, caller=Depends(whoami)):
-        supplied = request.query_params.get("key", "")
-        if not admin_token or supplied != admin_token:
-            raise HTTPException(status_code=401, detail="admin token required")
+    async def admin_hub(request: Request, caller=Depends(guard)):
+        """THE LANDING PAGE WENT THROUGH THE SHARED GUARD LAST.
+
+        Every other admin surface uses make_admin_guard and redirects to
+        Miami sign-in. This one compared the key by hand and never asked
+        SSO at all, so with SSO_ENABLED on, /admin/conversations bounced
+        to the IdP and /admin/ -- the page everybody opens first --
+        answered `{"detail":"admin token required"}` as raw JSON.
+
+        Miami IT hit exactly that on 2026-09-01: told to test
+        https://chatbot.lib.miamioh.edu/admin, they got the JSON.
+        """
+        # The links drop the key ONLY for an authenticated session.
+        #
+        # Stated that way round on purpose. Asking instead whether the
+        # caller arrived `via == "token"` means any guard that returns no
+        # caller at all -- a deployment without SSO, a test double --
+        # silently renders a whole nav that drops the key, which is the
+        # dead-link bug test_nav_carries_the_key exists to catch. Only a
+        # signed-in operator has something better than the key to travel
+        # on; everybody else keeps whatever they arrived with.
+        supplied = ("" if getattr(caller, "authenticated", False)
+                    else request.query_params.get("key", ""))
         counts = None
         if db is not None:
             from src.api.admin.review_queries import dashboard_counts
@@ -414,7 +446,15 @@ def build_hub_router(deps: dict):
     @router.get("/librarian", response_class=HTMLResponse, include_in_schema=False)
     async def librarian_hub(request: Request, caller=Depends(whoami)):
         supplied = request.query_params.get("key", "")
-        if not librarian_code or supplied != librarian_code:
+        # Either door: the shareable code, which reaches any member of
+        # library staff, or a Miami session for somebody on the librarian
+        # or operator list. Making a department head paste a code they
+        # have no reason to know, on a console their own sign-in already
+        # admits them to, is a step that exists for nobody.
+        if getattr(caller, "authenticated", False) and getattr(
+                caller, "is_librarian", False):
+            pass
+        elif not librarian_code or supplied != librarian_code:
             raise HTTPException(
                 status_code=401,
                 detail="Missing or wrong access code. Ask the library web "
