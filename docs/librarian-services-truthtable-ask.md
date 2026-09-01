@@ -1,9 +1,18 @@
 # Librarian ask: confirm services-offered per building
 
-> **Out of date, 2026-09-01.** Dated 20 May, before the current
-> subject-librarian system. Kept as a record of the reasoning, not as
-> a description of what the bot does now — see
-> [03-SUBJECT-LIBRARIAN-SYSTEM.md](./03-SUBJECT-LIBRARIAN-SYSTEM.md).
+> **Read this carefully, 2026-09-01.** It is a 20 May draft email, and the
+> *ask* is historical — it was sent and answered. But **the mechanism it
+> describes is live and load-bearing.** `LibrarySpace_v2.services_offered`
+> is populated for all seven buildings today (King 7 entries, Gardner-Harvey
+> 7, Rentschler 5, Wertz 5, MakerSpace 4, Special Collections 3, SWORD 1),
+> and the bot still refuses rather than guesses when a service is not listed
+> for a building.
+>
+> So: do not follow the "send to TBD" instructions, and do not treat the
+> service lists below as current data — read them from the database. But do
+> not dismiss the design either. An earlier version of this banner said the
+> file did not describe what the bot does now; that was wrong in the
+> direction that matters, and is corrected here.
 
 
 This is a 30-minute task. The output unblocks a load-bearing safety

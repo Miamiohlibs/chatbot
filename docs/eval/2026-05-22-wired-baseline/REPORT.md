@@ -1,5 +1,10 @@
 # Smart Chatbot Eval Report — operator-wired index (FINAL, v3)
 
+> **ARCHIVED — the 2026-05-22 baseline eval.** Kept so later scores have
+> something to be measured against. The system, the models and the gold set
+> have all changed since; do not read these numbers as current. Current
+> docs: [../../README.md](../../README.md).
+
 _Generated: 2026-05-22 21:32 | wired-index run + retest recovery_  
 _v3 update 2026-05-22 22:45: 3-shot majority judge applied; locker truth fix; hours-hub URL fix_
 

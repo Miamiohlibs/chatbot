@@ -1,5 +1,9 @@
 # Accuracy Audit — hand-verified, 2026-06-09 (evening)
 
+> **ARCHIVED — a dated snapshot from June 2026.** Accurate for its date,
+> not a description of the system now. Current docs:
+> [../../README.md](../../README.md).
+
 **Question answered:** what is the bot's TRUE answer accuracy (not the
 LLM-judge's floor), and what are the highest-value improvements?
 

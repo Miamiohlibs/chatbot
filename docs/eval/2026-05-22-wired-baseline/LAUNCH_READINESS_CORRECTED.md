@@ -1,5 +1,10 @@
 # Launch readiness — CORRECTED 2026-05-22 (supersedes earlier doc)
 
+> **ARCHIVED — the 2026-05-22 baseline eval.** Kept so later scores have
+> something to be measured against. The system, the models and the gold set
+> have all changed since; do not read these numbers as current. Current
+> docs: [../../README.md](../../README.md).
+
 The earlier `LAUNCH_READINESS.md` was wrong. After auditing the actual codebase, **almost everything is wired**. The gap to a 10% rollout is much smaller than ~2 weeks — it's ~1-2 days of operator verification + cron setup.
 
 ## Honest re-audit of all gaps

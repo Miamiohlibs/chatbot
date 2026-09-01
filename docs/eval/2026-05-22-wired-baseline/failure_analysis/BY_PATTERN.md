@@ -1,5 +1,9 @@
 # Failure pattern analysis — 77 not-right cases grouped by root cause
 
+> **ARCHIVED — failure analysis from the 2026-05-22 baseline eval.** Kept
+> as the record of what was breaking then. Current docs:
+> [../../../README.md](../../../README.md).
+
 _Generated 2026-05-23 from the final 184/184 eval._
 
 ## Pattern frequency

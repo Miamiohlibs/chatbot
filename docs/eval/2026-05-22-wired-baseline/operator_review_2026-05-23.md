@@ -1,5 +1,10 @@
 # Gold-Set Review — 2026-05-23 (focused, post-fix-session)
 
+> **ARCHIVED — the 2026-05-22 baseline eval.** Kept so later scores have
+> something to be measured against. The system, the models and the gold set
+> have all changed since; do not read these numbers as current. Current
+> docs: [../../README.md](../../README.md).
+
 _Eval state at time of generation: **131/184 = 71.2%** fully right._
 
 Two buckets to review. Total: **21 real-error + 7 C-list = 28 cases**.

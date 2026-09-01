@@ -1,5 +1,9 @@
 # Smart Chatbot v2 — Beta-Readiness Report
 
+> **ARCHIVED — a dated snapshot from June 2026.** Accurate for its date,
+> not a description of the system now. Current docs:
+> [../../README.md](../../README.md).
+
 **Date:** 2026-06-09 (overnight autonomous audit)
 **Branch:** `main` (clean, pushed)
 **Question this answers:** *Where is this version, and is it ready to launch beta?*

@@ -64,7 +64,14 @@ as a 404 on an otherwise-working host).
 
 - The staff code is deliberately separate from (and weaker than) the
   admin token: the form exposes no stored data, only accepts reports.
-  The queue — which shows ticket contents — requires the admin token.
+  The queue — which shows ticket contents — requires an operator, which
+  since 2026-09-01 means a Miami sign-in rather than the token. The same
+  boundary now also keeps real patron conversations off the shared code:
+  `/librarian/conversations?key=<code>` returns 401 by design.
+- nginx verified 2026-09-01: upstream `smartchatbot_backend` →
+  `localhost:8081`, with `location` blocks for both `/admin/` and
+  `/librarian/` (they live in `sites-available/default`, symlinked into
+  `sites-enabled`).
 - All rendered content is `html.escape()`d; ticket text may quote
   bot output influenced by patron input, so it is treated as untrusted.
 - Field length is capped (8 kB per field) to keep paste-bombs out.

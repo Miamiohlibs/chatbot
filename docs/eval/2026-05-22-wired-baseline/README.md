@@ -1,5 +1,10 @@
 # 2026-05-22 wired-baseline eval
 
+> **ARCHIVED — the 2026-05-22 baseline eval.** Kept so later scores have
+> something to be measured against. The system, the models and the gold set
+> have all changed since; do not read these numbers as current. Current
+> docs: [../../README.md](../../README.md).
+
 First end-to-end eval of the v2 smart-chatbot against the operator-wired Weaviate
 + Postgres. See `REPORT.md` for the headline + per-section breakdown.
 

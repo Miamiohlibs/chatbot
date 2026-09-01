@@ -1,5 +1,10 @@
 # System Overview - Miami University Libraries Chatbot
 
+> **ARCHIVED — describes the retired v3.1 stack.** Do not follow this for
+> the current system; it is kept as the record of a design that no longer
+> runs. Current docs: [../../README.md](../../README.md). Internal links
+> here are frozen as written and may not resolve.
+
 **Last Updated:** December 22, 2025  
 **Version:** 3.1.0
 

@@ -1,5 +1,10 @@
 # Router Refactor Guide
 
+> **ARCHIVED — describes the retired v3.1 stack.** Do not follow this for
+> the current system; it is kept as the record of a design that no longer
+> runs. Current docs: [../../README.md](../../README.md). Internal links
+> here are frozen as written and may not resolve.
+
 ## Overview
 
 This document describes the new routing system that replaces the old "many samples per category" approach with a multi-stage, high-accuracy routing pipeline.

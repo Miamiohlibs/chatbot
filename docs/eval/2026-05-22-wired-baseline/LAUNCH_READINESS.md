@@ -1,5 +1,10 @@
 # Launch readiness assessment — 2026-05-22
 
+> **ARCHIVED — the 2026-05-22 baseline eval.** Kept so later scores have
+> something to be measured against. The system, the models and the gold set
+> have all changed since; do not read these numbers as current. Current
+> docs: [../../README.md](../../README.md).
+
 Honest answer: **we are at Threshold 2 (internally usable / measurable), not yet at Threshold 3 (10% rollout).** Tonight's work pushed Threshold 2 hard. Going from here to Threshold 3 is a distinct ~2 weeks of work per the original plan.
 
 ## What landed tonight

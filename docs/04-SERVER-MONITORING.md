@@ -18,7 +18,7 @@
 - Useful commands:
   ```bash
   sudo systemctl status chatbot.service
-  sudo journalctl -u chatbot.service -since "1 hour ago"
+  sudo journalctl -u chatbot.service --since "1 hour ago"   # TWO dashes
   sudo systemctl restart chatbot.service
   ```
 
@@ -44,7 +44,10 @@ cd ai-core && .venv/bin/python -m src.observability.alerting   # sends a test em
 | `/smoketest` | a full turn answers WITH a citation under the latency budget |
 | `/metrics` | Prometheus exposition (if prometheus-client installed) |
 
-All also linked from the operator hub: `/admin/?key=<ADMIN_API_TOKEN>`.
+All also linked from the operator hub at `/admin/`. Reaching it needs a
+Miami sign-in since 2026-09-01 (see the banner at the top of this file);
+the four probe URLs themselves are unaffected and need no credentials.
+Verified 2026-09-01: `/health/live` and `/health/ready` both 200.
 
 ## Logs
 
