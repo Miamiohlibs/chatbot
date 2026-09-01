@@ -104,25 +104,41 @@ label instead of inventing one.
 ## What is *intentionally* still in code
 
 **Eight people are named in hardcoded answers**, all in
-`new_orchestrator.py`. Six of those answers state an email; two name the
-person and send the patron to a page for contact details. These are
-**functional specialists**, not subject-liaison data — they answer
-questions the lookup path gets wrong. Changing one needs a deploy; that's
-the accepted trade for reliability.
+`new_orchestrator.py`. Four of those answers state an email; four name the
+person only. These are **functional specialists**, not subject-liaison
+data — they answer questions the lookup path gets wrong. Changing one
+needs a deploy; that's the accepted trade for reliability.
 
-Every row below was checked against the `Librarian` roster on
-**2026-07-28**:
+Re-checked against the roster and against the code on **2026-09-01**.
+**The previous version of this table was wrong in both directions** — it
+listed five MakerSpace staff whose names are no longer in the file at all,
+and omitted four people who are. That is exactly the drift this page
+exists to catch, so the check below is worth repeating rather than
+trusting:
+
+```bash
+grep -noE "[a-z]+[a-z0-9]*@miamioh\.edu" src/graph/new_orchestrator.py
+```
 
 | Named in | Person | Email in code | Roster check |
 |---|---|---|---|
-| MakerSpace answer | Sarah Nagle | `pricesb@` | ✅ active, email matches |
-| MakerSpace answer | Lori Chapin | `pheanila@` | ✅ active, email matches |
-| MakerSpace answer | Lindsey Masters | `masterlr@` | ✅ active, email matches |
-| MakerSpace answer | John Williams | `williajc@` | ✅ active, email matches |
-| MakerSpace answer | Nathan Hall | `hallnj3@` | ✅ active, email matches |
-| Archivist answer | Jacky Johnson | `johnsoj@` | ✅ active, email matches — but roster spells her **Jacqueline** (see below) |
-| Scholarly-comm answer | Carla Myers | — | ✅ active (`myersc2@`) |
-| Gov-docs answer | Jenny Presnell | — | ✅ active (`presnejl@`) |
+| MakerSpace / class visits | Sarah Nagle | — named only | ✅ Creation and Innovation Services Librarian |
+| Archives answer | Ani Karagianis | `karagia@` | ✅ University Archivist |
+| Archives answer | Jacqueline Johnson | `johnsoj@` | ✅ Head of Special Collections and Archives |
+| Leadership answer | Jerome Conley | `conleyj@` | ✅ Dean & University Librarian |
+| Leadership answer | Aaron Shrimplin | — named only | ✅ Senior Associate Dean |
+| Leadership answer | John Millard | — named only | ✅ Associate Dean |
+| LOLA answer (`_LOLA_CONTACT`) | Carla Myers | `myersc2@` | ✅ Coordinator of Scholarly Communication |
+| Humanities / social science | Jenny Presnell | — named only | ✅ Humanities and Social Science Librarian |
+
+**Gone since the 2026-07-28 version of this table:** Lori Chapin, Lindsey
+Masters, John Williams and Nathan Hall. All four are still on staff — they
+were removed from the hardcoded MakerSpace answer, which now names only
+Sarah Nagle, "because she is the one person a patron needs". Sarah's email
+went with them; the answer names her and points at the page.
+
+**Nobody currently hardcoded has departed** — all eight verified against
+`staff-members.csv` on 2026-09-01, titles included.
 
 **Barry Zaslow was never hardcoded.** An earlier version of this page
 said he was; that was wrong. His name appeared only in a code *comment*
@@ -551,7 +567,14 @@ of it was noise, so it was deleted. The health check now reports what real
 users were refused instead — a list that is short, current, and always
 worth reading.
 
-## Why the ETL apply still has not run (2026-07-29)
+## Why the ETL apply had not run, as of 2026-07-29
+
+> **Resolved. Read this as the debugging record, not as current state.**
+> The apply runs. The collection being served on 2026-09-01 is
+> `Chunk_vv20260830_0302` at **490 chunks** — the 20,068 below is the
+> corpus as it was in July, before it was cut. An apply now takes about
+> seven minutes under `APPLY_MEMORY_CAP_MB = 1100`. The three bugs below
+> were real and their fixes are still in the code, which is why this stays.
 
 Three attempts, three distinct bugs, each one hidden behind the previous:
 
@@ -661,8 +684,10 @@ job.
 
 ## Known gaps (need operator decisions, not code)
 
-1. **`LibrarianSubject` covers 67 of 734 subjects (9%)**, and **zero**
-   of the 108 regional (`- HC` / `- MC`) variants. Most subject answers
+1. **`LibrarianSubject` covers 94 of 745 subjects (13%)**, and still
+   **zero** of the 108 regional (`- HC` / `- MC`) variants. *(Re-counted
+   2026-09-01; it read 67 of 734 on 2026-07-29. The regional zero has not
+   moved at all, which is the half that matters.)* Most subject answers
    therefore come from the live LibGuides API, which the operator can't
    edit and which can't be campus-scoped. Filling this table is the
    single highest-value data task.
