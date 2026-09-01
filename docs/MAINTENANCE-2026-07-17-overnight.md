@@ -1,5 +1,10 @@
 # Overnight maintenance sweep — 2026-07-17
 
+> **A record of one piece of work, not a description of the
+> system.** Accurate for its own date; read it as history. The
+> current picture is [01-SYSTEM-OVERVIEW.md](./01-SYSTEM-OVERVIEW.md).
+
+
 Full-repo audit after the legacy-path removal: version consistency, dead
 code, live integrity of every surface, docs. Three real defects found and
 fixed; every check green at the end.

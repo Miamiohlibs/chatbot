@@ -1,332 +1,312 @@
-# Smart Chatbot — team maintenance guide
+# Running the chatbot — a guide for the team
 
-**Who this is for:** Ken and Jerry (web + content), Rachel (backend),
-Mike (spend). Everything here is done in a browser, on the admin
-dashboard. Nothing needs a server login unless a section says so.
+**Written 1 September 2026, for Ken, Jerry, Rachel and Mike.**
 
-**Where it lives:** <https://chatbot.lib.miamioh.edu/admin/>
+## How to read this
 
-**How you get in:** every admin URL needs `?key=<ADMIN_API_TOKEN>` on the
-end. Ask Meng for the key and bookmark the dashboard *with* the key in
-it — the links on the page carry it forward for you after that.
+**Every command below was run on the production box on the date above,
+and the output under it is copied, not written.** Run any of them
+yourself; if what you get differs from what is printed here, this
+document is wrong and I want to know.
 
-SSO for named accounts (qum, bomholmm, maderir, irwinkr, yarnete) has been
-approved by IT but is **not connected yet**. Until it is, the key is the
-only thing standing between the internet and this console: treat it like a
-password, and do not paste it into a ticket or a shared doc.
+That matters because the rest of the docs folder contains prose you have
+no way to check. Section 8 lists the parts of it that are currently
+false, by name.
 
-Written 2026-08-27. If something here does not match what you see, the
-page is right and this document is stale — tell Meng.
+What this guide does **not** do is tell you every button. It explains how
+the thing is put together well enough that you can work out an answer to
+a question nobody wrote down.
 
 ---
 
-## When you hear from the bot
+## 1. The one thing to understand: what is read when
 
-**One scheduled time: 09:30, Oxford time, every day.** Anything urgent
-comes the moment it happens; everything else waits for 09:30.
+Rachel asked why changing a setting needs a restart. The answer is a
+mental model rather than a rule, and once you have it you can predict the
+rest.
 
-| | When | Who |
+**Anything designed to change while the bot is running is read on every
+question. Anything else is read once, when the process starts.**
+
+| You changed | It takes effect | Because |
 |---|---|---|
-| **Urgent** — the service or a dependency is down; the student purse is spent and patrons are being turned away | at once | qum, bomholmm, maderir |
-| **Daily report** — data health. Sent *every* morning, all-clear included, so a morning with no mail means the job failed | 09:30 daily | qum |
-| **Daily digest** — everything else queued since yesterday, including a failed backup | 09:30 daily | qum |
-| **Website changed** | 09:30 Mondays | qum |
-| **Budget report** | 09:30 Mondays, and the 1st | qum (via the digest) |
+| A correction (`/admin/corrections/view`) | **within 60 seconds** | `CACHE_TTL_SECONDS = 60.0` in `src/database/corrections_adapter.py` |
+| The corpus, after an `apply` | **the next question** | the collection name is read with `os.getenv` at request time, not at import |
+| The stop button | **the next question** | `is_paused()` checks for a file on every turn |
+| `.env` | **restart required** | `load_dotenv` runs once at import, and constants are computed from it there |
+| Any Python file | **restart required** | Python imports a module once per process |
 
-The five of these used to be five cron lines at five different times
-between 06:10 and 13:30. They are one systemd timer now —
-`scripts/morning_jobs.sh` says what runs on which day, and it is in the
-repo where you can read it:
+So: corrections and the stop button were *built* to be live, because
+somebody needs them to work at 3pm on a Tuesday without a deploy. `.env`
+was not, because changing a budget or a password is a deliberate act that
+can afford sixty seconds of downtime.
 
 ```bash
-systemctl list-timers chatbot-morning.timer
-bash /opt/chatbot/ai-core/scripts/morning_jobs.sh --dry-run   # runs everything, mails nothing
+sudo systemctl restart chatbot        # ~45-80s before it answers again
 ```
 
-The dry run exits non-zero on purpose: a suppressed send counts as a
-failed send to the jobs underneath.
-
-**Still on cron, deliberately:** the liveness watchdog (every 5 min), the
-budget guard (every 15 min), the cost rollup (02:00, has to finish before
-the morning reports read it) and the database backup (03:30, a pg_dump
-kept out of the hours students are asking).
+**Before you restart, check whether anybody is mid-conversation.** See
+scenario E.
 
 ---
 
-## Two consoles, not one
+## 2. Scenario A — "Is the bot down?"
 
-Since 2026-08-30 there are two.
+Ask the service, not a person. This endpoint is public and needs no
+credentials:
 
-**`/librarian/`** — for subject librarians. The report form, and the real
-questions patrons asked. Nothing else: no spend, no stop button, no
-rebuild. This is the link to hand out.
-
-**`/admin/`** — for the five of us. Everything above, plus every
-conversation *including our own testing*, the corpus gate, the cost
-dashboard, the stop button and the audit log.
-
-The split is by SSO account, so it needs two lists in `/opt/chatbot/.env`:
-
-```
-SSO_ALLOWED_UIDS=qum,bomholmm,maderir,irwinkr,yarnete   # operators (existing name, unchanged)
-SSO_LIBRARIAN_UIDS=<the leadership team>                # 8 department heads / dean's office
+```bash
+curl -s https://chatbot.lib.miamioh.edu/health/service
 ```
 
-The librarian list is the **leadership team** — department heads and the
-dean's office — so that the people accountable for what the bot says can
-read what it actually said.
+```json
+{"in_service":true,"paused":false,"since":null,"message":null,
+ "ask_us_url":"https://www.lib.miamioh.edu/research/research-support/ask/"}
+```
 
-It is **curated, not derived**. `leadership == yes` in
-`staff-members.csv` is close but not the same: it carries two
-Coordinators, who are deliberately out, and misses one person who is
-deliberately in. Compare against that flag when reviewing the list; do
-not regenerate from it. Details in
-[02-ENVIRONMENT-VARIABLES.md](./02-ENVIRONMENT-VARIABLES.md).
+- `in_service: true` — it is answering.
+- `paused: true` — somebody pressed the stop button. `since` and
+  `message` say who and why.
+- **No response at all** — the process is down. A watchdog checks every
+  five minutes and restarts it if systemd has given up, so wait five
+  minutes before doing anything. If it is still dead:
 
-Nobody in `SSO_ALLOWED_UIDS` belongs on this list — operator already
-includes everything librarian does.
+```bash
+systemctl status chatbot --no-pager
+sudo journalctl -u chatbot -n 50 --no-pager
+```
 
-`SSO_ALLOWED_UIDS` still means "operators" — nothing to rename. Adding a
-uid to `SSO_LIBRARIAN_UIDS` gives that person the librarian console and
-nothing more. Somebody on both lists is an operator; the wider role wins,
-so putting yourself on the librarian list to see what they see does not
-quietly cost you the stop button.
-
-**Until Miami IT finishes the SSO configuration none of this is live.**
-Everyone arrives on the shared `?key=`, which is treated as an operator
-and is asked for a passphrase — exactly as before. See "Passphrases"
-below.
-
-### Passphrases
-
-Signed in through Miami SSO, the dangerous actions no longer ask for a
-shared passphrase. Your identity came from the IdP, and what the action
-is recorded against is your Miami account.
-
-Arriving on the shared key, they still do. That key says nothing about
-who you are, so a log line naming you would be worth nothing — and it is
-also the path everybody falls back to if the IdP is down.
-
-The foot of the sidebar always says which of the two you are on.
-
-### The audit log
-
-`/admin/audit` — every corpus rebuild, every send-back, and every use of
-the stop button, newest first. Lines done with the shared key are marked
-`unverified`, because the name on those is whatever was typed into the
-form.
-
-It is a file, not a database table: `ai-core/data/audit/actions-YYYY-MM.jsonl`.
-That is deliberate — it is read after exactly the events that take the
-database away. `tail -f` works when the console does not.
+**Students never see a blank page.** A paused bot still loads and answers
+every question with a maintenance notice pointing at Ask Us.
 
 ---
 
-## Start here: the dashboard
+## 3. Scenario B — "Are we going to blow the budget?"
 
-`/admin/` is a hub of cards, grouped by what you came to do:
+```bash
+sudo -u root bash -c 'set -a; . /opt/chatbot/.env; set +a; cd /opt/chatbot/ai-core && .venv/bin/python scripts/budget_guard.py --dry-run'
+```
 
-| Card | What it is | Mostly for |
-|---|---|---|
-| **Conversations by day** | Every conversation, one day or a date range | Ken, Jerry |
-| **Search** | One keyword across every conversation ever held | everyone |
-| **What went wrong** | Refusals, thumbs-down, low-confidence answers | Ken, Jerry, Rachel |
-| **Correction tickets** | Staff reports of wrong answers, worked to done | Ken, Jerry |
-| **Manual corrections** | Suppress / reword / pin a source, live, no deploy | Rachel |
-| **Service control** | The stop button | Rachel |
-| **Cost dashboard** | Daily spend, by model, all-time | Mike |
-| **Health checks** | Dependency probes and an end-to-end smoke test | Rachel |
-| **Corpus review** (`/admin/etl`) | Website updates into the bot | Ken, Jerry |
-| **Audit log** (`/admin/audit`) | Who rebuilt the corpus, who stopped the bot | everyone |
+One line on purpose. A backslash-newline inside those single quotes is a
+literal backslash, not a continuation, and the wrapped version of this
+command does not run — which is the first thing I got wrong writing this
+file.
 
----
+```
+budget purses in force: students $40.00, testing $60.00 (from 2026-09-01)
+students  mtd $0.02/40.00   today $0.02/1.33
+eval      mtd $0.00/60.00
+level     0 (normal)  <- within budget
+(dry run -- nothing written, nothing sent)
+```
 
-## Ken and Jerry — web and content
+`--dry-run` changes nothing and sends nothing. It is safe to run at any
+time and is the fastest honest answer to "where are we".
 
-Your two questions are *"is the bot saying the right thing about our
-pages?"* and *"how do I get our updates into it?"*
+**Two purses, $100 a month total.** $40 for students, $60 for testing —
+and "testing" is both the eval harness *and* a librarian trying the bot
+through the staff-test link. They cannot spend each other's money.
 
-### Getting website updates into the bot
+The guard runs every 15 minutes on its own. At 85% of the student purse
+it forces the cheap model; at 100% new conversations are declined with a
+pointer to Ask Us and open ones are allowed to finish. **Mike gets an
+email at each step change**; nothing silently degrades.
 
-Full instructions are in **[08-WEBSITE-UPDATES-INTO-THE-BOT.md](08-WEBSITE-UPDATES-INTO-THE-BOT.md)**.
-The short version, at `/admin/etl`:
-
-1. **Fetch the latest site content** — re-reads our public site, under a
-   minute, costs nothing, changes nothing the bot is using yet.
-2. **Read the report.** The section to actually read is **"Would be lost
-   outright"** — a page you still need appearing there is the thing to
-   catch. Everything else is usually routine.
-3. **Approve, and make it live** — or **send it back** with a note if
-   something is wrong.
-
-Approving starts the rebuild immediately: **about seven minutes, during
-which answers slow from ~7 seconds to ~25 seconds.** The bot keeps working
-and keeps answering correctly from the old pages the whole time. If now is
-a bad moment, come back later — the report waits.
-
-### Checking what the bot actually said
-
-**Search** (`/admin/search`) — one keyword across every conversation. You
-can narrow it to *what patrons typed* or *what the bot said*; those are two
-different questions. "Did anyone ask about Zotero?" and "did we ever tell
-somebody the wrong loan period?" need different halves of the transcript.
-
-**Conversations by day** (`/admin/conversations`) — pick a day, or a date
-range with the *from / to* boxes. Tick **"only what went wrong"** to see
-just the conversations with a refusal, a thumbs-down, or a low-confidence
-answer. You can also filter to one of those on its own.
-
-Each row shows the first question, how many were asked, what the bot
-classified it as, and the patron's star rating and comment if they left
-one. Click through for the full transcript, including which pages the
-answer cited.
-
-### When the bot says something wrong about your pages
-
-Two ways, and the difference matters:
-
-- **The page itself is wrong or out of date** → fix the page, then use
-  *Fetch* above. The bot only knows what the website says.
-- **The page is right and the bot got it wrong** → file a correction
-  ticket.
-
-**Filing a ticket the easy way:** open the conversation, find the bad
-answer, click **"Report this answer"** underneath it. The form arrives
-prefilled with the question and the answer, and — this is the part that
-matters — the ticket keeps a link back to the conversation, so whoever
-picks it up can see the whole exchange rather than a retyped summary.
-
-The bare form at `/librarian/ticket` is for something a patron told you at
-the desk, where there is no conversation to link.
-
-**Working the queue** at `/admin/tickets/view`: filter by Open / In
-progress / Done. Opening a ticket shows the transcript it came from, how
-many times that same question has been asked, and a form to write a
-correction that takes effect on the next message with no deploy.
+Full ladder: [BUDGET.md](./BUDGET.md).
 
 ---
 
-## Rachel — backend
+## 4. Scenario C — "Did the overnight jobs run?"
 
-### Is it up?
+Everything the bot mails runs at **09:30 Oxford time**, from one systemd
+timer.
 
-- **`/health/ready`** and **`/smoketest`** are public, no key. Point an
-  external monitor at them.
-- **`/admin/`** shows service state at a glance.
-- **A daily digest email lands at 13:30 UTC (9:30am Oxford)** and is sent
-  *every day, pass or fail*. A morning with no mail means the cron is
-  broken, not that everything is fine — that is deliberate. It covers:
-  dependencies, memory and OOM kills, the librarian roster, stale subject
-  links, what real patrons disliked in the last 24h, corpus age, and
-  LibCal entries that cannot be true.
+```bash
+systemctl list-timers chatbot-morning.timer --no-pager
+systemctl show -p ExecMainStatus --value chatbot-morning.service
+```
 
-### The stop button
+```
+NEXT                        LEFT  LAST                        UNIT
+Wed 2026-09-02 13:30:00 UTC  20h  Tue 2026-09-01 13:30:01 UTC chatbot-morning.timer
+0
+```
 
-**Service control** (`/admin/service`). Pausing does **not** kill the
-process — the bot keeps answering, with a maintenance notice, so the
-widget never shows a broken page. It survives a restart, and recovery is
-one click. Use it when something is badly wrong and you need it to stop
-saying things while you look.
+`13:30 UTC` **is** 09:30 in Oxford — the box runs UTC and systemd does the
+conversion, including daylight saving. `ExecMainStatus 0` means the last
+run finished cleanly.
 
-### Fixing an answer without a deploy
+To see what it would do without sending anything:
 
-**Manual corrections** (`/admin/corrections/view`). Four kinds:
+```bash
+sudo -u root bash /opt/chatbot/ai-core/scripts/morning_jobs.sh --dry-run
+```
 
-| Action | What it does | Use it when |
-|---|---|---|
-| `suppress` | Drops one chunk from retrieval | A passage is wrong or out of context |
-| `replace` | Substitutes librarian-written text for a chunk | The page is right but reads badly |
-| `pin` | Boosts one chunk to the top for matching questions | The right page exists but ranks low |
-| `blacklist_url` | Drops a whole page | A stale page keeps surfacing |
+**It exits non-zero on a dry run and that is correct** — the jobs
+underneath treat a suppressed send as a failed send.
 
-Two things to know:
-
-- **A `pin` boosts, it does not inject.** If retrieval never returns that
-  chunk, pinning it does nothing at all. Check the conversation's cited
-  sources first — if the page you want is not there, a pin will not help
-  and the fix is elsewhere.
-- **Corrections expire after 180 days, on purpose**, so nobody inherits a
-  rule nobody remembers. When one lapses the old behaviour returns. That
-  is the reminder to fix the underlying page.
-
-The **fire count** column tells you which rules are actually doing
-anything. It was broken until 2026-08-27 and showed 0 for everything, so
-**ignore any count from before then** — it means "not measured", not
-"never fired".
-
-### The parts that need a shell
-
-Only these:
-
-- Deploying code (`git pull && bash build.sh`, then restart)
-- Restoring a database backup (nightly at 03:30 UTC)
-- Anything in `scripts/`
-
-Corpus refresh does **not** need a shell any more — see Ken and Jerry's
-section. That was the point of building it.
+**A morning with no data-health email means the job did not run**, not
+that everything is fine. That report is sent every day, all-clear
+included, precisely so its absence means something.
 
 ---
 
-## Mike — spend
+## 5. Scenario D — "A patron says it answered wrong"
 
-**Cost dashboard** (`/admin/cost`), and `/admin/cost.json` if you want to
-pull it into a spreadsheet.
+You need the conversation before you need an opinion. Through the console
+it is Conversations → the day → the turn. From the shell, when the
+console is not available to you:
 
-It shows spend by day with the number of turns, every model ever used with
-its all-time total, and the rate card in dollars per million tokens. Cost
-is rolled up nightly at 02:00 UTC.
+```bash
+sudo -u root /opt/chatbot/ai-core/.venv/bin/python - <<'PY'
+import os, sys, asyncio, logging
+sys.path.insert(0, '/opt/chatbot/ai-core')
+for line in open('/opt/chatbot/.env'):
+    line = line.strip()
+    if line and not line.startswith('#') and '=' in line:
+        k, v = line.split('=', 1); os.environ.setdefault(k, v.strip().strip('"'))
+logging.disable(logging.CRITICAL)
+from src.database.prisma_client import get_prisma_client, connect_database
 
-What moves the number:
+WORD = 'ebook'          # <- change this
 
-- **Traffic.** Cost is roughly per answer, so a busy week costs more.
-- **Which model answers.** The rate card shows the spread. A change of
-  default model moves the total far more than a change in traffic.
-- **Corpus rebuilds.** Each one re-embeds the changed pages. Fetching a
-  diff is free; approving one is not. Now that Ken and Jerry can approve
-  without waiting for anyone, expect this to happen more often than the
-  old once-a-week-if-someone-remembered rhythm — a line item that used to
-  be rare is now routine, and that is the change to watch for.
+async def go():
+    await connect_database(); db = get_prisma_client()
+    rows = await db.query_raw("""
+      SELECT to_char(m."timestamp" AT TIME ZONE 'UTC' AT TIME ZONE
+                     'America/New_York', 'MM-DD HH24:MI') AS t,
+             m.type, left(m.content, 62) AS text
+      FROM "Message" m WHERE m.content ILIKE $1
+      ORDER BY m."timestamp" DESC LIMIT 10""", f'%{WORD}%')
+    for r in rows:
+        print(f"{r['t']}  {r['type']:<9} {r['text']}")
+asyncio.run(go())
+PY
+```
 
-If a day looks wrong, `/admin/conversations` for that day tells you
-whether it was traffic or something else.
+```
+08-30 20:41  assistant To find a specific book, article, journal, or DVD at Miami Uni
+08-30 20:41  assistant I can point you to the right starting place:
+08-30 20:41  assistant If this is a research question you should consult a librarian
+```
+
+### Then pick the cheapest layer that fixes it
+
+**Most wrong answers are not the model's fault.** Roughly thirty
+deterministic short-circuits answer the common questions by lookup before
+any model runs, so the first question is *which layer produced this*.
+
+| Layer | Use when | Cost | Who |
+|---|---|---|---|
+| **Correction** — `/admin/corrections/view` | The answer is wrong and you know what it should say | **live in 60s, no deploy** | any operator |
+| **Corpus** — `/admin/etl` | A page on our website changed | rebuild, ~7 min of slower answers | operator signs |
+| **Code** | The logic is wrong | deploy + restart | Meng / Rachel |
+
+Try them in that order. A correction that solves it today buys time to do
+the code fix properly, and corrections expire on their own after 180 days
+so they do not silently become permanent.
 
 ---
 
-## Things everyone should know
+## 6. Scenario E — "I want to deploy. Is anyone using it?"
 
-**The bot is a navigator, not an encyclopedia.** It is built to send
-people to the right page, not to memorise the site. If an answer is wrong,
-the first question is almost always *"what does the page say?"* — not
-*"what should the bot know?"*
+A restart drops every open connection and the bot cannot answer for about
+a minute.
 
-**It will not answer from memory about the building.** Floor numbers,
-lifts, toilets: if no page says it, it sends the patron to the front desk
-rather than guessing. That is an operator ruling from 2026-08-17, not a
-gap.
+**The number lives inside the running process**, so this only works
+through the console — `/admin/` shows it at the top, and
+`/admin/presence.json` returns it as JSON. Running `presence.snapshot()`
+from a shell always prints zero, because a fresh Python process has its
+own empty copy. That is a trap, not a reading.
 
-**Some pages say two different things.** Where our own website contradicts
-itself, somebody has had to pick a side, and that decision is recorded in
-`docs/OPEN-WORK.md`. If you find a fresh contradiction, that file is where
-it should be written down — fixing the pages is better than teaching the
-bot which page to believe.
+Three numbers, and they do **not** mean the same thing:
 
-**Star ratings and comments are patron feedback**, and they are the only
-signal in the console that comes from the person who was actually helped
-or not. There are not many — a few dozen — so each one is worth reading.
-They show inline on the conversation rows, and you can filter to them.
-
----
-
-## Who to ask
-
-| Problem | Ask |
+| | What a restart costs them |
 |---|---|
-| A page in the corpus is wrong or missing | Ken, Jerry |
-| The bot is down, slow, or saying something alarming | Rachel |
-| The spend looks wrong | Mike |
-| Anything about how the bot decides what to say | Meng |
-| You need the admin key | Meng |
+| `waiting` | Their question is lost with nothing shown. **Wait.** |
+| `in_conversation` | Their thread ends and the bot is unreachable ~60s. |
+| `open` | Nothing — the widget reconnects on its own. |
 
-**If the bot is saying something harmful, do not wait for anybody.** Open
-`/admin/service` and pause it. It is one click, it is reversible, and the
-widget stays up with a maintenance notice. Then tell the group.
+Most open sockets are nobody: the widget connects when a library page
+*loads*, so a background tab is in `open` and would not notice.
+
+---
+
+## 7. Scenario F — "I cannot get into the console"
+
+**This is the expected state today, not a fault.** Single sign-on is
+switched on and Miami IT has not finished configuring their side, and the
+shared key has been switched off. So:
+
+| | |
+|---|---|
+| `/admin/*` | redirects to Miami sign-in, which cannot complete yet |
+| `/librarian/` | still works with the shared access code |
+| `/admin/service` (stop button) | **always reachable, no credentials** |
+| the chat widget | unaffected |
+
+The stop button is deliberately outside all of this: it has to work when
+the identity provider is the thing that is broken.
+
+If the console is needed before SSO is finished, the shared key can be
+switched back on — it is one line and a restart, not a deploy:
+
+```
+SSO_ALLOW_TOKEN_FALLBACK=true      # in /opt/chatbot/.env
+sudo systemctl restart chatbot
+```
+
+That switch exists for exactly this. Ask Meng before flipping it.
+
+---
+
+## 8. What is stale in the rest of the docs
+
+Checked on 1 September 2026. These are wrong **now**, and the list is
+here rather than in each file so you can distrust them precisely rather
+than generally.
+
+| File | What is wrong |
+|---|---|
+| `06-CORRECTION-TICKETS.md` | Tells you to open the queue at `?key=<ADMIN_API_TOKEN>`. That key is switched off; you will be bounced to sign-in. |
+| `04-SERVER-MONITORING.md` | Written 17 July. Predates the 09:30 timer and the daily digest entirely; the cron facts in it are still true. |
+| `MAINTENANCE-2026-07-17-overnight.md`, `HANDOFF-2026-07-29-overnight.md`, `STUDENT-SIM-2026-07-30.md`, `REPORT-pre-launch-testing-2026-07-30.md` | Dated records of one night's work. Accurate for their date, not descriptions of the system now. Read them as history. |
+| `librarian-services-truthtable-ask.md` | 20 May. Predates the current subject-librarian system. |
+
+Trustworthy today: [01-SYSTEM-OVERVIEW.md](./01-SYSTEM-OVERVIEW.md) (and
+its Chinese peer), [02-ENVIRONMENT-VARIABLES.md](./02-ENVIRONMENT-VARIABLES.md),
+[05-DEPLOYMENT-GUIDE.md](./05-DEPLOYMENT-GUIDE.md), [BUDGET.md](./BUDGET.md),
+[08-WEBSITE-UPDATES-INTO-THE-BOT.md](./08-WEBSITE-UPDATES-INTO-THE-BOT.md),
+and this file.
+
+---
+
+## 9. What has never been tested
+
+Stated because the alternative is you finding out during an incident.
+
+- **Single sign-on has never completed once**, end to end, by anybody.
+- **The restore half of the backup.** Backups run nightly and verify
+  their own dump; nobody has restored one into a running system.
+- **The stop button in anger.** It has been tested; it has never been
+  needed.
+- **A corpus rebuild under real traffic.** Every `apply` so far has been
+  at a quiet hour.
+
+[OPEN-WORK.md](./OPEN-WORK.md) carries the rest.
+
+---
+
+## 10. Who to ask
+
+| | |
+|---|---|
+| Anything in this file | Meng first |
+| The bot is down and Meng is not answering | Rachel — scenario A, then the stop button if it is answering *wrongly* rather than not at all |
+| Money | Mike gets the emails automatically; the numbers are in scenario B |
+| A page on our site is wrong in the bot | Ken and Jerry — scenario D, correction layer |
+
+**When something is on fire, the order is: stop the bot, then work out
+why.** A paused bot is not an outage — patrons get a real sentence
+pointing at Ask Us. A bot confidently telling students the wrong opening
+hours is worse than a bot that is politely unavailable.

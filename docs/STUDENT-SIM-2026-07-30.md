@@ -1,5 +1,10 @@
 # Ten simulated students against the acceptance sheet
 
+> **A record of one piece of work, not a description of the
+> system.** Accurate for its own date; read it as history. The
+> current picture is [01-SYSTEM-OVERVIEW.md](./01-SYSTEM-OVERVIEW.md).
+
+
 **Run:** overnight 2026-07-30, before the live session
 **Sheet:** [STUDENT-TEST-2026-07.md](STUDENT-TEST-2026-07.md) · **Target:** ≥80%
 

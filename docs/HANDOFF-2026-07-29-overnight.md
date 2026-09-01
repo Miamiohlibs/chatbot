@@ -1,5 +1,10 @@
 # Overnight, 29 July 2026 — what changed and what needs you
 
+> **A record of one piece of work, not a description of the
+> system.** Accurate for its own date; read it as history. The
+> current picture is [01-SYSTEM-OVERVIEW.md](./01-SYSTEM-OVERVIEW.md).
+
+
 Written for you to read first thing. Two sections: **what needs a decision**
 (short), then **what changed** (reference).
 

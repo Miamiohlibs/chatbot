@@ -1,5 +1,12 @@
 # Librarian Correction Tickets
 
+> **Out of date, 2026-09-01.** The queue URLs below use
+> `?key=<ADMIN_API_TOKEN>`. That key is switched off — single sign-on
+> replaced it — so those links bounce you to Miami sign-in. Everything
+> about how a ticket WORKS is still accurate; only the way in changed.
+> See [09-TEAM-MAINTENANCE-GUIDE.md](./09-TEAM-MAINTENANCE-GUIDE.md) §7.
+
+
 **Added:** July 16, 2026
 **Code:** `ai-core/src/api/admin/ticket_router.py` (tests: `test_ticket_router.py`)
 **Table:** `CorrectionTicket` (see `prisma/schema.prisma`)

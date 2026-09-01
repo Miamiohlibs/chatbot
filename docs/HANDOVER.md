@@ -1,5 +1,19 @@
 # Handover — Miami University Libraries Smart Chatbot
 
+> **This file is the STATE of things — the numbers, what is unfinished,
+> who to ask. For how to actually operate it, use
+> [09-TEAM-MAINTENANCE-GUIDE.md](./09-TEAM-MAINTENANCE-GUIDE.md), which
+> is scenario-driven and whose commands were run on the box.**
+>
+> Both files address Rachel, Ken and Mike by name and they used to
+> overlap. Split on 2026-09-01: two documents claiming to be the team
+> guide is how somebody reads one, acts on it, and finds the other said
+> something else.
+>
+> Some figures below are from 21 August. Where this and the system
+> overview disagree, [01-SYSTEM-OVERVIEW.md](./01-SYSTEM-OVERVIEW.md)
+> wins — it was measured on 1 September.
+
 **For:** Rachel · Ken · Mike (小马哥) · **Written:** 2026-08-21
 
 The chatbot on the Libraries site answers hours, locations, borrowing, rooms,

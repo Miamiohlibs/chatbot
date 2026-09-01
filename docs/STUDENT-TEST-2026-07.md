@@ -1,5 +1,10 @@
 # Student acceptance test — 10 questions
 
+> **A record of one piece of work, not a description of the
+> system.** Accurate for its own date; read it as history. The
+> current picture is [01-SYSTEM-OVERVIEW.md](./01-SYSTEM-OVERVIEW.md).
+
+
 **Prepared:** July 27, 2026 · **Target:** ≥80% correct to pass
 **Every question below was piloted against production before release.**
 

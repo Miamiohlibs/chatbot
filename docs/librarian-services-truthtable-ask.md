@@ -1,5 +1,11 @@
 # Librarian ask: confirm services-offered per building
 
+> **Out of date, 2026-09-01.** Dated 20 May, before the current
+> subject-librarian system. Kept as a record of the reasoning, not as
+> a description of what the bot does now — see
+> [03-SUBJECT-LIBRARIAN-SYSTEM.md](./03-SUBJECT-LIBRARIAN-SYSTEM.md).
+
+
 This is a 30-minute task. The output unblocks a load-bearing safety
 check in the rebuilt chatbot: it stops the bot from telling a
 Hamilton or Middletown user that there's a MakerSpace at their

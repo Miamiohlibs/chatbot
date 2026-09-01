@@ -1,5 +1,11 @@
 # Server Monitoring & Alerts
 
+> **Partly out of date, 2026-09-01.** Written 17 July. The cron facts
+> in it are still true, but it predates the 09:30 systemd timer and
+> the daily digest, so it is not the whole picture of what runs.
+> See [09-TEAM-MAINTENANCE-GUIDE.md](./09-TEAM-MAINTENANCE-GUIDE.md) §4.
+
+
 **Last Updated:** July 18, 2026
 **Describes the CURRENT stack.** The pre-migration watchdog era
 (`server_monitor.py`, local MTA on :25) is archived at
