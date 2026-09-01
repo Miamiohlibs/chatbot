@@ -167,16 +167,31 @@ reproducible.
 
 ### Real usage since launch
 
-| | |
-|---|---|
-| Real (browser) conversations | 66 |
-| Answers in them | 265 |
-| Thumbs up / down / unrated | **10 / 12 / 243** |
-| Correction tickets filed by librarians | 4 |
+Two columns on purpose. The left is the figure as measured on 2026-08-21;
+the right is 2026-09-01. **Where a row has no 1 Sep number, it is because
+separating real patrons from our own testing is done by the console's own
+classifier, and recomputing it in a different way here would produce a
+number that disagrees with the screen.** Read those from
+`/admin/conversations` rather than trusting a figure in a file.
 
-**More thumbs-down than thumbs-up.** The sample is tiny — 22 of 265 answers
-were rated at all — so it is not a quality measurement, but it is not
-flattering either and should not be presented as if it were.
+| | 21 Aug | 1 Sep |
+|---|---|---|
+| Real (browser) conversations | 66 | *see the console* |
+| Answers in them | 265 | *see the console* |
+| **Thumbs up** | 10 | **14** |
+| **Thumbs down** | 12 | **17** |
+| Correction tickets in `CorrectionTicket` | 4 | **2** |
+| All questions ever asked, every source | — | 3,157 |
+
+**More thumbs-down than thumbs-up, and the gap has not closed.** The sample
+is tiny — around thirty ratings out of thousands of answers — so it is not
+a quality measurement, but it is not flattering either and should not be
+presented as if it were. The seventeen thumbs-down are roughly eleven
+distinct problems and are the actual work list.
+
+*(The ticket count went 4 → 2 and this file cannot tell you why. Either two
+rows were removed, or the 4 was never right. Flagged rather than quietly
+overwritten.)*
 
 ### Two quality numbers, and why both exist
 
@@ -191,7 +206,10 @@ real-traffic number is the honest one**, and on 2026-08-20 it started the day
 at 140 good / 42 bad. The improvement came from fixing 35 specific routing
 faults, each verified in production.
 
-### Cost, month to date
+### Cost
+
+**August 2026, the last full month** — read against the $45 students'
+purse that was in force then:
 
 | | |
 |---|---|
@@ -199,10 +217,31 @@ faults, each verified in production.
 | — evaluation runs | $7.04 |
 | — scripted testing (no browser) | $5.92 |
 | — **real users** | **$2.76** |
-| Monthly purse for serving | $45.00 *(the purse in force that month; $40 from 1 Sep 2026)* |
+| Purse for serving that month | $45.00 |
 
-Real student traffic is costing about **6% of its budget**. Most of this
-month's spend is us testing it.
+Real student traffic cost about **6% of its budget**. Most of the spend was
+us testing it. That ratio, not the dollar figure, is the thing to carry
+forward.
+
+**September 2026, as of the 1st** — the new $100 ceiling, $40 / $60:
+
+```
+budget purses in force: students $40.00, testing $60.00 (from 2026-09-01)
+students  mtd $0.02/40.00   today $0.02/1.33
+eval      mtd $0.00/60.00
+level     0 (normal)  <- within budget
+```
+
+Get that yourself any time; it changes nothing and sends nothing:
+
+```bash
+sudo -u root bash -c 'set -a; . /opt/chatbot/.env; set +a; cd /opt/chatbot/ai-core && .venv/bin/python scripts/budget_guard.py --dry-run'
+```
+
+**Librarian testing moved purses on 1 September.** It arrives in a real
+browser from our own host, so until then it was charged to the students':
+$0.38 of $2.30, seventeen per cent of that purse, and growing as the eight
+department heads start using the console.
 
 ---
 
@@ -282,16 +321,27 @@ it was caught:
 |---|---|
 | Bot answering nonsense, or a bad deploy | **Pause it**: the kill switch, or `touch /opt/chatbot/ai-core/data/SERVICE_PAUSED`. Users then see an out-of-service notice instead of answers, and the three big buttons show it too. |
 | Service down | A watchdog checks every 5 minutes and restarts it. systemd also restarts on failure. |
-| Need yesterday's data | Backups run nightly at 03:30 to `/opt/chatbot-private-data/backups/` — **12 dumps** on hand, most recent `smartchatbot-20260820-033001.dump`. Restore procedure: [OPS-BACKUP.md](./OPS-BACKUP.md). |
+| Need yesterday's data | Backups run nightly at 03:30 to `/opt/chatbot-private-data/backups/` — **24 dumps**, most recent `smartchatbot-20260901-033001.dump` (checked 1 Sep 2026; 25 MB total). The directory is root-only, so `sudo ls` with a glob returns nothing — the shell expands it before sudo runs. Use `sudo bash -c 'ls …'`. Restore procedure: [OPS-BACKUP.md](./OPS-BACKUP.md). |
 | Dependency down (Weaviate, Postgres, LibCal, OpenAI) | Email alerts are configured and have been verified working. |
 | Spend climbing | `/admin/cost`, and the budget guard runs every 15 minutes. |
 
 **Deploy**, after pushing to GitHub:
 
 ```bash
-cd /opt/chatbot && sudo git push origin main && sudo systemctl restart chatbot \
-  && sleep 30 && bash ai-core/scripts/post_deploy_check.sh
+cd /opt/chatbot && sudo git push origin main && sudo systemctl restart chatbot && curl -s --retry 30 --retry-delay 5 --retry-all-errors -o /dev/null https://chatbot.lib.miamioh.edu/health/live && bash ai-core/scripts/post_deploy_check.sh
 ```
+
+**Corrected 1 Sep 2026.** This used to say `sleep 30`, and warm-up takes
+**45–80 seconds** — so on a perfectly good deploy the check ran while the
+service was still starting and reported failure. `post_deploy_check.sh`
+does not retry: it curls `/health/live` once with a 5-second timeout. A
+check that cries wolf on every healthy deploy is worse than no check,
+because people learn to ignore it. The `curl --retry` above waits for the
+service instead of guessing.
+
+One command on one line on purpose — a backslash-newline inside a shell
+one-liner you paste into a chat window is a common way to get a literal
+backslash and a broken command.
 
 The push needs `sudo` — the GitHub deploy key belongs to root, not to your
 user. The post-deploy check holds a **two-turn** conversation on purpose: a
@@ -310,10 +360,18 @@ Full detail in [OPEN-WORK.md](./OPEN-WORK.md). The short version:
   all still missing.
 - **The LLM path is nondeterministic.** Until that is understood, every
   quality number carries about ±2 questions of noise.
-- **Six manual corrections have never fired once.** A mechanism that has never
-  worked is worse than none, because it looks like coverage.
-- **Four budget-ladder tests have never run against the deployed
-  configuration.** They were written against the default purses.
+- ~~**Six manual corrections have never fired once.**~~ **Withdrawn — this
+  was never true.** Nothing had ever written `ManualCorrection.fireCount`;
+  only the admin list read it, so *every* rule showed 0 however often it
+  fired. Two of those suppressions were then demonstrated working, three
+  runs out of three. The counter is wired now. Corrected in
+  [OPEN-WORK.md](./OPEN-WORK.md) on 2026-08-27; this file went on repeating
+  the retracted version until 1 Sep 2026. **Deleting those rules on the
+  strength of it would have been deleting on the strength of a bug.**
+- ~~**Four budget-ladder tests have never run against the deployed
+  configuration.**~~ **Fixed.** They hardcoded a $75 purse — a module
+  default no deployment uses — so they passed alone and failed in a full
+  run. They now read the configured purse.
 - **Never tested:** a real screen reader, the widget embedded on the live
   library page, a dependency dying mid-conversation, session continuity after
   a refresh, more than ~40 concurrent users.

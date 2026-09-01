@@ -45,6 +45,13 @@ can afford sixty seconds of downtime.
 sudo systemctl restart chatbot        # ~45-80s before it answers again
 ```
 
+*(That range is measured, not estimated. Confirmed again by an unplanned
+restart on 1 Sep 2026 at 18:21 UTC — a stray `systemctl restart` in what
+was meant to be a read-only check. It answered again in about 65 seconds,
+came back clean, and lost nothing but the open sockets and the in-process
+presence counter. Which is the point of this section: the cost of a
+restart is real, bounded, and worth knowing before you cause one.)*
+
 **Before you restart, check whether anybody is mid-conversation.** See
 scenario E.
 
@@ -219,6 +226,12 @@ through the console — `/admin/` shows it at the top, and
 from a shell always prints zero, because a fresh Python process has its
 own empty copy. That is a trap, not a reading.
 
+> **Which means that today you cannot do this check at all.** The console
+> needs a sign-in that does not work yet (§7), and there is no other way
+> to read the number. Until SSO completes, deploying means picking a quiet
+> hour and accepting the risk — or asking Meng to reopen the shared key
+> for a minute. Say which one you did; do not record the check as done.
+
 Three numbers, and they do **not** mean the same thing:
 
 | | What a restart costs them |
@@ -262,32 +275,66 @@ That switch exists for exactly this. Ask Meng before flipping it.
 
 ## 8. How much to trust the rest of the docs
 
-**Every file in `/docs` was read line by line on 1 September 2026 and the
-wrong parts were corrected.** So this section is shorter than it was that
-morning. What remains is the residue: files that are still partly true,
-and files that were never meant to describe today.
+All **56** files under `docs/` were read and corrected on 1 September 2026.
+This section is what you still need to know afterwards.
+
+### The one that matters most: `programmer-guide/`
+
+**Ten files, and its operational half was unusable until 1 September.** It
+is not in `archive/`, the README lists it as a reference, and 00-INDEX
+tells you to send 03-DEPLOYMENT to Rachel and 08-OPERATIONS to whoever is
+on call. What was in it:
+
+| | |
+|---|---|
+| the service name | `smartchatbot-backend`, five times. The unit is `chatbot.service`. |
+| the deploy path | `/opt/chatbot/current/`, thirty times. It has never existed. |
+| Weaviate's port | 8888. It is 8080. |
+| the models | `gpt-5.4-mini` / `gpt-5.2`. Neither has been called in thirty days. |
+| a healthy daily spend | "$5–30/day, concerning above $100". The students' purse is **$40 a month**. |
+| the cron jobs | a file, a path and a script that none exist — and it omitted the backup, the watchdog, the budget guard and the 09:30 timer. |
+
+All fixed. The reason it is called out here rather than left in the log:
+**every command in `05-TROUBLESHOOTING.md` named the wrong service**, and
+that is the file you open when production is down at 4pm. If you had
+reached for it before today it would have failed on the first line and you
+would have had no way to tell whether that meant the doc was wrong or the
+box was.
+
+### Still only partly true
 
 | File | Where you stand |
 |---|---|
-| `04-SERVER-MONITORING.md` | Written 17 July. The cron jobs, probes and log paths in it are still right; the mail schedule is not — it predates the 09:30 timer and the daily digest. Carries a banner saying so. |
-| `06-CORRECTION-TICKETS.md` | How a ticket works is accurate. Its URLs still say `?key=…`, which is switched off — see §7. Banner at the top. |
-| `librarian-services-truthtable-ask.md` | 20 May. Predates the current subject-librarian system. Nothing operational in it. |
-| The dated files — `MAINTENANCE-2026-07-17`, `HANDOFF-2026-07-29`, `STUDENT-SIM-2026-07-30`, `REPORT-pre-launch-testing-2026-07-30`, `FINDING-compound-questions-2026-07-30`, `STUDENT-TEST-2026-07` | **History, deliberately left as written.** They are the record of a day, and rewriting them would destroy the only account of why some things are the way they are. Do not follow them as procedure. |
+| `04-SERVER-MONITORING.md` | Written 17 July. Cron jobs, probes and log paths are right; the mail schedule predates the 09:30 timer. Banner at the top. |
+| `06-CORRECTION-TICKETS.md` | How a ticket works is accurate. Its URLs still say `?key=…`, which is switched off — see §7. |
+| `librarian-services-truthtable-ask.md` | The *ask* is a 20 May draft and historical. **The mechanism is live** — `services_offered` is populated for all seven buildings and the bot still refuses rather than guesses. Do not dismiss it; an earlier banner did, wrongly. |
+| The dated files, and everything in `archive/` and `eval/` | **History, deliberately left as written.** Each now says so on its first line. Do not follow them as procedure. |
 
-Two corrections from that pass are worth knowing about even if you never
-open the file:
+### Two corrections worth knowing even if you never open the file
 
 - **`SSO-REQUEST-TO-IT.md`** — the ticket we sent Miami IT states that we
-  sign AuthnRequests. **We do not**, and never did. If their side was
+  sign AuthnRequests. **We do not**, and never did: `SSO_SP_CERT` and
+  `SSO_SP_KEY` are unset, so we have no signing key. If their side was
   configured to require it, that alone would explain why nobody has ever
   signed in. A corrected message is drafted in that file, unsent.
-- **`OPS-BACKUP.md`** — named a Weaviate collection that was three
-  rebuilds out of date. It now tells you to ask the box instead. Treat any
-  collection name written in any document the same way.
+- **`OPS-BACKUP.md`** — named a Weaviate collection three rebuilds out of
+  date. It now tells you to ask the box. **Treat any collection name
+  written in any document the same way, including in this one.**
 
-Everything else in the folder describes the system as it stands. Where two
-files disagree, [01-SYSTEM-OVERVIEW.md](./01-SYSTEM-OVERVIEW.md) and this
-one win — they were measured, not remembered.
+### What to do with all this
+
+Do not read "corrected on 1 September" as "correct forever". The failure
+mode here was never one big lie — it was thirty small paths that stopped
+resolving while nobody was looking. Two habits are worth more than any
+audit:
+
+- **Check the box, not the doc**, for anything with a name in it — a
+  collection, a port, a service, a path, a dollar figure.
+- **When a documented command fails, suspect the document first.** It was
+  right more often than the box was, this time.
+
+Where two files disagree, [01-SYSTEM-OVERVIEW.md](./01-SYSTEM-OVERVIEW.md)
+and this one win — they were measured, not remembered.
 
 ---
 
@@ -302,6 +349,14 @@ Stated because the alternative is you finding out during an incident.
   needed.
 - **A corpus rebuild under real traffic.** Every `apply` so far has been
   at a quiet hour.
+- **The corpus has no backup at all** — not an untested restore, an
+  absent one. Weaviate's backup module is switched off on our container
+  (`ENABLE_MODULES=` is empty), so the backup endpoint refuses the call.
+  `07-DATA-PIPELINE.md` printed a command for it until 1 September; it
+  returns 422. What protects you instead is that every `apply` builds a
+  NEW collection and leaves the old ones: rolling back is
+  `WEAVIATE_CHUNK_COLLECTION` plus a restart. That is a rollback, not a
+  backup — it does not survive losing the disk.
 
 [OPEN-WORK.md](./OPEN-WORK.md) carries the rest.
 
