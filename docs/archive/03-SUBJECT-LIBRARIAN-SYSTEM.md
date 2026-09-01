@@ -1,5 +1,31 @@
 # Subject Librarian System Documentation
 
+> **RETIRED 1 September 2026 — do not follow.** Superseded by
+> [../07-DATA-SOURCES.md](../07-DATA-SOURCES.md), which is dated,
+> verified, and states the rule this file breaks: each kind of fact has
+> exactly one source.
+>
+> It was retired rather than repaired because repairing it means keeping a
+> second copy of the roster, which is the thing that once handed a patron
+> the wrong person's details. What was wrong in it:
+>
+> - **Two directors' email addresses were wrong** — `mcdonak2@` (really
+>   `mcdonak@`) and `burkejf@` (really `burkejj@`). Both people are on
+>   staff with the titles shown; only the addresses were wrong, which is
+>   the half that matters.
+> - **It told you to run `sync_staff_directory.py` when staff change.**
+>   07 names that script as a hazard: it writes `Librarian.name` and knows
+>   nothing about `alternateName`, so it is how Jerry Yarnetsky starts
+>   being displayed as "Eric". The correct refresh table was merged into
+>   07 before this file was retired.
+> - **"Fuzzy matching, 70% similarity"** describes character-distance
+>   admission, removed on 2026-07-28 because it matched Botany to
+>   Accountancy. Matching is word-level now (`src/tools/subject_match.py`).
+> - Its header claimed "Last Updated: December 17, 2025" while the file
+>   had been edited eight months later.
+>
+> Kept as the record of a design and its failure modes.
+
 **Last Updated**: August 21, 2026 (header corrected 1 Sep 2026 — it read
 "December 17, 2025" while the file had been edited eight months later)  
 **Version**: 2.0 (Enhanced)

@@ -1,75 +1,51 @@
 # Developer Documentation
 
 **Miami University Libraries Smart Chatbot**
-**Last Updated:** 1 September 2026 — every file in this folder was read
-and corrected on that date.
+**Last Updated:** 1 September 2026 — every file in this folder was read and
+corrected on that date, and everything that had been superseded was moved
+into [archive/](./archive/).
 
-Everything in this folder describes the **current** system (the v2
-rebuild — the only serving path since 2026-07-17). Anything describing
-the retired v3.1 stack lives under [archive/](./archive/).
+Sixteen files at this level. All of them describe the system as it runs
+today. Nothing here is history — history is in `archive/`, and it says so
+on its first line.
 
-## Current docs — describe the system as it is now
+> The numbering skips 03. That file was retired, and renumbering the rest
+> would break every reference anybody has ever pasted into a ticket. A gap
+> is cheaper than a renumber.
+
+## Start here
+
+| | |
+|---|---|
+| **You are on the team and something needs doing** | [09-TEAM-MAINTENANCE-GUIDE.md](./09-TEAM-MAINTENANCE-GUIDE.md) — six scenarios, every command run on the box with its real output |
+| **You want to understand the whole thing** | [01-SYSTEM-OVERVIEW.md](./01-SYSTEM-OVERVIEW.md) · 中文 [01-SYSTEM-OVERVIEW.zh.md](./01-SYSTEM-OVERVIEW.zh.md) |
+| **You are taking it over** | [HANDOVER.md](./HANDOVER.md) — the state of things: numbers, what is unfinished, who to ask |
+| **You are a developer** | [programmer-guide/00-INDEX.md](./programmer-guide/00-INDEX.md) |
+
+## Reference
 
 | Doc | What it covers |
 |---|---|
-| [01-SYSTEM-OVERVIEW.md](./01-SYSTEM-OVERVIEW.md) | **Start here.** The whole system: what runs, one turn end to end, data stores, who can reach what, the schedule, the money. Chinese: [01-SYSTEM-OVERVIEW.zh.md](./01-SYSTEM-OVERVIEW.zh.md) |
-| [09-TEAM-MAINTENANCE-GUIDE.md](./09-TEAM-MAINTENANCE-GUIDE.md) | **If you are on the team, start here instead.** Six scenarios, every command run on the box with its real output |
-| [02-ENVIRONMENT-VARIABLES.md](./02-ENVIRONMENT-VARIABLES.md) | Every env var: model tiers, Springshare APIs, alerts, admin secrets |
-| [03-SUBJECT-LIBRARIAN-SYSTEM.md](./03-SUBJECT-LIBRARIAN-SYSTEM.md) | Subject → librarian data layer (Postgres tables, course codes, fuzzy match) |
-| [05-DEPLOYMENT-GUIDE.md](./05-DEPLOYMENT-GUIDE.md) | build.sh flow, schema changes, post-deploy checks, host-level pieces |
-| [06-CORRECTION-TICKETS.md](./06-CORRECTION-TICKETS.md) | Librarian "wrong answer" report form + operator queue |
-| [07-DATA-SOURCES.md](./07-DATA-SOURCES.md) | **Which single source owns each fact** (people, subjects, hours, corrections) + known data gaps |
-| [08-WEBSITE-UPDATES-INTO-THE-BOT.md](./08-WEBSITE-UPDATES-INTO-THE-BOT.md) | For the web team: getting site changes into the bot, no terminal needed |
-| [BUDGET.md](./BUDGET.md) | The spend ladder, the purses, and what happens at each rung |
-| [OPS-BACKUP.md](./OPS-BACKUP.md) | Database backup: what runs, where it lands, how to restore |
-| [OPEN-WORK.md](./OPEN-WORK.md) | Known failures after the real-traffic review, and the five measurement traps |
-| [HANDOVER.md](./HANDOVER.md) | The **state** of things: numbers, what is unfinished, who to ask. Operating instructions live in 09 |
-| [SSO-REQUEST-TO-IT.md](./SSO-REQUEST-TO-IT.md) | The Miami IT ticket, its outstanding correction, and where sign-on stands |
+| [02-ENVIRONMENT-VARIABLES.md](./02-ENVIRONMENT-VARIABLES.md) | Every variable the code actually reads. The template is generated from the running `.env`. |
+| [04-SERVER-MONITORING.md](./04-SERVER-MONITORING.md) | systemd, alerts, the four probe URLs, the two schedulers, logs |
+| [05-DEPLOYMENT-GUIDE.md](./05-DEPLOYMENT-GUIDE.md) | build.sh, schema changes, post-deploy checks |
+| [06-CORRECTION-TICKETS.md](./06-CORRECTION-TICKETS.md) | The "wrong answer" report form and the operator queue |
+| [07-DATA-SOURCES.md](./07-DATA-SOURCES.md) | **Which single source owns each fact.** Read before touching people, subjects or building data. |
+| [08-WEBSITE-UPDATES-INTO-THE-BOT.md](./08-WEBSITE-UPDATES-INTO-THE-BOT.md) | For the web team. No terminal needed. |
+| [BUDGET.md](./BUDGET.md) | The $100 ceiling, the two purses, what happens at each rung |
+| [OPS-BACKUP.md](./OPS-BACKUP.md) | Database backup and restore — and why the corpus has neither |
+| [OPEN-WORK.md](./OPEN-WORK.md) | Known failures from the real-traffic review, and five measurement traps |
+| [SSO-REQUEST-TO-IT.md](./SSO-REQUEST-TO-IT.md) | The Miami IT ticket, its outstanding correction, where sign-on stands |
 | [AWS-CAPACITY-REQUEST.md](./AWS-CAPACITY-REQUEST.md) | The memory measurements behind asking for a bigger box |
-| [NOTES.md](./NOTES.md) | Loose ends: the Ask Us widget snippet, odds and sods |
+| [NOTES.md](./NOTES.md) | Loose ends: the Ask Us widget snippet |
 
-### Partly superseded
+## Elsewhere
 
-| Doc | Trust it for | Not for |
-|---|---|---|
-| [04-SERVER-MONITORING.md](./04-SERVER-MONITORING.md) | the cron jobs, probes, log locations | the mail schedule — written 17 July, predates the 09:30 timer and the daily digest |
-| [librarian-services-truthtable-ask.md](./librarian-services-truthtable-ask.md) | nothing operational | 20 May; predates the current subject-librarian system |
-
-## Dated records — history, not instructions
-
-Accurate for the day they were written. Read them to learn *why* something
-is the way it is; do not follow them as procedure.
-
-- [MAINTENANCE-2026-07-17-overnight.md](./MAINTENANCE-2026-07-17-overnight.md) — the post-legacy-removal audit
-- [HANDOFF-2026-07-29-overnight.md](./HANDOFF-2026-07-29-overnight.md) — one night's work
-- [STUDENT-SIM-2026-07-30.md](./STUDENT-SIM-2026-07-30.md), [REPORT-pre-launch-testing-2026-07-30.md](./REPORT-pre-launch-testing-2026-07-30.md) — pre-launch testing
-- [FINDING-compound-questions-2026-07-30.md](./FINDING-compound-questions-2026-07-30.md) — why compound questions fail
-- [STUDENT-TEST-2026-07.md](./STUDENT-TEST-2026-07.md) — the 10-question acceptance test and its rubric
-
-## Deeper / adjacent
-
-- [../README.md](../README.md) — repo-level entry point
-- [../ai-core/docs/OPERATOR.md](../ai-core/docs/OPERATOR.md) — operator runbook (endpoints, day-to-day tasks, alerts)
-- [../ai-core/docs/eval/](../ai-core/docs/eval/) — dated eval reports, triage docs, gold-hygiene history
-- [programmer-guide/00-INDEX.md](./programmer-guide/00-INDEX.md) — architecture deep-dive written during the rebuild
-
-## Archive (historical — do NOT follow for the current system)
-
-- [archive/legacy-v31/](./archive/legacy-v31/) — v3.1-era docs: old system
-  overview, setup guide, Weaviate-as-correction-pool design, clarification
-  buttons, old deployment guide/checklist, router refactor design, the
-  watchdog-based monitoring doc
-- [archive/reports/](./archive/reports/) — dated snapshots: accuracy audit,
-  beta readiness, June deploy reports
-- [eval/2026-05-22-wired-baseline/](./eval/2026-05-22-wired-baseline/) — the
-  original eval-baseline archive
-
-## Quick starts
-
-**Deploy a change**: [05-DEPLOYMENT-GUIDE.md](./05-DEPLOYMENT-GUIDE.md)
-**A librarian reports a wrong answer**: [06-CORRECTION-TICKETS.md](./06-CORRECTION-TICKETS.md)
-**Alerts stopped / server questions**: [04-SERVER-MONITORING.md](./04-SERVER-MONITORING.md)
-**New developer orientation**: 01 → programmer-guide → OPERATOR.md
+- [../ai-core/docs/OPERATOR.md](../ai-core/docs/OPERATOR.md) — operator runbook
+- [../ai-core/docs/eval/](../ai-core/docs/eval/) — dated eval reports and gold-hygiene history
+- [archive/](./archive/) — **historical. Do not follow it for the current
+  system.** Retired docs, dated one-night records, the v3.1 stack, and the
+  May 2026 eval baseline. Every file in there says so on its first line.
 
 ---
 

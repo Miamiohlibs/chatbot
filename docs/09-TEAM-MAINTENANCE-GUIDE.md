@@ -279,7 +279,9 @@ That switch exists for exactly this. Ask Meng before flipping it.
 
 ## 8. How much to trust the rest of the docs
 
-All **56** files under `docs/` were read and corrected on 1 September 2026.
+All **56** files under `docs/` were read on 1 September 2026, corrected
+where they were wrong, and moved into `archive/` where they had been
+superseded. The top level is now sixteen files that all describe today.
 This section is what you still need to know afterwards.
 
 ### The one that matters most: `programmer-guide/`
@@ -311,8 +313,14 @@ box was.
 |---|---|
 | `04-SERVER-MONITORING.md` | Written 17 July. Cron jobs, probes and log paths are right; the mail schedule predates the 09:30 timer. Banner at the top. |
 | `06-CORRECTION-TICKETS.md` | How a ticket works is accurate. Its URLs still say `?key=…`, which is switched off — see §7. |
-| `librarian-services-truthtable-ask.md` | The *ask* is a 20 May draft and historical. **The mechanism is live** — `services_offered` is populated for all seven buildings and the bot still refuses rather than guesses. Do not dismiss it; an earlier banner did, wrongly. |
-| The dated files, and everything in `archive/` and `eval/` | **History, deliberately left as written.** Each now says so on its first line. Do not follow them as procedure. |
+| Everything in `archive/` | **History, deliberately left as written.** Each file says so on its first line. `archive/records/` holds the dated one-night reports, `archive/legacy-v31/` the retired stack, `archive/reports/` and `eval/` the June and May snapshots. Do not follow any of it as procedure. |
+
+`03-SUBJECT-LIBRARIAN-SYSTEM.md` was **retired** on 1 September, not
+corrected. It carried two wrong staff email addresses and told you to run
+`sync_staff_directory.py` when staff change — the one refresh script
+[07-DATA-SOURCES.md](./07-DATA-SOURCES.md) names as a hazard. Its refresh
+table, corrected, was merged into 07 first. The services truth table it
+partly described is live and is now documented in 07 as well.
 
 ### Two corrections worth knowing even if you never open the file
 

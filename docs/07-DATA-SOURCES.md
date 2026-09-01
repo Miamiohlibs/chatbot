@@ -18,6 +18,27 @@ source, and everything else is derived or deleted.**
 | Live hours, room availability | **LibCal API** — never cached, never crawled | n/a (live) |
 | Page content, policies, guides | **Weaviate corpus** (ETL'd website) | `scripts/etl_watch.py` weekly → librarian signs → `run_etl --phase apply` |
 | Answers the operator has hand-fixed | **Postgres `ManualCorrection`** | `/admin/corrections/view` |
+| Which services exist at which building | **Postgres `LibrarySpace_v2.services_offered`** | `scripts/seed_library_spaces_v2.py`, confirmed by the building's librarian |
+
+## The services truth table is strict on purpose
+
+`LibrarySpace_v2.services_offered` is not a description, it is an
+allow-list. **If a service is not listed for a building, the bot refuses
+rather than guesses**, and points at the building that does have it. That
+is what stops it telling a Hamilton student there is a MakerSpace at
+Rentschler.
+
+Populated for all seven buildings (checked 2026-09-01): King 7 entries,
+Gardner-Harvey 7, Rentschler 5, Wertz 5, MakerSpace 4, Special Collections
+3, SWORD 1. Each list was confirmed by the people who work in that
+building — the ask that produced them is at
+[archive/librarian-services-truthtable-ask.md](./archive/librarian-services-truthtable-ask.md).
+
+Adding a service means a database write, not a code change. Adding a
+building means both, plus the `LibrarySpace` (v1) row the `get_hours`
+name→id mapping still reads.
+
+---
 
 ## Two rules about people (2026-07-28)
 
@@ -681,6 +702,29 @@ diagnoses were initially wrong:
 The durable lessons are in the code: slice the embed→upsert loop, classify
 transport vs semantic failures, and never let one chunk lose a 20,000-chunk
 job.
+
+## Routine refreshes (merged from 03, 2026-09-01)
+
+Which script for which upstream. Verified present 2026-09-01.
+
+| Upstream changed | Run |
+|---|---|
+| Staff — somebody joined, left, changed title | `scripts/reconcile_staff_from_csv.py` |
+| LibGuides content | `scripts/sync_libguides.py` |
+| Course catalogue / subjects | `scripts/sync_myguide_subjects.py` |
+| Everything, monthly | `scripts/sync_all_library_data.py` |
+
+> **Do NOT use `sync_staff_directory.py` for a staff change**, even though
+> it sounds like the right one and the retired `03-SUBJECT-LIBRARIAN-SYSTEM.md`
+> told you to. It is one of the three overlapping scripts named above that
+> write `Librarian.name` and know nothing about `alternateName`. Running it
+> is how Jerry Yarnetsky starts being displayed as "Eric". Use
+> `reconcile_staff_from_csv.py`, which this page names as the single source.
+
+After any of them, the checks in "How you know the data is still good"
+apply.
+
+---
 
 ## Known gaps (need operator decisions, not code)
 
