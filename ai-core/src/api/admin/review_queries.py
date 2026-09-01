@@ -469,7 +469,8 @@ async def list_conversations_on(db: Any, day: "str", *,
                                 day_to: str = "",
                                 needs_only: bool = False,
                                 flag: str = "",
-                                real_patrons_only: bool = False) -> dict:
+                                real_patrons_only: bool = False,
+                                max_day_span: int = 0) -> dict:
     """Every conversation that had a question on `day` (YYYY-MM-DD, Oxford time).
 
     WHY THIS EXISTS
@@ -511,9 +512,19 @@ async def list_conversations_on(db: Any, day: "str", *,
         end_local = datetime(y2, m2, d2, tzinfo=tz) + _td(days=1)
         if end_local <= start_local:
             end_local = start_local + _td(days=1)
+        # A TOO-LONG RANGE KEEPS ITS RECENT END, NOT ITS OLD ONE.
+        #
+        # This moved the END back to start + 31 days, so asking for
+        # "everything since launch" once that is more than a month gets
+        # you the OLDEST month and hides today. Backwards: the reason to
+        # ask for a long range is to include what just happened. Reported
+        # while wiring the librarian console's since-launch view,
+        # 2026-09-01 -- it had not bitten yet only because the beta is
+        # nineteen days old.
         clamped = False
-        if (end_local - start_local).days > MAX_DAY_SPAN:
-            end_local = start_local + _td(days=MAX_DAY_SPAN)
+        span = max(1, int(max_day_span or MAX_DAY_SPAN))
+        if (end_local - start_local).days > span:
+            start_local = end_local - _td(days=span)
             clamped = True
         start = start_local.astimezone(timezone.utc)
         end = end_local.astimezone(timezone.utc)

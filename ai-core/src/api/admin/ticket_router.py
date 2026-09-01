@@ -116,6 +116,39 @@ def ticket_email_body(t: dict) -> str:
 
 # --- HTML rendering (zero-dependency, same approach as review_view) -------
 
+async def _prefill_from_turn(db, conversation_id: str,
+                             message_id: str) -> dict:
+    """The bot's answer and the question it was answering.
+
+    Read here rather than passed in the URL -- see the note at the call
+    site. Returns {} on anything unexpected: a form that opens empty is a
+    minor annoyance, and a form that 500s is a report nobody files.
+    """
+    if not (conversation_id and message_id):
+        return {}
+    try:
+        msgs = await db.message.find_many(
+            where={"conversationId": conversation_id},
+            order={"timestamp": "asc"})
+    except Exception:  # noqa: BLE001
+        logger.warning("could not prefill from %s/%s", conversation_id,
+                       message_id, exc_info=True)
+        return {}
+    answer, question = "", ""
+    for m in msgs or []:
+        if str(getattr(m, "id", "")) == message_id:
+            answer = getattr(m, "content", "") or ""
+            break
+        if getattr(m, "type", "") == "user":
+            question = getattr(m, "content", "") or ""
+    if not answer:
+        return {}
+    out = {"bot_answer": answer[:_PREFILL_MAX]}
+    if question:
+        out["question"] = question[:_PREFILL_MAX]
+    return out
+
+
 def render_form(key: str, values: dict | None = None,
                 errors: list[str] | None = None,
                 conversation_id: str = "", message_id: str = "") -> str:
@@ -441,17 +474,29 @@ def build_ticket_router(deps: dict):
     async def ticket_form(request: Request):
         key = await librarian_guard(request)
         q = request.query_params
-        # Prefill when the form was opened from a conversation. The three
-        # text fields save the librarian retyping what is already on
-        # screen; the ids are what make the ticket point back.
+        conv_id = (q.get("conversation_id") or "")[:64]
+        msg_id = (q.get("message_id") or "")[:64]
+
+        # PREFILLED FROM THE DATABASE, NOT FROM THE URL.
+        #
+        # These two fields used to arrive in the query string -- a
+        # thousand characters of the patron's question and two thousand of
+        # the answer, which is to say in the access log and in browser
+        # history. The ids are enough: they name the turn, and the turn
+        # holds the text.
+        #
+        # A query-string value is still honoured if one is present, for a
+        # link somebody bookmarked before 2026-09-01.
         prefill = {
             k: (q.get(k) or "")[:_PREFILL_MAX]
             for k in ("question", "bot_answer")
             if q.get(k)
         }
+        if msg_id and db is not None and not prefill:
+            prefill = await _prefill_from_turn(db, conv_id, msg_id)
         return HTMLResponse(render_form(
             key, prefill or None,
-            conversation_id=(q.get("conversation_id") or "")[:64],
+            conversation_id=conv_id,
             message_id=(q.get("message_id") or "")[:64],
         ))
 

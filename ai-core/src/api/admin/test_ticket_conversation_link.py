@@ -11,6 +11,8 @@ Both directions are tested: the ticket stores what it was given, and the
 detail page prefers the stored id over the guess.
 """
 
+import pytest
+
 import datetime as dt
 from types import SimpleNamespace as NS
 
@@ -207,3 +209,63 @@ def test_a_link_to_a_conversation_we_no_longer_hold_says_so():
     assert r.status_code == 200
     assert "no longer held" in r.text
     assert "c-gone" in r.text
+
+
+# --- the patron's typing does not travel in a URL -------------------------
+
+def test_the_report_link_carries_ids_not_the_patrons_words():
+    """It carried up to 1,000 characters of the question and 2,000 of the
+    answer in the query string -- which is to say in nginx's access log,
+    in browser history, and in the Referer of anything that page links
+    out to. A patron's typing is the field here most likely to hold
+    something personal, and PII has been an incident on this project
+    before."""
+    import inspect
+
+    from src.api.admin import review_view_router as RV
+
+    src = inspect.getsource(RV)
+    link = src[src.index("def _report_link"):]
+    link = link[:link.index("return (f\"<a class='btn ghost'")]
+    assert '"question"' not in link
+    assert '"bot_answer"' not in link
+    assert '"message_id"' in link, "the id is what replaces them"
+
+
+@pytest.mark.asyncio
+async def test_the_form_fills_itself_from_the_turn():
+    """The ids name the turn and the turn holds the text, so the form
+    still opens filled in and nothing is retyped."""
+    from src.api.admin.ticket_router import _prefill_from_turn
+
+    class _M:
+        def __init__(self, mid, typ, content):
+            self.id, self.type, self.content = mid, typ, content
+
+    class _DB:
+        class message:
+            @staticmethod
+            async def find_many(**kw):
+                return [_M("m1", "user", "when does King close"),
+                        _M("m2", "assistant", "King closes at 4pm."),
+                        _M("m3", "user", "and Saturday?")]
+
+    got = await _prefill_from_turn(_DB(), "c1", "m2")
+    assert got["question"] == "when does King close"
+    assert got["bot_answer"] == "King closes at 4pm."
+
+
+@pytest.mark.asyncio
+async def test_a_lookup_that_fails_opens_an_empty_form_not_a_500():
+    """A form that opens empty is a minor annoyance. A form that 500s is a
+    report nobody files."""
+    from src.api.admin.ticket_router import _prefill_from_turn
+
+    class _DB:
+        class message:
+            @staticmethod
+            async def find_many(**kw):
+                raise RuntimeError("db down")
+
+    assert await _prefill_from_turn(_DB(), "c1", "m2") == {}
+    assert await _prefill_from_turn(_DB(), "", "") == {}

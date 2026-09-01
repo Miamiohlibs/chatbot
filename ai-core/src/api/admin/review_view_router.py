@@ -411,12 +411,24 @@ def build_review_view_router(deps: dict) -> Any:
                 return ""
             from urllib.parse import urlencode
 
+            # THE IDS ONLY. The text is looked up on the other side.
+            #
+            # This carried up to 1,000 characters of the patron's question
+            # and 2,000 of the answer in the query string, which is to say
+            # in nginx's access log, in browser history, and in the Referer
+            # of anything that page links out to. A patron's typing is the
+            # single field here most likely to contain something personal,
+            # and it has been an incident on this project before.
+            #
+            # `message_id` fetches both at the far end, so the form still
+            # opens filled in and nothing is retyped. `prev_user` is kept
+            # in the signature because the caller computes it anyway and
+            # the next reader will wonder where the question went.
+            del prev_user
             qs = urlencode({
                 "key": lib_code,
                 "conversation_id": conversation_id,
                 "message_id": m.get("id") or "",
-                "question": (prev_user or "")[:1000],
-                "bot_answer": (m.get("content") or "")[:2000],
             })
             return (f"<a class='btn ghost' href='/librarian/ticket?{qs}' "
                     f"target='_blank' rel='noopener'>Report this answer</a>")

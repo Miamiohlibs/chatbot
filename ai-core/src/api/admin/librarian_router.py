@@ -59,10 +59,25 @@ logger = logging.getLogger(__name__)
 
 _NOINDEX = {"X-Robots-Tag": "noindex, nofollow, noarchive"}
 
-# How far back the quick ranges reach. Deliberately short: the question a
-# librarian arrives with is "what happened lately", and a year of history
-# on a 4 GB box is a page that takes ten seconds to draw.
-_RANGES = ((0, "Today"), (6, "Last 7 days"), (29, "Last 30 days"))
+# The day the bot opened to the public. "Everything" means everything
+# since then; there is nothing before it that a patron asked.
+LAUNCH_DAY = "2026-08-13"
+
+# Since launch is the DEFAULT, and the reason is the shape of the data
+# rather than a preference. Measured 2026-09-01: 778 conversations since
+# launch, of which 15 are real patrons -- 21 questions in nineteen days.
+# A seven-day default shows a department head two rows and reads as an
+# empty product; the whole history is one short page.
+_RANGES = ((None, "Since launch"), (0, "Today"),
+           (6, "Last 7 days"), (29, "Last 30 days"))
+
+# What a librarian may ask for in one go. The operator console's 31 days
+# bounds a read of EVERY message in the window, which is the right bound
+# there. Here the answer is fifteen conversations and the page is opened
+# a few times a week by eight people, so the ceiling is a year -- high
+# enough that "since launch" keeps meaning since launch for a year, low
+# enough that a hand-edited date cannot ask for a decade.
+_LIBRARIAN_MAX_SPAN = 400
 
 
 def _kq(key: str) -> str:
@@ -98,7 +113,7 @@ def render_list(rows: dict, *, key: str, day: str, day_to: str,
     today = today_local()
     chips = []
     for back, label in _RANGES:
-        frm = shift_day(today, -back)
+        frm = LAUNCH_DAY if back is None else shift_day(today, -back)
         on = " active" if (day == frm and day_to == today) else ""
         chips.append(f"<a class='tag{on}' href='/librarian/conversations"
                      f"?day={frm}&day_to={today}{_kq(key)}'>"
@@ -120,7 +135,7 @@ def render_list(rows: dict, *, key: str, day: str, day_to: str,
                 + "</tbody></table></div>")
 
     clamp = ("<p class='hint'>That range was longer than this page will "
-             "draw at once, so it was shortened.</p>"
+             "draw at once, so it shows the most recent part of it.</p>"
              if rows.get("clamped") else "")
 
     return ui.page(
@@ -201,16 +216,18 @@ def build_librarian_router(deps: dict):
                             page: int = 1, per: int = 50,
                             caller=Depends(guard)):
         today = today_local()
-        # Default to a week rather than to today. A subject librarian does
-        # not open this every morning; landing on an empty page because it
-        # is 9am is the version of this that gets bookmarked once and never
-        # opened again.
-        day = day or shift_day(today, -6)
+        # EVERYTHING SINCE LAUNCH, by default.
+        #
+        # It defaulted to a week, which on 2026-09-01 is two rows -- a
+        # department head opening this for the first time would see an
+        # almost blank page and conclude the bot is not being used. The
+        # whole history is fifteen conversations. Show it.
+        day = day or LAUNCH_DAY
         day_to = day_to or today
         page, per, offset = ui.page_bounds(page, per, per_max=200)
         rows = await list_conversations_on(
             db, day, day_to=day_to, limit=per, offset=offset,
-            real_patrons_only=True)
+            real_patrons_only=True, max_day_span=_LIBRARIAN_MAX_SPAN)
         return HTMLResponse(
             render_list(rows, key=key, day=day, day_to=day_to, caller=caller),
             headers=_NOINDEX)
