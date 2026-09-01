@@ -13,8 +13,8 @@
 ## What this document assumes
 
 - You have SSH root (or `sudo`) access to the prod server
-- The repo is checked out somewhere reachable on prod (typical: `/opt/chatbot/current/`)
-- The backend runs as a systemd service (typical: `smartchatbot-backend`)
+- The repo is checked out somewhere reachable on prod (typical: `/opt/chatbot/`)
+- The backend runs as a systemd service (typical: `chatbot`)
 - Nginx (or another reverse proxy) sits in front of the FastAPI backend
 
 If anything in this assumption list is wrong on your prod, adjust the commands but the structure still applies.
@@ -31,7 +31,7 @@ ssh root@<your-prod-host>
 hostname  # confirm it's prod, not staging
 
 # 2. Confirm the chatbot path
-ls -la /opt/chatbot/current/   # OR your install path
+ls -la /opt/chatbot/   # OR your install path
 
 # 3. Confirm the backend service name
 sudo systemctl list-units --type=service | grep -iE 'chatbot|smart'
@@ -54,7 +54,7 @@ When `ai-core/` has new commits on `main`.
 ```bash
 # 1. SSH in
 ssh root@<your-prod-host>
-cd /opt/chatbot/current
+cd /opt/chatbot
 
 # 2. Confirm you're on main + see what's coming
 git status              # expected: "On branch main" + clean
@@ -100,7 +100,7 @@ When `client/` has new commits. Requires Node.js + npm on prod (or build elsewhe
 
 ```bash
 # After pulling main (steps 1-3 above)
-cd /opt/chatbot/current/client
+cd /opt/chatbot/client
 npm install                       # idempotent; pulls any new dependencies
 npm run build                     # produces client/dist/
 
@@ -111,7 +111,7 @@ npm run build                     # produces client/dist/
 sudo rsync -avz --delete client/dist/ /var/www/chatbot/
 
 # Pattern B: served from inside the project itself
-# (no copy needed — uvicorn or nginx serves /opt/chatbot/current/client/dist/)
+# (no copy needed — uvicorn or nginx serves /opt/chatbot/client/dist/)
 
 # Pattern C: served via a separate CDN
 # Upload client/dist/ to your CDN bucket
@@ -130,7 +130,7 @@ After deploy, force-refresh a browser to pick up the new bundle (browsers cache 
 If `prisma/schema.prisma` was modified:
 
 ```bash
-cd /opt/chatbot/current
+cd /opt/chatbot
 npx prisma migrate deploy
 # Generates and applies pending migrations
 ```
@@ -138,7 +138,7 @@ npx prisma migrate deploy
 If you see "url is no longer supported" — the local Node Prisma CLI on prod has drifted to v7 while the project schema is v5/v6 format. Solution:
 ```bash
 # Pin Prisma CLI to a compatible version
-cd /opt/chatbot/current
+cd /opt/chatbot
 npm install --save-dev prisma@5.22.0   # match the version in package.json
 npx prisma migrate deploy
 ```
@@ -147,7 +147,7 @@ npx prisma migrate deploy
 
 ```bash
 # Source .env so DATABASE_URL is set
-set -a; source /opt/chatbot/current/.env; set +a
+set -a; source /opt/chatbot/.env; set +a
 
 # Use psql if available, else Python (asyncpg)
 psql "$DATABASE_URL" <<'SQL'
@@ -155,7 +155,7 @@ INSERT INTO "LibrarySpace_v2" (...) VALUES (...);
 SQL
 
 # Or via Python:
-/opt/chatbot/current/ai-core/.venv/bin/python <<'PY'
+/opt/chatbot/ai-core/.venv/bin/python <<'PY'
 import os, asyncio, asyncpg
 async def main():
     conn = await asyncpg.connect(os.environ['DATABASE_URL'])
@@ -172,7 +172,7 @@ See [07-DATA-PIPELINE.md](07-DATA-PIPELINE.md) for the actual MakerSpace insert 
 When `ai-core/src/eval/golden_set*.jsonl` files are updated, the operator-gold chunks need to be re-inserted into Weaviate:
 
 ```bash
-cd /opt/chatbot/current/ai-core
+cd /opt/chatbot/ai-core
 .venv/bin/python scripts/operator_wiring/wire_gold_to_weaviate.py
 # Takes ~1-2 minutes, costs <$0.01 in OpenAI embeddings
 # Idempotent: deletes prior operator-gold-* chunks, re-inserts fresh
@@ -199,7 +199,7 @@ If your deploy uses timestamped build directories (the typical setup):
 ls -lat /opt/chatbot/builds/ | head -5
 
 # Swap the symlink atomically
-sudo ln -sfn /opt/chatbot/builds/<PREVIOUS_TIMESTAMP>/ /opt/chatbot/current
+sudo ln -sfn /opt/chatbot/builds/<PREVIOUS_TIMESTAMP>/ /opt/chatbot
 
 # Restart
 sudo systemctl restart <service-name>
@@ -215,7 +215,7 @@ Use this for: "the new deploy broke something, get prod working immediately, deb
 If you can identify the bad commit but don't want to lose subsequent good commits:
 
 ```bash
-cd /opt/chatbot/current
+cd /opt/chatbot
 git log --oneline -10
 git revert <bad-commit-sha> --no-edit   # creates a new commit that reverses the bad one
 git push origin main                    # push the revert
@@ -230,7 +230,7 @@ If v2 is fundamentally broken and you need v1 back. Requires the cutover commit 
 
 ```bash
 # Revert the v2-cutover commit
-cd /opt/chatbot/current
+cd /opt/chatbot
 git revert 50963e6 --no-edit
 git push origin main
 sudo systemctl restart <service-name>
@@ -261,7 +261,7 @@ sudo systemctl restart <service-name>
 
 **Fix:**
 ```bash
-cd /opt/chatbot/current/ai-core
+cd /opt/chatbot/ai-core
 source .venv/bin/activate
 pip install --force-reinstall --no-cache-dir fastapi starlette
 sudo systemctl restart <service-name>
@@ -269,7 +269,7 @@ sudo systemctl restart <service-name>
 
 **Nuclear fix** if above doesn't work (5 minutes):
 ```bash
-cd /opt/chatbot/current/ai-core
+cd /opt/chatbot/ai-core
 sudo systemctl stop <service-name>
 mv venv venv.broken_$(date +%s)
 python3.13 -m venv venv
@@ -285,7 +285,7 @@ sudo systemctl start <service-name>
 
 **Fix:** Make sure frontend is built from latest main (which uses `/health/live`). If still hitting `/health`, rebuild client/:
 ```bash
-cd /opt/chatbot/current/client
+cd /opt/chatbot/client
 git pull origin main
 npm install
 npm run build
@@ -305,7 +305,7 @@ npm run build
 **Diagnosis:**
 - Check the key is still valid in the OpenAI dashboard
 - Check the org billing isn't over quota
-- Check the key has access to `gpt-5.4-mini` + `text-embedding-3-large`
+- Check the key has access to `gpt-5.6-terra` + `gpt-5.6-luna` + `text-embedding-3-large`
 
 **Not a deploy issue** — won't be fixed by restart. Update `OPENAI_API_KEY` in `.env` if rotated.
 
@@ -359,10 +359,10 @@ sudo tail -100 /var/log/smartchatbot_backend.error.log
 # /etc/cron.d/smart-chatbot
 
 # Weekly ETL: pulls library website, builds librarian-approval diff (does NOT auto-apply)
-0 2 * * 0 cd /opt/chatbot/current/ai-core && .venv/bin/python -m scripts.etl.run_etl --phase prepare 2>&1 | logger -t etl-prepare
+0 2 * * 0 cd /opt/chatbot/ai-core && .venv/bin/python -m scripts.etl.run_etl --phase prepare 2>&1 | logger -t etl-prepare
 
 # Daily cost rollup: aggregates ModelTokenUsage into DailyCost
-30 6 * * * cd /opt/chatbot/current/ai-core && .venv/bin/python -m scripts.cost_rollup 2>&1 | logger -t cost-rollup
+30 6 * * * cd /opt/chatbot/ai-core && .venv/bin/python -m scripts.cost_rollup 2>&1 | logger -t cost-rollup
 ```
 
 If these aren't running on your prod:

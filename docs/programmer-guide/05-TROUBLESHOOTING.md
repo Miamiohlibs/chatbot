@@ -25,7 +25,7 @@
 ### Symptom
 
 ```
-sudo systemctl status smartchatbot-backend
+sudo systemctl status chatbot
 ... Active: failed (Result: exit-code) ...
 ```
 
@@ -35,7 +35,7 @@ Or running uvicorn directly produces a traceback.
 
 ```bash
 # Get the actual error
-sudo journalctl -u smartchatbot-backend --since "10 min ago" --no-pager | tail -40
+sudo journalctl -u chatbot --since "10 min ago" --no-pager | tail -40
 
 # OR look at error log
 sudo tail -100 /var/log/smartchatbot_backend.error.log
@@ -109,7 +109,7 @@ Frontend bundle is OLD — built before the 2026-05-27 cutover when v2 was promo
 
 **Step 1:** Rebuild frontend from latest main.
 ```bash
-cd /opt/chatbot/current/client
+cd /opt/chatbot/client
 git pull origin main
 npm install
 npm run build
@@ -317,7 +317,7 @@ Prisma 7.x changed schema format. The `npx prisma` CLI auto-installed v7, but `p
 
 **Option A — Pin Prisma CLI to a compatible version:**
 ```bash
-cd /opt/chatbot/current
+cd /opt/chatbot
 npm install --save-dev prisma@5.22.0
 npx prisma migrate deploy
 ```
@@ -401,7 +401,7 @@ If this prints `True` + actual hours, the LibCal mapping works — the agent isn
 
 ### Symptom
 
-Eval prints `Weaviate unreachable -- the SSH tunnel is down. Verify with nc -z -w2 127.0.0.1 8888` and aborts.
+Eval prints `Weaviate unreachable -- the SSH tunnel is down. Verify with nc -z -w2 127.0.0.1 8888` and aborts. (8888 is the LOCAL end of the tunnel; the prod side is 8080 — see 02-LOCAL-DEVELOPMENT.)
 
 ### Cause
 

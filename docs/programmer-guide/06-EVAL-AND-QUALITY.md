@@ -311,7 +311,7 @@ If you change bot behavior specifically to make the judge happier — but the ch
 | Action | Cost (approx) |
 |---|---|
 | Single embedding call | $0.00001 |
-| Single agent turn (gpt-5.4-mini, ~1.5k cached + 0.5k uncached + 100 output) | $0.005 |
+| Single agent turn (`gpt-5.6-terra`, ~1.5k cached + 0.5k uncached + 100 output) | ~$0.014 |
 | Single synth turn | $0.005 |
 | Single judge call (3-shot majority) | $0.02 |
 | Full 271-case eval with `--with-real-llm --with-judge` | ~$5 |

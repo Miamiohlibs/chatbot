@@ -8,7 +8,7 @@
 |---|---|---|
 | **Python 3.13+** | Backend | `python3 --version` |
 | **Node.js 18+** | Frontend | `node --version` |
-| **OpenAI API key** | LLM calls | You'll need a key with `gpt-5.4-mini` + `gpt-5.2` + `text-embedding-3-large` access |
+| **OpenAI API key** | LLM calls | You'll need a key with `gpt-5.6-terra` + `gpt-5.6-luna` + `text-embedding-3-large` access |
 | **SSH access to prod Postgres + Weaviate** | OR your own local instances | Ask Meng for tunnel credentials |
 | **(optional) Postgres + Weaviate locally** | If you don't want the tunnel | docker-compose.weaviate.local.yml is in the repo root |
 
@@ -34,11 +34,15 @@ credential. Skip it and you are committing with no check at all.
 
 ### 2. Set up the SSH tunnels (if using prod data)
 
-The bot reaches Postgres on `127.0.0.1:5432` and Weaviate on `127.0.0.1:8888`. You need an SSH tunnel that forwards these from your prod (or staging) server:
+The bot reaches Postgres on `127.0.0.1:5432` and Weaviate on `127.0.0.1:8888`
+through the tunnel. **On prod, Weaviate listens on 8080** — 8888 is only the
+local end of the tunnel, chosen so it does not clash with a local 8080. The
+tunnel command below mapped 8888→8888 until 2026-09-01, which could never
+have connected. You need an SSH tunnel that forwards these from your prod (or staging) server:
 
 ```bash
 # In a dedicated terminal — leave it running
-ssh -L 5432:localhost:5432 -L 8888:localhost:8888 your-user@your-prod-host
+ssh -L 5432:localhost:5432 -L 8888:localhost:8080 your-user@your-prod-host
 ```
 
 Verify:

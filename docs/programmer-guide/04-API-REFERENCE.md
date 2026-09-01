@@ -58,7 +58,7 @@ The bot's answer.
   "confidence": "high",
   "intent": "hours",
   "scope": {"campus": "oxford", "library": "king"},
-  "model_used": "gpt-5.4-mini",
+  "model_used": "gpt-5.6-terra",
   "tokens": {"input": 1450, "cached_input": 1200, "output": 35},
   "fired_corrections": [],
   "agent_stopped_reason": "clean",
@@ -77,7 +77,7 @@ The bot's answer.
   "confidence": "low",
   "intent": "hours",
   "scope": {"campus": "hamilton", "library": "rentschler"},
-  "model_used": "gpt-5.4-mini",
+  "model_used": "gpt-5.6-terra",
   "tokens": {"input": 1450, "cached_input": 1200, "output": 12},
   "fired_corrections": [],
   "agent_stopped_reason": "synth_low_confidence",
@@ -95,7 +95,7 @@ The bot's answer.
 | `confidence` | "high"\|"medium"\|"low" | Synthesizer's self-assessment. "low" auto-downgrades to refusal in post-processor. |
 | `intent` | string | The kNN classifier's verdict |
 | `scope` | object | Resolved campus+library |
-| `model_used` | string | Which LLM (gpt-5.4-mini default; gpt-5.2 escalation for hard cases) |
+| `model_used` | string | Which LLM. `gpt-5.6-luna` for the synthesizer and surface questions, `gpt-5.6-terra` for the agent loop and escalation. At 85% of the students' purse the budget guard forces terra down to luna, so this field is also how you tell the bot is throttled. |
 | `tokens` | object | For cost tracking |
 | `fired_corrections` | array of int | IDs of any `ManualCorrection` rows that affected this turn |
 | `agent_stopped_reason` | string | `clean` / `max_iters` / `loop_detected` / `tool_failures` / `synth_low_confidence` / `capability_limitation` etc |
@@ -210,7 +210,7 @@ The bot itself authenticates outbound calls:
 - LibGuides: OAuth client credentials in `.env`
 - Postgres / Weaviate: connection strings in `.env`
 
-`.env` is **not** checked into git. On prod, it lives at `/opt/chatbot/current/.env` (or wherever your deploy puts it) and must be readable by the user running uvicorn.
+`.env` is **not** checked into git. On prod, it lives at `/opt/chatbot/.env` (or wherever your deploy puts it) and must be readable by the user running uvicorn.
 
 ---
 

@@ -162,10 +162,12 @@ nginx forwards `/health/*` and `/smartchatbot/socket.io` to `:8081`; `classifier
 
 </details>
 
-### C4. 🟠 nginx `location /health` block + `ADMIN_API_TOKEN` on prod
-**What.** Two ops tasks owned by Rachel: (a) nginx must forward `/health/*` to `localhost:8081` (frontend liveness probe depends on `/health/live`); (b) set `ADMIN_API_TOKEN` env so the Op 1 review surface mounts (it fail-closes when unset, which is why `/admin/review` 404s today).
-
-**Effort.** Ops, ~30 min. Not code.
+### ~~C4. nginx `location /health` block + `ADMIN_API_TOKEN` on prod~~ — DONE
+*(Both landed long ago; `/health/*` is proxied and `/admin/review` has not
+404'd since. Part (b) is now superseded entirely: the console moved to
+Miami single sign-on on 2026-09-01 and `ADMIN_API_TOKEN` is refused unless
+`SSO_ALLOW_TOKEN_FALLBACK=true`. Closed 2026-09-01 during a docs audit —
+it had been sitting open as an "owned by Rachel" task that was not.)*
 
 ---
 

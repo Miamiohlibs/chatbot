@@ -51,7 +51,7 @@ Suppose Miami adds a new branch. Steps:
 
 2. **Insert into `LibrarySpace_v2`:**
    ```bash
-   set -a; source /opt/chatbot/current/.env; set +a
+   set -a; source /opt/chatbot/.env; set +a
    psql "$DATABASE_URL" <<'SQL'
    INSERT INTO "LibrarySpace_v2" (
      id, library, campus, name, building_role,
@@ -187,7 +187,7 @@ To rebuild from scratch with a new collection name:
 When `golden_set*.jsonl` files change:
 
 ```bash
-cd /opt/chatbot/current/ai-core
+cd /opt/chatbot/ai-core
 .venv/bin/python scripts/operator_wiring/wire_gold_to_weaviate.py
 ```
 
@@ -240,7 +240,7 @@ Two phases: `--phase prepare` (compute diff, do NOT apply) and `--phase apply` (
 ### Run the prepare phase manually
 
 ```bash
-cd /opt/chatbot/current/ai-core
+cd /opt/chatbot/ai-core
 .venv/bin/python -m scripts.etl.run_etl --phase prepare
 # Outputs:
 #   data/diffs/<date>.md       — summary for the librarian
@@ -365,15 +365,25 @@ pg_dump "$DATABASE_URL" > backup_$(date +%Y%m%d).sql
 
 ### Weaviate
 
-Snapshot the whole collection before any major change:
+> **This does not work, and never did on this host.** The backup module is
+> not enabled on our container (`ENABLE_MODULES=` is empty), so the endpoint
+> rejects the call — verified 2026-09-01, it returns 422. Enabling it needs a
+> restart with `ENABLE_MODULES=backup-filesystem`, which is an operator
+> decision. See [../OPS-BACKUP.md](../OPS-BACKUP.md), which has the accurate
+> account: **the corpus has no backup, and that is a known gap.**
+>
+> What actually protects you is that every `apply` builds a NEW collection
+> and leaves the old ones in place. Rolling back is
+> `WEAVIATE_CHUNK_COLLECTION` plus a restart, not a restore.
+
+Kept for the day the module is switched on (note the port: 8080 on prod,
+8888 only if you are reaching it through the tunnel):
+
 ```bash
-# Via Weaviate's backup API
-curl -X POST http://localhost:8888/v1/backups/filesystem \
+curl -X POST http://localhost:8080/v1/backups/filesystem \
   -H 'Content-Type: application/json' \
   -d '{"id":"snapshot-'"$(date +%Y%m%d)"'","include":["'"$WEAVIATE_CHUNK_COLLECTION"'"]}'
 ```
-
-Restore is the inverse with the backup ID.
 
 ### What to back up before a major change
 

@@ -197,22 +197,30 @@ The match logic (when implemented in the admin UI):
 - OR user message contains a course / dept / major code in this librarian's subjects
 - OR conversation's `scope.campus` matches this librarian's `campus` (regional librarians see their campus's traffic by default)
 
-### MVP without admin UI (Metabase / shared spreadsheet)
+### There is an admin console now — use it
 
-For phase-1 ops before a real admin UI exists, librarians use Metabase saved queries:
+**This section described a Metabase/spreadsheet workaround "for phase-1 ops
+before a real admin UI exists". That UI has existed since June 2026, and
+the SQL printed here referenced five columns `Message` does not have
+(`created_at`, `user_message`, `bot_answer`, `cited_chunk_ids`,
+`refusal_trigger`) — it could only ever have errored.**
 
-```sql
--- My subject's recent dialogs (librarian fills in their subject IDs)
-SELECT m.id, m.created_at, m.user_message, m.bot_answer, m.cited_chunk_ids, m.refusal_trigger
-FROM "Message" m
-JOIN "ChunkProvenance" cp ON cp.chunk_id = ANY(m.cited_chunk_ids)
-WHERE cp.source_url IN (SELECT url FROM "LibGuide" WHERE id IN (SELECT "libGuideId" FROM "LibGuideSubject" WHERE "subjectId" = <YOUR_SUBJECT_ID>))
-  AND m.created_at > NOW() - INTERVAL '7 days'
-ORDER BY m.created_at DESC
-LIMIT 100;
-```
+The real columns are `type`, `content`, `timestamp`, `intent`,
+`scopeCampus`, `modelUsed`, `isPositiveRated`. A worked query against them
+is in [../09-TEAM-MAINTENANCE-GUIDE.md](../09-TEAM-MAINTENANCE-GUIDE.md)
+§5, with its real output.
 
-Verdict submission: librarian adds a row to a shared Google Sheet with conversation ID + verdict. Periodically synced into a `LibrarianReview` Postgres table.
+Where to go instead:
+
+| You want | Go to |
+|---|---|
+| Every conversation, filterable by day | `/admin/conversations` |
+| What patrons asked, for a department head | `/librarian/` → "What patrons asked" (needs a Miami sign-in) |
+| The correction queue | `/admin/corrections/view` |
+| Spend | `/admin/cost` |
+
+Access is Miami single sign-on since 2026-09-01; see
+[../02-ENVIRONMENT-VARIABLES.md](../02-ENVIRONMENT-VARIABLES.md).
 
 ### Weekly digest email
 
@@ -224,30 +232,61 @@ If this isn't running on your prod, set up the cron.
 
 ---
 
-## Scheduled jobs (cron)
+## Scheduled jobs
+
+**Rewritten 1 September 2026. What was here before described a file that
+does not exist (`/etc/cron.d/smart-chatbot`), under a path that does not
+exist (`/opt/chatbot/`), running a script that does not exist
+(`expire_corrections.py`), at times none of the real jobs use — while
+omitting every job that actually runs, including the backup and the
+watchdog.** Verified below against `crontab -l` and `systemctl`.
+
+There are two schedulers, deliberately.
+
+### 1. Everything the bot MAILS — one systemd timer, 09:30 America/New_York
+
+`chatbot-morning.timer` → `ai-core/scripts/morning_jobs.sh`.
+
+| Job | When |
+|---|---|
+| `scripts.data_health --quiet` | daily — sent every morning, all-clear included |
+| `scripts.alert_digest` | daily — every other queued alert, including a failed backup |
+| `scripts.etl_watch` | Mondays — website-change watch |
+| `scripts.budget_report --email` | Mondays, and again on the 1st |
+
+Not cron, because the box runs UTC and Ubuntu's cron cannot schedule in
+another timezone — a fixed UTC time would be 09:30 in summer and 08:30 in
+winter. `Persistent=true` also catches up after downtime.
+
+```bash
+systemctl list-timers chatbot-morning.timer --no-pager
+sudo -u root bash /opt/chatbot/ai-core/scripts/morning_jobs.sh --dry-run
+```
+
+The dry run **exits non-zero and that is correct** — the jobs underneath
+treat a suppressed send as a failed send.
+
+**A morning with no data-health email means the job did not run**, not
+that everything is fine.
+
+### 2. Everything that must NOT wait for business hours — root crontab
 
 ```cron
-# /etc/cron.d/smart-chatbot
-
-# Weekly ETL prepare (Sunday 2 AM)
-0 2 * * 0 cd /opt/chatbot/current/ai-core && .venv/bin/python -m scripts.etl.run_etl --phase prepare 2>&1 | logger -t etl-prepare
-
-# Daily cost rollup (6:30 AM)
-30 6 * * * cd /opt/chatbot/current/ai-core && .venv/bin/python -m scripts.cost_rollup 2>&1 | logger -t cost-rollup
-
-# Weekly librarian digest (Monday 8 AM)
-0 8 * * 1 cd /opt/chatbot/current/ai-core && .venv/bin/python -m scripts.digest_email 2>&1 | logger -t digest-email
-
-# Daily ManualCorrection expiry check (8 AM)
-0 8 * * * cd /opt/chatbot/current/ai-core && .venv/bin/python -m scripts.expire_corrections 2>&1 | logger -t expire-corrections
+*/5  * * * *   scripts.liveness_watchdog --try-restart   # restarts if systemd gave up
+*/15 * * * *   scripts.budget_guard                      # decide the spend level
+0 2  * * *     scripts.cost_rollup                       # must finish before the morning reports read it
+30 3 * * *     scripts.backup_db --quiet                 # pg_dump, out of the hours students ask
 ```
 
-To verify cron is set up:
+Each is wrapped so it loads `/opt/chatbot/.env` first and appends to
+`ai-core/logs/<name>.log`. To see them exactly as installed:
+
 ```bash
 sudo crontab -l
-ls -la /etc/cron.d/
-sudo journalctl -t etl-prepare --since "30 days ago" --no-pager | tail -20
 ```
+
+**Note:** `scripts/digest_email.py` exists but nothing schedules it;
+`scripts.alert_digest` is the one that runs.
 
 ---
 
@@ -256,8 +295,8 @@ sudo journalctl -t etl-prepare --since "30 days ago" --no-pager | tail -20
 ### OpenAI
 
 1. Generate new key in OpenAI dashboard
-2. Update `OPENAI_API_KEY` in `/opt/chatbot/current/.env`
-3. Restart backend: `sudo systemctl restart smartchatbot-backend`
+2. Update `OPENAI_API_KEY` in `/opt/chatbot/.env`
+3. Restart backend: `sudo systemctl restart chatbot`
 4. Verify with a smoke test
 5. After confirming new key works, revoke old key
 
@@ -277,8 +316,8 @@ sudo journalctl -t etl-prepare --since "30 days ago" --no-pager | tail -20
 ### .env file permissions
 
 ```bash
-chmod 600 /opt/chatbot/current/.env
-chown <service-user>:<service-user> /opt/chatbot/current/.env
+chmod 600 /opt/chatbot/.env
+chown <service-user>:<service-user> /opt/chatbot/.env
 ```
 
 Only the service user should be able to read it.
@@ -291,19 +330,30 @@ Only the service user should be able to read it.
 |---|---|---|
 | `/health/live` p50 | <10ms | >50ms |
 | `/health/live` p99 | <50ms | >200ms |
-| Chat turn p50 | 2-5s | >10s |
-| Chat turn p99 | 5-15s | >30s |
+| Chat turn p50 | ~7s | >15s |
+| Chat turn p99 | 15-25s | >40s |
 | OpenAI input tokens / turn | 1.5k-3k | >5k |
 | Cache hit rate | 70-85% | <60% |
 | Refusal rate | 15-25% | >40% |
-| Per-day OpenAI cost (production traffic) | $5-30 | >$100 |
+| Per-day OpenAI cost (real student traffic) | **$0.05–0.20** | **>$1.33** |
 | New `ManualCorrection`/week | <10 | >30 |
+
+**The cost row was `$5-30/day, concerning above $100` until 2026-09-01.
+That was never true of this deployment and is now actively misleading:
+the students' purse is $40 for the WHOLE MONTH, so the guard's daily line
+is $1.33 and it starts throttling above it.** Real traffic runs about
+$3/month. If you see $5 in a day, something is wrong — that is not a
+healthy range, it is four days of the month's money.
+
+Turn latency: ~7s is normal and ~25s is normal *during a corpus apply*,
+which is memory-bound on this box. See
+[../AWS-CAPACITY-REQUEST.md](../AWS-CAPACITY-REQUEST.md).
 
 If you're outside the healthy range, the next step depends:
 - High latency → check Weaviate health, LibCal latency, OpenAI rate limits
 - Low cache hit → prompt prefix is drifting; check `prompts/builder.py` byte-stability assertion
 - High refusal rate → either the corpus is missing content, OR a recent prompt change made the bot too conservative
-- High cost → check for prompt regression, tool-call retry loops, or traffic spike
+- High cost → check for prompt regression, tool-call retry loops, or traffic spike. `budget_guard.py --dry-run` prints the live position and is safe to run any time; the ladder is in [../BUDGET.md](../BUDGET.md)
 - High correction count → bot quality is degrading; investigate which categories are misfiring
 
 ---
@@ -313,7 +363,7 @@ If you're outside the healthy range, the next step depends:
 If "everything is broken" on a Tuesday morning:
 
 1. **Don't panic.** Symlink swap is always available (Option 1 in [03-DEPLOYMENT.md](03-DEPLOYMENT.md)).
-2. **Roll back to last known good build:** `sudo ln -sfn /opt/chatbot/builds/<previous>/ /opt/chatbot/current && sudo systemctl restart smartchatbot-backend`.
+2. **Roll back to last known good build:** `sudo ln -sfn /opt/chatbot/builds/<previous>/ /opt/chatbot && sudo systemctl restart chatbot`.
 3. **Verify:** `/smoketest` + sanity-check a few questions in the browser.
 4. **Then debug:** what changed in the bad build? `git log` between the two timestamps.
 

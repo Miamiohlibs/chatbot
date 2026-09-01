@@ -110,7 +110,10 @@ For `intent=hours`, the tier is READY → agent runs.
 #### Step 5 — Agent loop
 File: `src/agent/agent.py` + `src/prompts/agent_v1.py`
 
-A single tool-calling LLM (`gpt-5.4-mini`) with these tools:
+A single tool-calling LLM (`gpt-5.6-terra`, the reasoning tier) with these
+ten tools. The three **action** tools at the bottom were missing from this
+table until 2026-09-01 — they are the ones that do something in the world
+rather than read:
 
 | Tool | What it does |
 |---|---|
@@ -119,8 +122,11 @@ A single tool-calling LLM (`gpt-5.4-mini`) with these tools:
 | `lookup_space(library\|name)` | Postgres LibrarySpace_v2 lookup. Returns address, phone, services_offered, equipment, libcal_id. |
 | `get_hours(library, date)` | Live LibCal API. Returns formatted hours string. |
 | `get_room_availability(library, date)` | Live LibCal API. Returns time slots. |
-| `point_to_url(service)` | Returns canonical form/page URL for ILL, account, etc. |
+| `point_to_url(service)` | Returns canonical form/page URL for ILL, account, etc. Returns a URL; never acts for the patron. |
 | `validate_url(url)` | Checks Postgres UrlSeen allowlist. |
+| `book_room(...)` | **Action.** Reserves a room through LibCal. |
+| `create_ticket(...)` | **Action.** Opens a LibAnswers ticket. |
+| `handoff_human(...)` | **Action.** Hands the conversation to Ask Us. |
 
 The agent's system prompt (Core Rule 6) tells it to PREFER specific tools by intent:
 - `intent=hours → get_hours()`
@@ -135,7 +141,7 @@ For King hours: agent calls `get_hours("king")` → LibCal returns this week's h
 #### Step 6 — Synthesizer
 File: `src/synthesis/synthesizer.py` + `src/prompts/synthesizer_v1.py`
 
-A separate LLM call (`gpt-5.4-mini`) with the evidence bundle the agent collected + the user's question. Returns structured JSON:
+A separate LLM call (`gpt-5.6-luna`, the basic tier) with the evidence bundle the agent collected + the user's question. Returns structured JSON:
 
 ```json
 {
@@ -234,7 +240,7 @@ Production server (`ulblwebp20`) layout:
 
 Each deploy creates a new timestamped directory (likely by CI). `current` symlink is atomically swapped to point at the new build. Rollback = swap symlink back + restart service. See [03-DEPLOYMENT.md](03-DEPLOYMENT.md).
 
-The systemd service runs uvicorn pointing at `/opt/chatbot/current/...`. So a symlink swap + restart = full rollback.
+The systemd service runs uvicorn pointing at `/opt/chatbot/...`. So a symlink swap + restart = full rollback.
 
 ---
 

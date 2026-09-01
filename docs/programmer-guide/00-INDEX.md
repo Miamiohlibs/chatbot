@@ -2,6 +2,10 @@
 
 **Audience:** any engineer who needs to develop, deploy, troubleshoot, or extend the Miami University Libraries Smart Chatbot. Assumes you have read nothing else about this project.
 
+**Last verified against the running system: 1 September 2026.** No file in
+this guide carried a date before then; several had drifted badly enough to
+send a reader to a dead port or a deleted file.
+
 **Status:** v2 (the rebuild). Replaces the original v1 LangGraph-based bot that was blocked from production launch in late 2025 due to hallucination issues. v2 was promoted to the only production handler on 2026-05-27.
 
 ---
@@ -34,7 +38,7 @@ If a sysadmin asks "how do I deploy?" — send them [03-DEPLOYMENT.md](03-DEPLOY
 
 ## Critical facts (read at minimum, even if you skip everything else)
 
-1. **The bot is "v2".** v1 still exists in the codebase as dead code (legacy `sio` Socket.IO handler), but every Socket.IO request is routed to v2. To re-enable v1, you would need to revert commit `50963e6` and the frontend RolloutFlag.
+1. **The bot is "v2", and v1 is gone.** It was *deleted* on 2026-07-17, not left as dead code — `src/graph/orchestrator.py`, the legacy `sio` handler and `client/src/services/RolloutFlag.js` no longer exist. There is no flag to flip and nothing to revert to; the references to them in this guide were stale. See `docs/MAINTENANCE-2026-07-17-overnight.md` for what that removal took out.
 
 2. **Tools are wired in two places** — both must be done or the agent can't use them:
    - **Backend implementation** in `ai-core/src/eval/real_backends.py` (used by eval; mirrored by `ai-core/src/graph/v2_serving.py` for prod)
@@ -73,9 +77,8 @@ chatbot/
 │   ├── src/
 │   │   ├── main.py               # ASGI app entry, mounts everything
 │   │   ├── graph/
-│   │   │   ├── new_orchestrator.py   # The v2 turn pipeline
-│   │   │   ├── v2_serving.py         # Socket.IO bridge for v2
-│   │   │   └── orchestrator.py       # LEGACY v1 — unused but loaded
+│   │   │   ├── new_orchestrator.py   # The v2 turn pipeline (75 stages)
+│   │   │   └── v2_serving.py         # Socket.IO bridge for v2
 │   │   ├── agent/                # Tool-calling agent
 │   │   ├── synthesis/            # Synthesizer + post-processor (citation/URL/typo gates)
 │   │   ├── router/
@@ -105,8 +108,7 @@ chatbot/
 ├── client/                       # React frontend (Vite)
 │   └── src/
 │       ├── App.jsx
-│       ├── context/SocketContextProvider.jsx
-│       └── services/RolloutFlag.js   # v2 flag resolver (now returns canonical path always)
+│       └── context/SocketContextProvider.jsx
 ├── prisma/
 │   └── schema.prisma             # Database schema
 └── docs/programmer-guide/        # ← you are here
@@ -118,14 +120,14 @@ chatbot/
 
 | Term | Meaning |
 |---|---|
-| **v1** | Original chatbot, LangGraph-routed, 6 specialized agents. Dead code now. |
+| **v1** | Original chatbot, LangGraph-routed, 6 specialized agents. **Deleted 2026-07-17** — not dead code, gone. |
 | **v2** | Current chatbot. Single tool-calling agent + structured synthesizer + post-processor. |
-| **kNN classifier** | Intent classifier using embedding nearest-neighbor against ~5,400 labeled exemplars. No LLM. |
+| **kNN classifier** | Intent classifier using embedding nearest-neighbor against ~5,900 labeled exemplars. No LLM. |
 | **operator-gold chunks** | Weaviate chunks created from gold-set questions + verified answers. Highest-priority retrieval source. |
 | **ManualCorrection** | Postgres table where librarians flag bad answers; bot reads this every turn to override / suppress / pin chunks. No deploy required. |
 | **LibCal** | Springshare's library scheduling system. Source of truth for hours, room availability. We have OAuth credentials in `.env`. |
 | **LibGuides** | Springshare's library guides system. Source of truth for subject librarians. API in `_bridge` pattern. |
-| **Weaviate** | Vector DB on prod, port 8888. Holds prose chunks (web pages, LibGuide content). |
+| **Weaviate** | Vector DB on prod, port **8080** (this guide said 8888 until 2026-09-01; nothing listens there). Holds prose chunks (web pages, LibGuide content). |
 | **Postgres** | Primary RDB. Truth for librarians, library spaces, conversations, manual corrections, URL allowlist. |
 | **Async bridge** | The pattern in `real_backends.py` (`_AsyncBridge`) — one persistent asyncio loop on a daemon thread so legacy tools' singleton clients (Prisma, LocationService) don't get orphaned. |
 | **Operator** | The product owner (Meng). Approves design decisions, gold-set rewrites. |
