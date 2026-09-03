@@ -108,8 +108,14 @@ would configure a dead endpoint.
   door open. The consequence is real and current: **nobody can reach
   `/admin/*` until IT finishes.** Setting it back to `true` and
   restarting reopens the shared key in about a minute — no deploy.
-- **Nobody has ever completed a sign-in**, so nothing about the IdP side
-  is confirmed working.
+- ~~Nobody has ever completed a sign-in.~~ **Confirmed working 2026-09-03
+  17:43**, by Eboney Kimbrough (`kimbroe`, ITS). Eighteen attempts failed
+  first, every one of them an `invalid_response` / `Responder` status —
+  the IdP reporting its own error, not a rejection of anything we sent.
+
+  **This also settles the signing question: our UNSIGNED AuthnRequest was
+  accepted.** The correction above is still worth sending for the record,
+  but it is no longer a suspected blocker — it was never the problem.
 
 ### Who is on the list
 

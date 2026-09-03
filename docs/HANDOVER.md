@@ -250,7 +250,7 @@ department heads start using the console.
 Sections A, B and C above. Not repeated here so the two cannot drift apart.
 
 Everything all three share: **how you get into the console changed on
-2026-09-01.** It is Miami single sign-on now — `SSO_ALLOW_TOKEN_FALLBACK=false`,
+2026-09-01, and as of 2026-09-03 it works.** It is Miami single sign-on now — `SSO_ALLOW_TOKEN_FALLBACK=false`,
 so `ADMIN_API_TOKEN` is refused. Miami IT has not finished their side, so
 today nobody can get in at all; see
 [09-TEAM-MAINTENANCE-GUIDE.md](./09-TEAM-MAINTENANCE-GUIDE.md) §7.

@@ -354,7 +354,14 @@ and this one win — they were measured, not remembered.
 
 Stated because the alternative is you finding out during an incident.
 
-- **Single sign-on has never completed once**, end to end, by anybody.
+- ~~Single sign-on has never completed once.~~ **It works, since
+  2026-09-03 17:43.** Miami IT completed a full round trip: our unsigned
+  AuthnRequest was accepted, the assertion validated, the uid extracted.
+  It took her eight failed attempts over three hours, all of them
+  `Responder` errors — the IdP's own status code for "my side broke", not
+  ours. What is still untested is a sign-in by somebody who is actually on
+  the access list, i.e. landing on the console rather than on the
+  not-on-the-list page.
 - **The restore half of the backup.** Backups run nightly and verify
   their own dump; nobody has restored one into a running system.
 - **The stop button in anger.** It has been tested; it has never been
