@@ -107,6 +107,33 @@ def build_sso_router(cfg: SSOConfig) -> Any:
             req["post_data"] = post_data
         return OneLogin_Saml2_Auth(req, saml_settings(cfg))
 
+    def _describe_attrs(attrs: dict) -> str:
+        """What the IdP actually released, for the service log.
+
+        WHY: until a sign-in completes we are guessing what Miami sends. The
+        only place attribute names were logged was the no-uid failure branch,
+        so a SUCCESSFUL sign-in told us nothing -- and "is muohioeduDepartmentCode
+        being released?" is exactly the question the operator is testing.
+
+        NAMES always; VALUES only for group codes (affiliation / department /
+        entitlement / member). Those are the ones an access rule is written
+        against, and they are organisational labels rather than personal data.
+        A name, an address or a title is nobody's business in a log line that
+        gets grepped and pasted into tickets.
+        """
+        out = []
+        for k in sorted(attrs):
+            short = k.rsplit(":", 1)[-1]
+            if any(w in short.lower() for w in
+                   ("affiliation", "department", "entitlement", "member")):
+                v = attrs.get(k)
+                if isinstance(v, (list, tuple)):
+                    v = ",".join(str(x) for x in v)
+                out.append(f"{short}={v}")
+            else:
+                out.append(short)
+        return "; ".join(out) if out else "(none)"
+
     @router.get("/metadata")
     async def metadata() -> Response:
         from onelogin.saml2.settings import OneLogin_Saml2_Settings  # noqa: WPS433
@@ -181,7 +208,8 @@ def build_sso_router(cfg: SSOConfig) -> Any:
         # somebody else could have influenced on the way out.
         target = safe_next(post_data.get("RelayState"))
         name = display_name_from_attributes(attrs)
-        logger.info("SSO sign-in: uid=%s%s", uid, f" ({name})" if name else "")
+        logger.info("SSO sign-in: uid=%s%s | released: %s", uid,
+                    f" ({name})" if name else "", _describe_attrs(attrs))
 
         resp = RedirectResponse(target, status_code=303)
         token = issue_session(uid, cfg)
