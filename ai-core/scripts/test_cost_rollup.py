@@ -144,7 +144,7 @@ def test_rollup_usd_computed_on_aggregates_not_per_row() -> None:
     out = rollup_by_model(rows, date(2026, 4, 25))[0]
     # No call_site set -> all bucket to (gpt-5.6-luna, "unknown").
     assert out.call_site == "unknown" and out.call_count == 3
-    expected = 1_000_000 * 0.75 / 1_000_000  # verified input $0.75/1M
+    expected = 1_000_000 * 0.20 / 1_000_000  # luna input $0.20/1M
     assert abs(out.usd - expected) < 1e-12
 
 
