@@ -109,7 +109,14 @@ def _apply(response: Response, origin: str) -> Response:
         response.headers["Vary"] = "Origin"
     # The app-wide middleware sets this; on a public endpoint it is
     # misleading at best. Say what we mean: no credentials here.
-    response.headers.pop("Access-Control-Allow-Credentials", None)
+    #
+    # `del`, not `.pop()` -- MutableHeaders has no pop, and calling it
+    # raised AttributeError on every /health/ready request that carried an
+    # Origin. That shipped, because the inline check before deploying
+    # exercised origin_allowed() and is_cors_path() and never once ran
+    # _apply(). Deleting a key that is not there is a no-op here, so no
+    # guard is needed.
+    del response.headers["Access-Control-Allow-Credentials"]
     return response
 
 
