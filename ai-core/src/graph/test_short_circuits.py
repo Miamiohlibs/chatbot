@@ -6052,3 +6052,46 @@ class TestTheDeanMatcherKnowsTheOrdinaryPhrasings:
         from src.graph.new_orchestrator import _DEAN_RE
 
         assert not _DEAN_RE.search(q), q
+
+# --- a week's hours are not a standing timetable -------------------------
+
+_MAKERSPACE_WEEK_PLAIN_ROWS = """Monday (2026-08-31): 9:00am to 5:00pm
+Tuesday (2026-09-01): 9:00am to 5:00pm
+Wednesday (2026-09-02): 9:00am to 7:00pm
+Thursday (2026-09-03): 9:00am to 7:00pm
+Friday (2026-09-04): 9:00am to 5:00pm
+Saturday (2026-09-05): closed
+Sunday (2026-09-06): closed"""
+
+
+def test_week_span_names_the_dates_the_hours_cover():
+    """_week_rows always carried the ISO date and every caller dropped it.
+
+    Operator, 2026-09-04: the MakerSpace answer said "closed Saturday and
+    Sunday" as though that were the rule. LibCal has it closed on Sunday 6
+    September and open 12:00pm-4:00pm on Sunday 13 September, so the
+    sentence was true when generated and wrong a week later, with nothing
+    in it to say which Sunday it meant.
+    """
+    from src.graph.new_orchestrator import _week_span
+
+    assert _week_span(_MAKERSPACE_WEEK_PLAIN_ROWS) == "31 Aug - 6 Sep"
+    # Same month collapses; a single row still reads; junk gives up.
+    assert _week_span("Monday (2026-09-07): x\nSunday (2026-09-13): y") == "7-13 Sep"
+    assert _week_span("Monday (2026-09-07): x") == "7 Sep"
+    assert _week_span("") is None
+    assert _week_span("no dated rows here") is None
+
+
+def test_collapse_week_is_unchanged_by_the_date_qualifier():
+    """The qualifier belongs to the sentence, not to the day-collapsing.
+
+    Kept separate so the wording change cannot quietly alter which days
+    are reported -- that logic has its own bugs on record.
+    """
+    from src.graph.new_orchestrator import _collapse_week
+
+    out = _collapse_week(_MAKERSPACE_WEEK_PLAIN_ROWS)
+    assert "Monday and Tuesday, 9:00am to 5:00pm" in out
+    assert "closed Saturday and Sunday" in out
+

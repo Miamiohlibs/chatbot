@@ -8532,6 +8532,34 @@ def _sentence_case(text: str) -> str:
     return text[:1].upper() + text[1:] if text else text
 
 
+def _week_span(hours_text: str) -> "Optional[str]":
+    """"31 Aug - 6 Sep" for the week this hours text covers, or None.
+
+    WHY THIS EXISTS: _week_rows already carries the ISO date of every row
+    and every caller threw it away, so a week's schedule was stated as if
+    it were the standing one. The MakerSpace is the case that proved it
+    costly -- LibCal has it closed on Sunday 6 September and open
+    12:00pm-4:00pm on Sunday 13 September, and the answer said "closed
+    Saturday and Sunday" with nothing to say which Sunday. A patron
+    reading that on the 12th is told the wrong thing by a sentence that
+    was true when it was generated.
+    """
+    rows = _week_rows(hours_text)
+    if not rows:
+        return None
+    import datetime as _d
+    try:
+        first = _d.date.fromisoformat(rows[0][1])
+        last = _d.date.fromisoformat(rows[-1][1])
+    except (ValueError, IndexError):
+        return None
+    if first == last:
+        return f"{first.day} {first:%b}"
+    if (first.month, first.year) == (last.month, last.year):
+        return f"{first.day}-{last.day} {last:%b}"
+    return f"{first.day} {first:%b} - {last.day} {last:%b}"
+
+
 def _collapse_week(hours_text: str) -> "Optional[str]":
     """"Monday-Friday, 9am-4pm by appointment; closed Saturday and Sunday".
 
@@ -9059,7 +9087,14 @@ def _week_hours_answer(
     if not summary:
         return None
     name = _LIBRARY_DISPLAY.get(library, library.title())
-    body = f"{name} is open {summary}. [1]"
+    # SAY WHICH WEEK. These are the Monday-Sunday week containing today,
+    # and they are not a standing timetable -- the MakerSpace is closed on
+    # one Sunday and open 12-4 the next. Without the dates the answer reads
+    # as a permanent rule and goes stale the moment the week turns.
+    span = _week_span(str(data.get("hours") or ""))
+    lede = f"This week ({span}), {name} is open" if span else f"{name} is open"
+    body = (f"{lede} {summary}. Hours vary from week to week; "
+            f"the calendar has the others. [1]")
     cites = [{"n": 1, "url": str(data.get("source_url") or "")
               or _HOURS_PAGE_URL["oxford"],
               "snippet": "Miami University Libraries — Hours (live from LibCal)"}]
