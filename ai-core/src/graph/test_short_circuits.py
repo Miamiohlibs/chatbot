@@ -6095,3 +6095,43 @@ def test_collapse_week_is_unchanged_by_the_date_qualifier():
     assert "Monday and Tuesday, 9:00am to 5:00pm" in out
     assert "closed Saturday and Sunday" in out
 
+
+# --- a statement of hours is not a request for them ----------------------
+
+def test_a_correction_about_hours_is_not_answered_as_a_question():
+    """Operator, 2026-09-01. Told the bot "The makerspace is open noon-4pm
+    on Sundays" -- a CORRECTION -- and got the week's table back, byte for
+    byte identical to the answer being corrected.
+
+    Every hours short-circuit triggers on a bare word (_WEEK_HOURS_RE is
+    \\b(hours|open|...)\\b), so an assertion containing "open" looked
+    exactly like a request. Answering the question next to the one asked is
+    this system's main failure mode; this is the cleanest instance of it.
+    """
+    from src.graph.new_orchestrator import _asserts_hours
+
+    for said in ("The makerspace is open noon-4pm on Sundays.",
+                 "the makerspace is open noon-4pm on sundays",
+                 "King closes at 10pm on Fridays",
+                 "Actually it opens at 9 not 8"):
+        assert _asserts_hours(said), said
+
+
+def test_the_guard_never_silences_a_real_hours_question():
+    """The dangerous direction. A false positive here means a patron asking
+    a normal question gets no short-circuit at all, so this list is the
+    shapes people actually type -- checked against all 100 hours-related
+    questions in the message table on 2026-09-04, of which exactly one (the
+    correction above) was flagged.
+    """
+    from src.graph.new_orchestrator import _asserts_hours
+
+    for asked in ("what are the hours for the makerspace?", "makerspace hours",
+                  "is the makerspace open at 3pm?", "is King open until 10pm",
+                  "how late is King open?", "open rn", "r u open rn",
+                  "when does King close", "hours today", "are you open on sunday",
+                  "what time do you close today", "King Library hours this week",
+                  "Is the library open 24 hours",
+                  "does the makerspace open at noon on sundays"):
+        assert not _asserts_hours(asked), asked
+

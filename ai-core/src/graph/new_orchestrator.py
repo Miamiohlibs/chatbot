@@ -1482,6 +1482,15 @@ def _run_turn(
             latency_ms=latency_ms, cited_chunk_ids=[],
         )
 
+    # A STATEMENT OF HOURS SKIPS ALL OF THEM.
+    #
+    # These five paths each match a bare word, so a correction ("the
+    # makerspace is open noon-4pm on Sundays") looked exactly like a
+    # request and was answered with the table the reader was correcting.
+    # Falling through hands it to the agent, which can at least respond to
+    # what was said.
+    _hours_paths_ok = not _asserts_hours(request.user_message)
+
     # --- 3.55. "Is it open RIGHT NOW" short-circuit ---
     # Placed before the Special Collections branch and after the long-period
     # check, so "summer hours" and a named future day still take their own
@@ -1493,7 +1502,7 @@ def _run_turn(
     # the gate ran first. The regex is the precise part; the classifier is the
     # lossy one. Each of these functions matches its own pattern before it
     # touches a tool, so running them unconditionally costs nothing.
-    if True:
+    if _hours_paths_ok:
         _now = _open_right_now_answer(request.user_message, deps, scope)
         if _now is not None:
             _ans, _cites = _now
@@ -1515,7 +1524,7 @@ def _run_turn(
     # After open-now (a "still open?" question is that one, not this one) and
     # before the Special Collections branch. Declines on anything it cannot
     # read, which falls through to the behaviour that was there before.
-    if True:  # see the note on the open-now gate above
+    if _hours_paths_ok:  # see the note on the open-now gate above
         _close = _close_today_answer(request.user_message, deps, scope)
         if _close is not None:
             _ans, _cites = _close
@@ -1534,7 +1543,7 @@ def _run_turn(
             )
 
     # --- 3.58. A NAMED day ("open on Saturday?") ---
-    if True:  # see the note on the open-now gate above
+    if _hours_paths_ok:  # see the note on the open-now gate above
         _nd = _named_day_answer(request.user_message, deps, scope)
         if _nd is not None:
             _ans, _cites = _nd
@@ -1553,7 +1562,7 @@ def _run_turn(
             )
 
     # --- 3.59. Whole-week hours for a SUB-SPACE, collapsed ---
-    if True:  # see the note on the open-now gate above
+    if _hours_paths_ok:  # see the note on the open-now gate above
         _wk = _week_hours_answer(request.user_message, deps, scope)
         if _wk is not None:
             _ans, _cites = _wk
@@ -1573,7 +1582,7 @@ def _run_turn(
 
     # --- 3.595. "What are the hours at X?" -> today's, then the week ---
     # After week_hours, which owns the MakerSpace and Special Collections.
-    if True:  # see the note on the open-now gate above
+    if _hours_paths_ok:  # see the note on the open-now gate above
         _th = _today_hours_answer(request.user_message, deps, scope)
         if _th is not None:
             _ans, _cites = _th
@@ -9008,6 +9017,39 @@ def _close_today_answer(
 
 _WEEK_HOURS_RE = re.compile(
     r"\b(hours|open|opening|schedule|times)\b", re.IGNORECASE)
+
+
+# "The makerspace is open noon-4pm on Sundays." is not a question.
+#
+# Every hours short-circuit triggers on a bare word -- _WEEK_HOURS_RE is
+# literally \b(hours|open|...)\b -- so a patron CORRECTING us matched
+# "open" and got the week's table read back at them, byte-identical to the
+# answer they were correcting (operator, 2026-09-01). Answering a question
+# nobody asked is this system's main failure mode; a statement of hours is
+# the clearest case of it there is.
+#
+# Deliberately conservative. A false positive here silences a real hours
+# question, which is much worse than a false negative leaving today's
+# behaviour alone, so it fires only on an unmistakable declarative frame
+# with a clock time in it -- and never when the message asks.
+_HOURS_ASSERTION_RE = re.compile(
+    r"\b(?:is|are|'s|was|were)\s+open\b[^?]*?\d"
+    r"|\b(?:opens?|closes?)\s+(?:at|from)\s*\d",
+    re.IGNORECASE)
+
+_QUESTION_OPENER_RE = re.compile(
+    r"^\s*(?:what|when|where|how|why|who|which|is|are|do|does|did|can|could|"
+    r"will|would|should|any|got|hours|open|r\s+u|u\b)\b", re.IGNORECASE)
+
+
+def _asserts_hours(message: str) -> bool:
+    """True when the message TELLS us hours rather than asking for them."""
+    m = (message or "").strip()
+    if not m or "?" in m:
+        return False
+    if _QUESTION_OPENER_RE.match(m):
+        return False
+    return bool(_HOURS_ASSERTION_RE.search(m))
 
 
 def _named_day_answer(
