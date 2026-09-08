@@ -164,3 +164,46 @@ def test_todays_own_date_does_not_jump_a_year():
     # A date genuinely still to come is left alone.
     assert resolve_target_date("open December 25", today=_SUN) == date(2026, 12, 25)
 
+
+# --- search_dates hands back fragments that are not dates ----------------
+#
+# It returns everything it can read as one. "hours for December 25" comes
+# back [('hours', today), ('December 25', Dec 25)] -- "hours" read as a
+# unit -- and "what time do you close December 25" leads with ('do', ...).
+# Taking the first match answered about today, or about a day derived from
+# the word "do", while the real date sat second in the list.
+#
+# Checked against all 736 distinct questions in the message table: four
+# resolutions changed and every one of them was previously wrong.
+
+
+def test_a_unit_word_does_not_win_over_the_real_date():
+    assert resolve_target_date("hours for December 25", today=_SUN) == date(2026, 12, 25)
+    assert resolve_target_date("what time do you close December 25",
+                               today=_SUN) == date(2026, 12, 25)
+    assert resolve_target_date("hours on Dec 25", today=_SUN) == date(2026, 12, 25)
+
+
+def test_a_bare_weekday_is_still_a_date():
+    """"next monday" reaches us as the fragment "monday". An early version
+    of the filter refused it and lost a question that used to work."""
+    assert resolve_target_date("when does Art library open next monday",
+                               today=_SUN) == date(2026, 9, 7)
+
+
+def test_tomorrow_survives_a_sentence_with_clock_times_in_it():
+    """search_dates never mentions "tomorrow" in "tomorrow 10am to 11am" --
+    it returns 10am and 11am and reads them as days of the month, which is
+    how a room booking for tomorrow was resolved to May 2027."""
+    tomorrow = _SUN + timedelta(days=1)
+    assert resolve_target_date("tomorrow 10am to 11am", today=_SUN) == tomorrow
+    assert resolve_target_date("book me a study room at King tomorrow at 3pm",
+                               today=_SUN) == tomorrow
+
+
+def test_a_question_with_no_date_still_declines():
+    """The filter must not turn every sentence into today."""
+    for q in ("what are your hours", "open hours", "where is the makerspace",
+              "who is the biology librarian"):
+        assert resolve_target_date(q, today=_SUN) is None, q
+

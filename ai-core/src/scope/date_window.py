@@ -21,7 +21,7 @@ here so the v2 rule-B gate doesn't import the heavy legacy agent.
 from __future__ import annotations
 
 import re
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Optional
 
 # A specific date within this many days of "today" is treated as
@@ -84,6 +84,30 @@ def _holiday_name_matches(name: str, frag: str) -> bool:
     return clean.startswith(frag)
 
 
+_WEEKDAY_WORD_RE = re.compile(
+    r"\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b",
+    re.IGNORECASE)
+
+
+def _fragment_is_a_date(frag: str) -> bool:
+    """Does this search_dates fragment name a date on its own?
+
+    search_dates hands back everything it can read as one, including
+    things nobody means as a date: "hours" (a unit), "do" (a word), "10am"
+    (a clock time, which it turns into the 10th of the month). Taking the
+    first match therefore answered about today, or about the word "do".
+
+    Accepting is safer than rejecting here -- a fragment we wrongly refuse
+    just falls through to the whole-string parse, while one we wrongly
+    accept becomes a confidently wrong date.
+    """
+    f = (frag or "").lower()
+    if any(re.search(pat, f) for pat in _DATE_PATTERNS):
+        return True
+    # A bare weekday is a real answer ("next monday" arrives as "monday").
+    return bool(_WEEKDAY_WORD_RE.search(f))
+
+
 def _prefer_today_over_next_year(d: date, ref: date) -> date:
     """PREFER_DATES_FROM="future" sends today's own date a year out.
 
@@ -126,6 +150,13 @@ def resolve_target_date(
     # wrong day, with nothing marking the difference.
     if re.search(r"\b(today|tonight|right now)\b", t):
         return ref
+    # Same for tomorrow -- unless it is "the day after tomorrow", which is a
+    # different day and has its own pattern below. search_dates does not
+    # always surface it: given "tomorrow 10am to 11am" it returns 10am and
+    # 11am, reads them as days of the month, and never mentions tomorrow.
+    if (re.search(r"\btomorrow\b", t)
+            and not re.search(r"\bday\s+(after|before)\s+tomorrow\b", t)):
+        return ref + timedelta(days=1)
 
     # 1) Named US holiday -> its next occurrence on/after `ref`.
     #
@@ -168,7 +199,24 @@ def resolve_target_date(
 
         found = search_dates(text, settings=settings)
         if found:
-            return _prefer_today_over_next_year(found[0][1].date(), ref)
+            # THE FIRST MATCH IS OFTEN NOT A DATE.
+            #
+            # search_dates returns every fragment it can read as one, and it
+            # reads plenty that are not. "hours for December 25" comes back
+            # [('hours', today), ('December 25', Dec 25)], and "what time do
+            # you close December 25" leads with ('do', ...). Taking found[0]
+            # therefore answered about today, or about a day derived from
+            # the word "do", while the real date sat second in the list.
+            #
+            # Keep only fragments that look like a date on their own -- the
+            # same patterns that gate this whole branch.
+            for frag, when in found:
+                if _fragment_is_a_date(frag):
+                    return _prefer_today_over_next_year(when.date(), ref)
+            # Nothing in the list was a date. Fall through to the
+            # whole-string parse rather than giving up: search_dates can
+            # miss the only real date in a sentence -- for "tomorrow 10am
+            # to 11am" it returns 10am and 11am and never "tomorrow".
     except Exception:  # noqa: BLE001 -- search extra missing / parse issue
         pass
     try:  # fallback: whole-string parse (works for "tomorrow" etc.)
