@@ -8679,6 +8679,29 @@ def _resolve_named_day(message: str, now) -> "Optional[tuple[str, object]]":
     return d.strftime("%A"), d
 
 
+def _next_open_row(hours_text: str, after) -> "Optional[tuple[str, str, str]]":
+    """The first row after `after` that is actually open, or None.
+
+    Only looks inside the week already fetched, so a library shut for the
+    rest of it returns None rather than a guess -- and the sentence falls
+    back to a plain "closed", which is at least not wrong.
+    """
+    import datetime as _d
+
+    for day, iso, hrs in _week_rows(hours_text):
+        try:
+            d = _d.date.fromisoformat(iso)
+        except ValueError:
+            continue
+        if d <= after:
+            continue
+        low = hrs.lower()
+        if "closed" in low or _HOURS_NOT_POSTED_MARKER in low:
+            continue
+        return day, iso, hrs.strip()
+    return None
+
+
 def _named_day_hours_sentence(hours_text: str, name: str, message: str,
                               now) -> "Optional[str]":
     """"King Library is open Saturday (2026-08-08) from 7:30am to 9pm." or None.
@@ -8698,6 +8721,9 @@ def _named_day_hours_sentence(hours_text: str, name: str, message: str,
         if _HOURS_NOT_POSTED_MARKER in low:
             return None
         if "closed" in low:
+            # Just the fact. The caller adds "opens again ..." because that
+            # can need the FOLLOWING week, and this function only ever sees
+            # the one table it was handed.
             return f"{name} is closed on {day_name} ({iso})."
         if "24 hour" in low or "24/7" in low:
             return f"{name} is open around the clock on {day_name} ({iso})."
@@ -9088,10 +9114,31 @@ def _named_day_answer(
         return None
 
     name = _LIBRARY_DISPLAY.get(library, library.title())
-    line = _named_day_hours_sentence(
-        str(data.get("hours") or ""), name, m, now)
+    hours_text = str(data.get("hours") or "")
+    line = _named_day_hours_sentence(hours_text, name, m, now)
     if line is None:
         return None
+
+    # SAY WHEN IT OPENS AGAIN.
+    #
+    # "Closed" answers the question and leaves the reader where they
+    # started; somebody asking whether they can study today wants the
+    # alternative. The next open row is usually in the table already --
+    # except on a Sunday, which is the last day of the Monday-Sunday week
+    # we fetch, and therefore exactly the day this matters most. So when
+    # the rest of the week is shut, look at the next one.
+    if " is closed on " in line:
+        import datetime as _d
+
+        nxt = _next_open_row(hours_text, target)
+        if nxt is None:
+            ahead = _get_hours_data(deps, library,
+                                    target_date=target + _d.timedelta(days=1))
+            if ahead is not None:
+                nxt = _next_open_row(str(ahead.get("hours") or ""), target)
+        if nxt:
+            n_day, n_iso, n_hrs = nxt
+            line = f"{line} It opens again {n_day} ({n_iso}), {n_hrs}."
     return (
         line + " [1]",
         [{"n": 1, "url": str(data.get("source_url") or "")

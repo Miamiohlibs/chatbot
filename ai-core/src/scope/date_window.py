@@ -84,6 +84,23 @@ def _holiday_name_matches(name: str, frag: str) -> bool:
     return clean.startswith(frag)
 
 
+def _prefer_today_over_next_year(d: date, ref: date) -> date:
+    """PREFER_DATES_FROM="future" sends today's own date a year out.
+
+    Asked "is anything open September 6" ON 6 September, dateparser reads
+    "future" strictly and answers 2027 -- a date LibCal has no rows for, so
+    the answer degrades to nothing useful. Somebody naming today's date
+    means today.
+
+    Only that exact case: same month and day, exactly one year ahead.
+    Every other future reading is left alone, because "December 25" asked
+    in January really does mean the one coming.
+    """
+    if (d.month, d.day) == (ref.month, ref.day) and d.year == ref.year + 1:
+        return ref
+    return d
+
+
 def resolve_target_date(
     text: str, today: Optional[date] = None
 ) -> Optional[date]:
@@ -98,19 +115,38 @@ def resolve_target_date(
     ref = today or date.today()
     t = text.lower()
 
+    # 0) "TODAY" BEATS EVERYTHING. It carries its own date and cannot be
+    # ambiguous, so nothing below gets to overrule it.
+    #
+    # It used to be checked last. A student asking "is there any facility
+    # open TODAY on Sunday, September 6, Labor Day weekend, to study?" was
+    # told King opens Monday 1pm-1am: "Labor Day" matched at step 1 and
+    # took the whole sentence with it. Every library was shut that Sunday,
+    # so the honest answer was "no" -- instead they got true hours for the
+    # wrong day, with nothing marking the difference.
+    if re.search(r"\b(today|tonight|right now)\b", t):
+        return ref
+
     # 1) Named US holiday -> its next occurrence on/after `ref`.
+    #
+    # "Labor Day WEEKEND" is not Labor Day, and "Christmas EVE" is not
+    # Christmas. There the holiday word is a modifier: it names the stretch
+    # the asker means, not the day they are asking about.
     try:
         import holidays  # type: ignore
 
         us = holidays.US(years=[ref.year, ref.year + 1])
         for kw, frag in _HOLIDAYS.items():
-            if kw in t:
-                cands = sorted(
-                    d for d, name in us.items()
-                    if _holiday_name_matches(name, frag) and d >= ref
-                )
-                if cands:
-                    return cands[0]
+            if kw not in t:
+                continue
+            if re.search(re.escape(kw) + r"\s*(weekend|eve\b)", t):
+                continue
+            cands = sorted(
+                d for d, name in us.items()
+                if _holiday_name_matches(name, frag) and d >= ref
+            )
+            if cands:
+                return cands[0]
     except Exception:  # noqa: BLE001 -- optional dep / parse issue
         pass
 
@@ -132,7 +168,7 @@ def resolve_target_date(
 
         found = search_dates(text, settings=settings)
         if found:
-            return found[0][1].date()
+            return _prefer_today_over_next_year(found[0][1].date(), ref)
     except Exception:  # noqa: BLE001 -- search extra missing / parse issue
         pass
     try:  # fallback: whole-string parse (works for "tomorrow" etc.)
@@ -140,7 +176,7 @@ def resolve_target_date(
 
         parsed = dateparser.parse(text, settings=settings)
         if parsed is not None:
-            return parsed.date()
+            return _prefer_today_over_next_year(parsed.date(), ref)
     except Exception:  # noqa: BLE001
         return None
     return None

@@ -6135,3 +6135,55 @@ def test_the_guard_never_silences_a_real_hours_question():
                   "does the makerspace open at noon on sundays"):
         assert not _asserts_hours(asked), asked
 
+
+# --- closed today, and when it opens again -------------------------------
+
+_KING_LABOR_WEEK = """Monday (2026-08-31): 7:00am to 1:00am
+Tuesday (2026-09-01): 7:00am to 1:00am
+Wednesday (2026-09-02): 7:00am to 1:00am
+Thursday (2026-09-03): 7:00am to 1:00am
+Friday (2026-09-04): 7:00am to 5:00pm
+Saturday (2026-09-05): closed
+Sunday (2026-09-06): closed"""
+
+_KING_NEXT_WEEK = """Monday (2026-09-07): 1:00pm to 1:00am
+Tuesday (2026-09-08): 7:00am to 1:00am"""
+
+
+def test_a_closed_day_says_closed_not_some_other_days_hours():
+    """The student asked about Sunday and was told Monday's hours."""
+    import datetime as dt
+
+    from src.graph.new_orchestrator import _named_day_hours_sentence
+
+    said = "is anything open today on Sunday, September 6 to study"
+    out = _named_day_hours_sentence(
+        _KING_LABOR_WEEK, "King Library", said, dt.datetime(2026, 9, 6, 9, 53))
+    assert out == "King Library is closed on Sunday (2026-09-06)."
+
+
+def test_next_open_row_skips_the_shut_days():
+    import datetime as dt
+
+    from src.graph.new_orchestrator import _next_open_row
+
+    # Friday is open, so a Thursday question finds it.
+    assert _next_open_row(_KING_LABOR_WEEK, dt.date(2026, 9, 3))[1] == "2026-09-04"
+    # Nothing after Sunday in this table -- Sunday ENDS the Monday-Sunday
+    # week we fetch, which is why the caller looks at the next one.
+    assert _next_open_row(_KING_LABOR_WEEK, dt.date(2026, 9, 6)) is None
+    # And the following week answers it.
+    nxt = _next_open_row(_KING_NEXT_WEEK, dt.date(2026, 9, 6))
+    assert nxt == ("Monday", "2026-09-07", "1:00pm to 1:00am")
+
+
+def test_a_saturday_closure_finds_sunday_in_the_same_week():
+    """Only the Sunday case needs the extra fetch; mid-week must not."""
+    import datetime as dt
+
+    from src.graph.new_orchestrator import _next_open_row
+
+    week = _KING_LABOR_WEEK.replace(
+        "Sunday (2026-09-06): closed", "Sunday (2026-09-06): 1:00pm to 9:00pm")
+    assert _next_open_row(week, dt.date(2026, 9, 5))[1] == "2026-09-06"
+

@@ -122,3 +122,45 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+# --- "today" is not up for debate ----------------------------------------
+#
+# A student asked, on Sunday 6 September 2026: "Is there any facility on
+# Miami's campus that is open TODAY on Sunday, September 6 Labor Day
+# weekend to study?" Every Miami library was shut that day. The bot
+# answered "King Library is open on Monday (2026-09-07) from 1pm to 1am" --
+# true, for a day nobody asked about, with nothing marking the difference.
+#
+# "Labor Day" matched the holiday branch, which ran first and took the
+# whole sentence with it.
+
+_SUN = date(2026, 9, 6)          # Sunday of Labor Day weekend
+_LABOR_DAY = date(2026, 9, 7)    # the Monday itself
+
+
+def test_today_wins_over_every_other_date_word():
+    said = ("Is there any facility on Miami's campus that is open today on "
+            "Sunday, September 6 Labor Day weekend to study?")
+    assert resolve_target_date(said, today=_SUN) == _SUN
+    assert resolve_target_date("open today", today=_SUN) == _SUN
+    assert resolve_target_date("are you open tonight", today=_SUN) == _SUN
+
+
+def test_a_holiday_weekend_is_not_the_holiday():
+    """"Labor Day weekend" names the stretch, not the Monday. Same for an
+    eve: Christmas Eve is not Christmas."""
+    assert resolve_target_date("open Labor Day weekend", today=_SUN) is None
+    assert resolve_target_date("open Christmas Eve", today=_SUN) is None
+    # The holiday itself still resolves -- this must not have broken it.
+    assert resolve_target_date("open on Labor Day", today=_SUN) == _LABOR_DAY
+    assert resolve_target_date("open on Christmas", today=_SUN) == date(2026, 12, 25)
+
+
+def test_todays_own_date_does_not_jump_a_year():
+    """PREFER_DATES_FROM="future" read "September 6" asked ON 6 September
+    as 2027 -- a date LibCal has no rows for."""
+    assert resolve_target_date("open September 6", today=_SUN) == _SUN
+    # A date genuinely still to come is left alone.
+    assert resolve_target_date("open December 25", today=_SUN) == date(2026, 12, 25)
+
