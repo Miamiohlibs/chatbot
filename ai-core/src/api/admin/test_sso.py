@@ -1015,3 +1015,101 @@ def test_the_sign_out_page_offers_the_re_prompting_link():
     body = _logout_response().text
     assert "/admin/sso/login?force=1" in body
 
+
+# --- the third tier: all Libraries staff, verified by department ---------
+#
+# Attribute shapes copied from the service log on 2026-09-08, the first
+# real sign-ins. Miami releases muohioeduDepartment as ONE comma-joined
+# string, and the operator's own record carries two departments -- which is
+# why "any value matches" is the rule and "all values match" would have
+# locked out the person who asked for the feature.
+
+_ATTRS_ONE_DEPT = {"muohioeduDepartment": ["Library"]}
+_ATTRS_TWO_DEPTS = {"muohioeduDepartment": ["Library,Media, Journalism and Film"]}
+_ATTRS_ELSEWHERE = {"muohioeduDepartment": ["Information Technology Services"]}
+
+
+def _dept_cfg(**over):
+    from src.api.admin.sso import SSOConfig  # noqa: F401
+    return cfg(required_department="Library",
+               operator_uids=frozenset({"qum"}),
+               librarian_uids=frozenset({"messnekr"}),
+               allowed_uids=frozenset({"qum", "messnekr"}), **over)
+
+
+def test_a_joint_appointment_still_counts_as_library():
+    """The operator's own assertion reads "Library,Media, Journalism and
+    Film". Requiring every value to match would refuse exactly the people
+    with the most going on -- and, on 2026-09-08, the person who asked for
+    this feature."""
+    from src.api.admin.sso import has_required_department
+
+    c = _dept_cfg()
+    assert has_required_department(_ATTRS_TWO_DEPTS, c)
+    assert has_required_department(_ATTRS_ONE_DEPT, c)
+    assert not has_required_department(_ATTRS_ELSEWHERE, c)
+
+
+def test_the_whitelist_alone_is_not_enough():
+    """Being on the operator list is necessary, not sufficient. A uid list
+    outlives somebody's employment; the attribute is what catches that."""
+    from src.api.admin.sso import role_from_assertion
+
+    c = _dept_cfg()
+    assert role_from_assertion("qum", _ATTRS_TWO_DEPTS, c) == ROLE_OPERATOR
+    assert role_from_assertion("qum", _ATTRS_ELSEWHERE, c) is None
+
+
+def test_library_staff_on_no_list_get_the_narrowest_tier():
+    from src.api.admin.sso import ROLE_STAFF, role_from_assertion
+
+    c = _dept_cfg()
+    assert role_from_assertion("someone", _ATTRS_ONE_DEPT, c) == ROLE_STAFF
+    assert role_from_assertion("someone", _ATTRS_ELSEWHERE, c) is None
+    assert role_from_assertion("messnekr", _ATTRS_ONE_DEPT, c) == ROLE_LIBRARIAN
+
+
+def test_the_tiers_nest_widest_first():
+    from src.api.admin.sso import ROLE_STAFF
+
+    op = Caller(role=ROLE_OPERATOR, uid="a", via="sso")
+    lib = Caller(role=ROLE_LIBRARIAN, uid="b", via="sso")
+    staff = Caller(role=ROLE_STAFF, uid="c", via="sso")
+
+    assert op.may(ROLE_OPERATOR) and op.may(ROLE_LIBRARIAN) and op.may(ROLE_STAFF)
+    assert lib.may(ROLE_LIBRARIAN) and lib.may(ROLE_STAFF)
+    assert not lib.may(ROLE_OPERATOR)
+    assert staff.may(ROLE_STAFF)
+    assert not staff.may(ROLE_LIBRARIAN) and not staff.may(ROLE_OPERATOR)
+    # A caller with no verdict satisfies nothing.
+    assert not Caller(role="", via="token").may(ROLE_STAFF)
+
+
+def test_it_is_off_until_a_department_is_configured():
+    """Deploying this must not change who can get in. Three of the five
+    operators had never signed in on 2026-09-08, so their released
+    department was unknown -- and with the shared key off there is no
+    second door. The switch is .env, not a deploy."""
+    from src.api.admin.sso import role_from_assertion
+
+    c = cfg(operator_uids=frozenset({"qum"}), allowed_uids=frozenset({"qum"}))
+    assert c.required_department == ""
+    assert role_from_assertion("qum", _ATTRS_ELSEWHERE, c) == ROLE_OPERATOR
+    assert role_from_assertion("stranger", _ATTRS_ONE_DEPT, c) is None
+
+
+def test_a_staff_session_survives_the_round_trip():
+    """The tier is earned from an attribute that exists only in the
+    assertion, so the verdict has to travel in the cookie -- there is
+    nothing to re-derive it from on the next request."""
+    from src.api.admin.sso import (ROLE_STAFF, issue_session,
+                                   read_session_caller)
+
+    c = _dept_cfg()
+    tok = issue_session("someone", c, role=ROLE_STAFF)
+    assert read_session_caller(tok, c) == ("someone", ROLE_STAFF)
+    # And the uid tiers are still re-read from the lists, not the cookie:
+    # a cookie CLAIMING operator for an unlisted uid gets staff at most.
+    forged = issue_session("stranger", c, role=ROLE_OPERATOR)
+    assert read_session_caller(forged, c) is None
+

@@ -49,9 +49,14 @@ from src.api.admin.sso import (
     is_allowed,
     Caller,
     ROLE_OPERATOR,
+    ROLE_STAFF,
+    departments_from_attributes,
+    has_required_department,
     issue_session,
     read_session,
+    read_session_caller,
     role_for,
+    role_from_assertion,
     safe_next,
     saml_settings,
     uid_from_attributes,
@@ -211,7 +216,19 @@ def build_sso_router(cfg: SSOConfig) -> Any:
                 "account. The operator needs to ask IT to release the uid "
                 "attribute to this service."), status_code=403)
 
-        if not is_allowed(uid, cfg):
+        role = role_from_assertion(uid, attrs, cfg)
+        if role is None and cfg.required_department and not has_required_department(attrs, cfg):
+            logger.info("SSO sign-in refused for uid=%s (department %r not %r)",
+                        uid, departments_from_attributes(attrs),
+                        cfg.required_department)
+            return HTMLResponse(_denied_page(
+                "You are signed in, but not through this door.",
+                f"The account <b>{uid}</b> signed in, but Miami does not "
+                f"list it under <b>{cfg.required_department}</b>. This "
+                "console is for Libraries staff. If that is wrong, the "
+                "department on your Miami record is what needs fixing, "
+                "not this page."), status_code=403)
+        if role is None and not is_allowed(uid, cfg):
             # Logged at INFO, not WARNING: a colleague clicking a link they
             # were sent is ordinary, not an incident.
             logger.info("SSO sign-in refused for uid=%s (not on the list)", uid)
@@ -231,7 +248,7 @@ def build_sso_router(cfg: SSOConfig) -> Any:
                     f" ({name})" if name else "", _describe_attrs(attrs))
 
         resp = RedirectResponse(target, status_code=303)
-        token = issue_session(uid, cfg)
+        token = issue_session(uid, cfg, role=role)
         for path in COOKIE_PATHS:
             resp.set_cookie(
                 SESSION_COOKIE,
@@ -284,8 +301,9 @@ def build_sso_router(cfg: SSOConfig) -> Any:
 
     @router.get("/whoami")
     async def whoami(request: Request) -> dict:
-        uid = read_session(request.cookies.get(SESSION_COOKIE), cfg)
-        return {"uid": uid, "signed_in": bool(uid)}
+        seen = read_session_caller(request.cookies.get(SESSION_COOKIE), cfg)
+        uid, role = seen if seen else (None, None)
+        return {"uid": uid, "role": role, "signed_in": bool(uid)}
 
     return router
 
@@ -328,10 +346,11 @@ def make_caller_reader(*, cfg: SSOConfig, token: str = ""):
     async def peek(request: Request):
         try:
             if cfg.enabled:
-                uid = read_session(request.cookies.get(SESSION_COOKIE), cfg)
-                if uid:
-                    return Caller(role=role_for(uid, cfg) or "", uid=uid,
-                                  via="sso")
+                seen = read_session_caller(
+                    request.cookies.get(SESSION_COOKIE), cfg)
+                if seen:
+                    _uid, _role = seen
+                    return Caller(role=_role, uid=_uid, via="sso")
             # `and cfg.allow_token_fallback`, the same condition the
             # guard applies. Without it the two disagree about who somebody
             # is: with the fallback switched off, this said "you are an
@@ -381,10 +400,13 @@ def make_admin_guard(*, cfg: SSOConfig, token: str = "",
 
     async def guard(request: Request) -> Caller:
         if cfg.enabled:
-            uid = read_session(request.cookies.get(SESSION_COOKIE), cfg)
-            if uid:
-                who = Caller(role=role_for(uid, cfg) or "", uid=uid,
-                             via="sso")
+            seen = read_session_caller(request.cookies.get(SESSION_COOKIE), cfg)
+            if seen:
+                uid, _role = seen
+                # _role, not role_for(uid) -- the staff tier is earned from
+                # an attribute and is on no uid list, so re-deriving it here
+                # would silently demote every staff session to nothing.
+                who = Caller(role=_role, uid=uid, via="sso")
                 if who.may(require):
                     return who
                 raise HTTPException(

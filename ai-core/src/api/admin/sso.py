@@ -153,11 +153,19 @@ def _uid_set(name: str) -> set:
 # people maintaining a table about five people.
 ROLE_OPERATOR = "operator"
 ROLE_LIBRARIAN = "librarian"
+ROLE_STAFF = "staff"
 
 ROLE_LABELS = {
     ROLE_OPERATOR: "operator",
     ROLE_LIBRARIAN: "librarian",
+    ROLE_STAFF: "library staff",
 }
+
+# Three tiers, widest last. A rank rather than a chain of ifs because the
+# two-role version read "operator may do anything; otherwise roles must be
+# equal", and adding a third tier to that shape silently gives librarians
+# nothing a staff member has.
+_ROLE_RANK = {ROLE_STAFF: 1, ROLE_LIBRARIAN: 2, ROLE_OPERATOR: 3}
 
 
 @dataclass(frozen=True)
@@ -179,6 +187,15 @@ class SSOConfig:
     session_secret: str = ""
     session_hours: int = 8
     allow_token_fallback: bool = True
+    required_department: str = ""
+    """Every sign-in must carry this in muohioeduDepartment, and it is what
+    the STAFF tier is verified by. Empty (the default) disables both.
+
+    Off by default ON PURPOSE. Turning it on can lock out anyone whose
+    released department we have not actually seen -- on 2026-09-08 that was
+    three of the five operators -- and with the shared key switched off
+    there is no second door. Set it in .env once those people have signed
+    in once and the log has shown their value."""
 
     @property
     def acs_url(self) -> str:
@@ -246,6 +263,7 @@ def load_config() -> SSOConfig:
         session_secret=_env("SSO_SESSION_SECRET"),
         session_hours=_hours("SSO_SESSION_HOURS", 8),
         allow_token_fallback=_env_bool("SSO_ALLOW_TOKEN_FALLBACK", True),
+        required_department=_env("SSO_REQUIRED_DEPARTMENT"),
     )
 
 
@@ -290,6 +308,76 @@ def display_name_from_attributes(attrs: dict) -> str:
         if v:
             return str(v).strip()
     return ""
+
+
+_DEPARTMENT_KEYS = (
+    "muohioeduDepartment",
+    "urn:mace:dir:attribute-def:muohioeduDepartment",
+)
+
+
+def departments_from_attributes(attrs: dict) -> "list[str]":
+    """Every department this assertion carries, split out.
+
+    Miami releases muohioeduDepartment as ONE comma-joined string when a
+    person belongs to more than one -- the operator's own assertion reads
+    "Library,Media, Journalism and Film". Note the second value contains
+    commas of its own, so this cannot be a faithful parse and is not
+    pretending to be: it splits on comma and keeps every fragment, which is
+    enough to answer "is Library among them" and nothing more.
+    """
+    out: list[str] = []
+    for key in _DEPARTMENT_KEYS:
+        v = attrs.get(key)
+        if v is None:
+            continue
+        values = v if isinstance(v, (list, tuple)) else [v]
+        for item in values:
+            out.extend(p.strip() for p in str(item).split(",") if p.strip())
+    return out
+
+
+def has_required_department(attrs: dict, cfg: SSOConfig) -> bool:
+    """True when ANY released department matches the required one.
+
+    Any, not all. A colleague with a joint appointment reads
+    "Library,Media, Journalism and Film" and belongs here on the strength
+    of the first -- requiring every value would lock out exactly the people
+    with the most going on.
+    """
+    want = (cfg.required_department or "").strip().lower()
+    if not want:
+        return True
+    return any(d.lower() == want for d in departments_from_attributes(attrs))
+
+
+def role_from_assertion(uid: str | None, attrs: dict,
+                        cfg: SSOConfig) -> "str | None":
+    """Which console a fresh sign-in earns, or None for nobody.
+
+    The department gate applies to EVERY tier, not just the widest one:
+    being on the operator list is necessary but not sufficient. Two checks
+    that can each fail closed are the point -- a uid list that outlives
+    somebody's employment is exactly what the attribute catches.
+
+    Only reachable at sign-in, because attributes come with the assertion
+    and nothing later in the session can re-read them.
+    """
+    if not has_required_department(attrs, cfg):
+        return None
+    u = (uid or "").strip().lower()
+    if not u:
+        return None
+    if u in cfg.operator_uids:
+        return ROLE_OPERATOR
+    if u in cfg.librarian_uids:
+        return ROLE_LIBRARIAN
+    # The third tier is the department itself. No list to maintain -- which
+    # is the whole reason for it -- so it exists only when there is a
+    # department to verify against.
+    if (cfg.required_department or "").strip():
+        return ROLE_STAFF
+    return None
 
 
 def is_allowed(uid: str | None, cfg: SSOConfig) -> bool:
@@ -338,10 +426,15 @@ class Caller:
         return self.role in (ROLE_LIBRARIAN, ROLE_OPERATOR)
 
     def may(self, role: str) -> bool:
-        """Operators may do anything a librarian may. Not the reverse."""
-        if self.role == ROLE_OPERATOR:
-            return True
-        return self.role == role
+        """Wider tiers may do everything narrower ones may. Not the reverse.
+
+        operator > librarian > staff. An unknown role on either side ranks
+        0, so it satisfies nothing -- a Caller built with role="" (the
+        no-verdict case) cannot slip past a requirement.
+        """
+        mine = _ROLE_RANK.get(self.role, 0)
+        want = _ROLE_RANK.get(role, 0)
+        return bool(mine and want and mine >= want)
 
     @property
     def display(self) -> str:
@@ -388,14 +481,23 @@ def _b64d(txt: str) -> bytes:
     return base64.urlsafe_b64decode(txt + pad)
 
 
-def issue_session(uid: str, cfg: SSOConfig, *, now: float | None = None) -> str:
-    """A signed `payload.signature` string for the cookie value."""
+def issue_session(uid: str, cfg: SSOConfig, *, now: float | None = None,
+                  role: "str | None" = None) -> str:
+    """A signed `payload.signature` string for the cookie value.
+
+    `role` is carried because the STAFF tier is earned from a SAML
+    attribute, and attributes exist for exactly one instant -- the
+    assertion. Nothing later in the session can re-read them, so the
+    verdict has to travel in the cookie.
+    """
     now = time.time() if now is None else now
     payload = {
         "uid": uid.lower(),
         "iat": int(now),
         "exp": int(now + cfg.session_hours * 3600),
     }
+    if role:
+        payload["role"] = role
     body = _b64e(json.dumps(payload, separators=(",", ":"), sort_keys=True).encode())
     sig = hmac.new(cfg.session_secret.encode(), body.encode(), hashlib.sha256).digest()
     return f"{body}.{_b64e(sig)}"
@@ -431,6 +533,55 @@ def read_session(cookie: str | None, cfg: SSOConfig,
     if not is_allowed(uid, cfg):
         return None
     return uid
+
+
+def read_session_caller(cookie: str | None, cfg: SSOConfig,
+                        *, now: float | None = None) -> "tuple[str, str] | None":
+    """(uid, role) for a valid cookie, or None.
+
+    THE TWO TIERS ARE RE-CHECKED DIFFERENTLY, and the difference is not an
+    oversight.
+
+    operator and librarian are uid lists, so they are re-read on every
+    request: strike somebody from .env, restart, and their next click is
+    refused even mid-session. That property is worth keeping.
+
+    staff is earned from muohioeduDepartment, which arrives with the
+    assertion and never again. There is nothing to re-check, so the
+    cookie's own claim stands until it expires -- at most SSO_SESSION_HOURS
+    (8). Somebody who leaves the Libraries keeps the narrowest tier for
+    less than a working day, and that tier can file a ticket and nothing
+    else. Say it out loud rather than let a reader assume the immediate
+    revocation covers all three.
+    """
+    if not cookie or not cfg.session_secret:
+        return None
+    try:
+        body, sig = cookie.split(".", 1)
+    except ValueError:
+        return None
+    expected = hmac.new(cfg.session_secret.encode(), body.encode(),
+                        hashlib.sha256).digest()
+    if not hmac.compare_digest(_b64e(expected), sig):
+        return None
+    try:
+        payload = json.loads(_b64d(body))
+    except Exception:  # noqa: BLE001
+        return None
+    now = time.time() if now is None else now
+    if float(payload.get("exp", 0)) < now:
+        return None
+    uid = str(payload.get("uid") or "").lower()
+    if not uid:
+        return None
+    claimed = str(payload.get("role") or "")
+
+    live = role_for(uid, cfg)          # operator / librarian, from the lists
+    if live:
+        return uid, live
+    if claimed == ROLE_STAFF:
+        return uid, ROLE_STAFF
+    return None
 
 
 # --- python3-saml plumbing -------------------------------------------------

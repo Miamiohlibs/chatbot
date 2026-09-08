@@ -671,6 +671,9 @@ if _admin_token or _sso_cfg.enabled:
     from src.api.admin.ticket_router import build_ticket_router
     app.include_router(build_ticket_router({
         **_admin_deps, "librarian_code": _ticket_code,
+        # Third tier: any Libraries member signed in through Miami may
+        # report a wrong answer, without being handed the shared code.
+        "whoami": make_caller_reader(cfg=_sso_cfg, token=_admin_token),
     }))
 
     # One-bookmark hubs: /admin/ (operator) + /librarian/ (staff).

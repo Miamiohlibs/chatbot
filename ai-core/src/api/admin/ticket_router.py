@@ -445,6 +445,9 @@ def render_admin_list(tickets: list[dict], key: str,
 # --- Router builder --------------------------------------------------------
 
 
+from src.api.admin.sso import ROLE_STAFF  # noqa: E402
+
+
 def build_ticket_router(deps: dict):
     """Mount the ticket surfaces. deps: db, guard (admin), librarian_code."""
     from fastapi import APIRouter, Depends, HTTPException  # type: ignore
@@ -456,19 +459,42 @@ def build_ticket_router(deps: dict):
 
     router = APIRouter(tags=["tickets"])
 
+    whoami = deps.get("whoami")
+
     async def librarian_guard(request: Request) -> str:
-        """Fail-closed shared-code gate for the librarian surface."""
+        """Who may report a wrong answer: the shared code, or ANY Libraries
+        member signed in through Miami.
+
+        This is the third tier, and it is the reason it exists. Reporting a
+        bad answer should be open to everyone who works here -- the barrier
+        was never about trust, it was that a shared code is all we had. An
+        SSO session replaces it with a name, which is strictly better: the
+        ticket says who filed it, and nobody has to be handed a secret.
+
+        The code still works. It is what a colleague already has bookmarked
+        and what covers the stretch before every tier is switched on.
+
+        Returns the key to thread through links, or "" for a signed-in
+        caller who needs none.
+        """
         supplied = request.query_params.get("key", "")
         if not supplied and request.method == "POST":
             form = await request.form()
             supplied = str(form.get("key") or "")
-        if not librarian_code or supplied != librarian_code:
-            raise HTTPException(
-                status_code=401,
-                detail="Missing or wrong access code. Ask the library web "
-                       "services team for the ticket-form link.",
-            )
-        return supplied
+        if librarian_code and supplied == librarian_code:
+            return supplied
+        if whoami is not None:
+            try:
+                who = await whoami(request)
+            except Exception:  # noqa: BLE001 -- identity must not 500 a form
+                who = None
+            if who is not None and who.may(ROLE_STAFF):
+                return ""
+        raise HTTPException(
+            status_code=401,
+            detail="Sign in with your Miami account, or use the access code "
+                   "from the library web services team.",
+        )
 
     @router.get("/librarian/ticket", response_class=HTMLResponse)
     async def ticket_form(request: Request):
