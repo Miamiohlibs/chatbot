@@ -286,20 +286,42 @@ def render_librarian_hub(code: str, caller=None,
     # for a code-holder is "sign in", not "here you go" -- and the link
     # below becomes a working button the moment the IdP is configured,
     # with no change here.
+    # THREE STATES, NOT TWO.
+    #
+    # This card was written when a reader was either a department head or a
+    # code-holder with no session. The staff tier is a third case -- signed
+    # in, and not entitled -- and the two-state version told exactly those
+    # people to "sign in with Miami" when they already had. The button sent
+    # them through the IdP and back to a 403, which is a loop that blames
+    # the reader for our own missing branch.
     may_read = getattr(caller, "is_librarian", False)
-    reading = _card(
-        "What patrons asked",
-        "Every real question since the bot opened, and what it answered. "
-        "Our own testing is left out."
-        if may_read else
-        "Every real question since the bot opened, and what it answered. "
-        "Reading these needs your Miami sign-in — the access code for this "
-        "page is shared with all library staff, and these are patrons' own "
-        "words.",
-        ui.action("/librarian/conversations", "Open", primary=True)
-        if may_read else
-        ui.action("/admin/sso/login?next=/librarian/conversations",
-                  "Sign in with Miami", primary=True))
+    signed_in = bool(getattr(caller, "uid", ""))
+    if may_read:
+        reading = _card(
+            "What patrons asked",
+            "Every real question since the bot opened, and what it "
+            "answered. Our own testing is left out.",
+            ui.action("/librarian/conversations", "Open", primary=True))
+    elif signed_in:
+        # Say whose it is and stop. No button: there is nothing here this
+        # reader can press that will work, and offering one anyway is how
+        # a page teaches people to distrust it.
+        reading = _card(
+            "What patrons asked",
+            "Real patron questions are open to department heads and the "
+            f"dean's office. You are signed in as "
+            f"{ui.e(getattr(caller, 'uid', ''))}, which does not include "
+            "this. Ask the maintainer if you need it.",
+            "")
+    else:
+        reading = _card(
+            "What patrons asked",
+            "Every real question since the bot opened, and what it "
+            "answered. Reading these needs your Miami sign-in — the access "
+            "code for this page is shared with all library staff, and these "
+            "are patrons' own words.",
+            ui.action("/admin/sso/login?next=/librarian/conversations",
+                      "Sign in with Miami", primary=True))
 
     report = _card(
         "Report a wrong answer",

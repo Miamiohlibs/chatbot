@@ -306,3 +306,53 @@ def test_a_stranger_still_needs_the_code():
     c = _app()
     assert c.get("/librarian/").status_code == 401
     assert c.get("/librarian/?key=CODE").status_code == 200
+
+
+# --- the staff tier is a third state on the hub --------------------------
+
+def _hub_for(role, uid="someone"):
+    from src.api.admin.hub_router import render_librarian_hub
+    from src.api.admin.sso import Caller
+
+    return render_librarian_hub(
+        "CODE", Caller(role=role, uid=uid, via="sso"), False)
+
+
+def test_a_staff_member_is_not_told_to_sign_in_again():
+    """They already did. The two-state version showed the code-holder's
+    "Sign in with Miami" button to anyone who was not a department head,
+    so the staff tier got sent through the IdP and back to a 403 -- a loop
+    that blames the reader for a branch we had not written."""
+    from src.api.admin.sso import ROLE_STAFF
+
+    body = _hub_for(ROLE_STAFF)
+    assert "Sign in with Miami" not in body
+    assert "/admin/sso/login" not in body
+    assert "department heads" in body
+    assert "someone" in body, "say who they are signed in as"
+
+
+def test_a_staff_member_still_gets_the_two_things_that_are_theirs():
+    from src.api.admin.sso import ROLE_STAFF
+
+    body = _hub_for(ROLE_STAFF)
+    assert "/librarian/ticket" in body
+    assert "/librarian/staff-test" in body
+
+
+def test_a_department_head_still_gets_the_transcripts():
+    from src.api.admin.sso import ROLE_LIBRARIAN
+
+    body = _hub_for(ROLE_LIBRARIAN, uid="messnekr")
+    assert "/librarian/conversations" in body
+    assert "Sign in with Miami" not in body
+
+
+def test_a_code_holder_with_no_session_is_still_asked_to_sign_in():
+    """The state the card was originally written for, and the one the
+    third branch must not have eaten."""
+    from src.api.admin.hub_router import render_librarian_hub
+
+    body = render_librarian_hub("CODE", None, False)
+    assert "Sign in with Miami" in body
+
