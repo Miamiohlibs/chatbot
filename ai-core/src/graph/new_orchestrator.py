@@ -8631,6 +8631,71 @@ def _collapse_week(hours_text: str) -> "Optional[str]":
     return text
 
 
+def _llm_agrees_on_date(message: str, resolved, now) -> bool:
+    """Second opinion on a date the deterministic resolver committed to.
+
+    Returns True to proceed. Returns False ONLY when a model reads the same
+    sentence and names a different day -- and then the caller declines the
+    date path entirely rather than picking a winner, so the answer falls
+    back to the whole-week table, which needs no exact date.
+
+    dateparser never says "I am not sure": it returns something, and until
+    now nothing could tell a confident right answer from a confident wrong
+    one. Every date bug found on 2026-09-08 was of that shape.
+
+    FAILS OPEN. A model that is slow, unreachable, out of budget or
+    unparseable must not stop the bot answering an hours question -- the
+    deterministic answer is what we had yesterday and it is usually right.
+    Only an explicit, parsed disagreement counts.
+    """
+    if resolved is None:
+        return True
+    import os as _os
+
+    if _os.getenv("HOURS_DATE_CROSSCHECK", "1").strip().lower() in {"0", "false", "no"}:
+        return True
+    try:
+        import src.prompts.date_check_v1  # noqa: F401 -- registers the prefix
+        from src.config.models import resolve_model
+        from src.llm.client import structured_completion
+
+        today = now.date() if hasattr(now, "date") else now
+        payload, _usage = structured_completion(
+            prefix_id="date_check_v1",
+            dynamic_suffix=(f"Today is {today.isoformat()}, a "
+                            f"{today.strftime('%A')}.\n\nQuestion: {message}"),
+            response_schema={
+                "type": "object",
+                "properties": {"date": {"type": ["string", "null"]}},
+                "required": ["date"],
+                "additionalProperties": False,
+            },
+            schema_name="date_check",
+            model=resolve_model("cheap"),
+        )
+    except Exception:  # noqa: BLE001 -- see FAILS OPEN above
+        log.info("date cross-check unavailable; keeping the parsed date")
+        return True
+
+    said = (payload or {}).get("date")
+    if not said:
+        # "I see no single date here" is not a contradiction of a parsed
+        # one -- the resolver saw a pattern the model did not name. Left to
+        # the resolver on purpose; the cross-check exists to catch a
+        # DIFFERENT day, not a quieter one.
+        return True
+    import datetime as _d
+    try:
+        theirs = _d.date.fromisoformat(str(said)[:10])
+    except ValueError:
+        return True
+    if theirs == resolved:
+        return True
+    log.info("date cross-check disagreed: parsed=%s model=%s for %r",
+             resolved, theirs, (message or "")[:120])
+    return False
+
+
 def _resolve_named_day(message: str, now) -> "Optional[tuple[str, object]]":
     """(weekday name, date) for a named day in the message, or None.
 
@@ -9100,6 +9165,13 @@ def _named_day_answer(
     if resolved is None:
         return None
     _, target = resolved
+    # A SECOND OPINION BEFORE COMMITTING TO A DAY.
+    #
+    # Declining costs a reader the precise sentence and gives them the
+    # week's table instead. Being wrong costs them a walk to a locked
+    # building. Those are not the same size of mistake.
+    if not _llm_agrees_on_date(m, target, now):
+        return None
     try:
         from src.scope.date_window import within_window
 

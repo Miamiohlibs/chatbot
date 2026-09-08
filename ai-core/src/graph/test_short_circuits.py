@@ -6187,3 +6187,84 @@ def test_a_saturday_closure_finds_sunday_in_the_same_week():
         "Sunday (2026-09-06): closed", "Sunday (2026-09-06): 1:00pm to 9:00pm")
     assert _next_open_row(week, dt.date(2026, 9, 5))[1] == "2026-09-06"
 
+
+# --- a second opinion before committing to a date ------------------------
+#
+# dateparser never says "I am not sure": it returns something, and nothing
+# could tell a confident right answer from a confident wrong one. Every
+# date bug found on 2026-09-08 was of that shape -- including the one that
+# told a student King opened Monday when they had asked about Sunday.
+
+import datetime as _dtm
+
+_NOW = _dtm.datetime(2026, 9, 6, 9, 53)
+
+
+def _with_model_saying(monkeypatch, payload, boom=False):
+    """Stub the cheap-tier call. Never reaches OpenAI."""
+    import src.llm.client as C
+
+    def _fake(**kwargs):
+        if boom:
+            raise RuntimeError("model unreachable")
+        return payload, None
+
+    monkeypatch.setattr(C, "structured_completion", _fake)
+
+
+def test_it_declines_when_the_model_names_a_different_day(monkeypatch):
+    from src.graph.new_orchestrator import _llm_agrees_on_date
+
+    _with_model_saying(monkeypatch, {"date": "2026-09-06"})
+    assert not _llm_agrees_on_date(
+        "is anything open today on Sunday, September 6",
+        _dtm.date(2026, 9, 7), _NOW)
+
+
+def test_it_proceeds_when_they_agree(monkeypatch):
+    from src.graph.new_orchestrator import _llm_agrees_on_date
+
+    _with_model_saying(monkeypatch, {"date": "2026-09-06"})
+    assert _llm_agrees_on_date("open today", _dtm.date(2026, 9, 6), _NOW)
+
+
+def test_a_model_that_sees_no_date_is_not_a_contradiction(monkeypatch):
+    """The resolver saw a pattern the model did not name. The cross-check
+    exists to catch a DIFFERENT day, not a quieter one."""
+    from src.graph.new_orchestrator import _llm_agrees_on_date
+
+    _with_model_saying(monkeypatch, {"date": None})
+    assert _llm_agrees_on_date("open on 9/12", _dtm.date(2026, 9, 12), _NOW)
+
+
+def test_it_fails_open(monkeypatch):
+    """Slow, unreachable, out of budget, unparseable -- none of those may
+    stop the bot answering an hours question. Yesterday's answer is
+    usually right; only an explicit, parsed disagreement counts."""
+    from src.graph.new_orchestrator import _llm_agrees_on_date
+
+    _with_model_saying(monkeypatch, None, boom=True)
+    assert _llm_agrees_on_date("open today", _dtm.date(2026, 9, 6), _NOW)
+
+    _with_model_saying(monkeypatch, {"date": "not-a-date"})
+    assert _llm_agrees_on_date("open today", _dtm.date(2026, 9, 6), _NOW)
+
+    _with_model_saying(monkeypatch, {})
+    assert _llm_agrees_on_date("open today", _dtm.date(2026, 9, 6), _NOW)
+
+
+def test_no_date_parsed_means_no_call_at_all(monkeypatch):
+    """Nothing to second-guess, so nothing is spent."""
+    from src.graph.new_orchestrator import _llm_agrees_on_date
+
+    _with_model_saying(monkeypatch, None, boom=True)   # would raise if called
+    assert _llm_agrees_on_date("what are your hours", None, _NOW)
+
+
+def test_it_can_be_switched_off_without_a_deploy(monkeypatch):
+    from src.graph.new_orchestrator import _llm_agrees_on_date
+
+    _with_model_saying(monkeypatch, {"date": "2026-09-06"})
+    monkeypatch.setenv("HOURS_DATE_CROSSCHECK", "0")
+    assert _llm_agrees_on_date("x", _dtm.date(2026, 9, 7), _NOW)
+
