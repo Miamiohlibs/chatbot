@@ -140,18 +140,32 @@ def test_turning_it_off_says_so_in_the_shared_look(client):
     assert "Miami University Libraries" in r.text, "staff page, not admin"
 
 
-def test_the_hub_says_whether_this_browser_is_marked():
-    """The reported problem, at the place somebody would look. The link
-    set a cookie and dropped you on the chat; nothing anywhere told you
-    it had taken."""
+def test_the_hub_no_longer_asks_about_test_mode_at_all():
+    """RETIRED 2026-09-08, and worth saying why rather than deleting.
+
+    The original problem was real: the link set a cookie, dropped you on
+    the chat, and nothing told you it had taken. The fix was a card saying
+    which state the browser was in, with one button for the state you were
+    not in.
+
+    Then the shared codes went and SSO arrived, and the whole card turned
+    out to be asking a signed-in librarian to declare that they are staff
+    -- which their Miami assertion had already said. The operator's verdict
+    on the wording was that it was too convoluted to be worth reading.
+
+    So the state is no longer SHOWN because it is no longer CHOSEN. The
+    hub marks the browser itself; see test_signing_in_marks_the_browser
+    in test_hub_router.py, which is where that behaviour now lives.
+    """
     from src.api.admin.hub_router import render_librarian_hub
 
-    on = render_librarian_hub("CODE", marked=True)
-    off = render_librarian_hub("CODE", marked=False)
-    assert "Test mode is ON for this browser" in on
-    assert "Turn it off" in on
-    assert "Trying the bot rather than using it?" in off
-    assert "Turn on test mode and open the chatbot" in off
+    for body in (render_librarian_hub("CODE", marked=True),
+                 render_librarian_hub("CODE", marked=False)):
+        assert "Test mode is ON" not in body
+        assert "Trying the bot rather than using it?" not in body
+        assert "Turn on test mode" not in body
+        # The way to the chatbot survives; only the accounting talk went.
+        assert "/librarian/staff-test" in body
 
 
 def test_the_hub_offers_one_button_not_both():
@@ -165,10 +179,13 @@ def test_the_hub_offers_one_button_not_both():
     assert "Turn it off" not in off
 
 
-def test_the_state_is_said_once_not_twice():
-    """It appeared in a strip at the top AND inside the card below it,
-    which is half the reason the page was too long to read."""
+def test_the_state_is_not_said_at_all_now():
+    """It once appeared in a strip at the top AND in the card below it,
+    which was half the reason the page was too long to read. It was cut to
+    one on 2026-09-01 and to none on 2026-09-08, when marking stopped
+    being something the reader does."""
     from src.api.admin.hub_router import render_librarian_hub
 
     body = render_librarian_hub("CODE", marked=True)
-    assert body.count("recorded as testing") == 1
+    assert "recorded as testing" not in body
+    assert "not counted as a student" not in body

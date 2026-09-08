@@ -399,3 +399,55 @@ def test_a_stranger_signed_in_to_nothing_is_still_refused():
          "whoami": _nobody_role}))
     assert TestClient(app).get("/librarian/").status_code == 401
 
+
+# --- the test-mode button became automatic -------------------------------
+
+def _hub_client(role="staff", uid="someone"):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from src.api.admin.hub_router import build_hub_router
+    from src.api.admin.sso import Caller
+
+    async def _who():
+        return Caller(role=role, uid=uid, via="sso") if role else None
+
+    app = FastAPI()
+    app.include_router(build_hub_router(
+        {"admin_token": "TOK", "librarian_code": "CODE", "db": None,
+         "whoami": _who}))
+    return TestClient(app)
+
+
+def test_signing_in_marks_the_browser_without_being_asked():
+    """The old card asked a librarian to press a button declaring "I am
+    staff, do not bill this to the students". A Miami session already says
+    so. Anyone who did not bother spent from the students' purse -- $0.38
+    of $2.30 before it was noticed."""
+    from src.api.staff_test import COOKIE, STAFF
+
+    r = _hub_client().get("/librarian/")
+    assert r.status_code == 200
+    assert r.cookies.get(COOKIE) == STAFF
+
+
+def test_a_code_holder_is_not_marked():
+    """No session, no claim about who they are. The old button is still
+    there for them at /librarian/staff-test."""
+    from src.api.staff_test import COOKIE
+
+    r = _hub_client(role=None).get("/librarian/?key=CODE")
+    assert r.status_code == 200
+    assert COOKIE not in r.cookies
+
+
+def test_the_confusing_card_is_gone():
+    """Operator, 2026-09-08: too convoluted to be worth a librarian's
+    attention. What replaced it says what the link does and nothing about
+    accounting."""
+    body = _hub_client().get("/librarian/").text
+    assert "not counted as a student" not in body
+    assert "Test mode" not in body and "test mode" not in body
+    assert "Bookmark this page" not in body
+    assert "/librarian/staff-test" in body, "the chatbot link itself stays"
+

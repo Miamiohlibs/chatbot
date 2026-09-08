@@ -328,26 +328,30 @@ def render_librarian_hub(code: str, caller=None,
         "Goes straight to the maintainer. Nothing comes back to you.",
         ui.action(f"/librarian/ticket{k}", "Open the form"))
 
-    if marked:
-        testing = _card(
-            "Test mode is ON for this browser",
-            "Questions you ask are recorded as testing, not as a "
-            "student's. It ends when you close the browser.",
-            ui.action("/librarian/staff-test/off", "Turn it off"), on=True)
-    else:
-        testing = _card(
-            "Trying the bot rather than using it?",
-            "One click marks this browser so your questions are not "
-            "counted as a student's. Same bot, same answers.",
-            ui.action("/librarian/staff-test",
-                      "Turn on test mode and open the chatbot"))
+    # THE TEST-MODE CARD IS GONE, and the marking is automatic instead.
+    #
+    # It asked a librarian to click a button declaring "I am staff, do not
+    # count this as a student's" -- a question that only made sense in the
+    # shared-code era, when a code told us nothing about who was holding
+    # it. Signed in through Miami we already know, so asking is asking
+    # somebody to tell us what we just read off their assertion.
+    #
+    # The operator's verdict on the wording, 2026-09-08: too convoluted to
+    # be worth a librarian's attention. Deleting the card WITHOUT moving
+    # the marking would have put staff testing back on the students' purse,
+    # which is the bug fixed on 2026-09-01 -- $0.38 of $2.30, seventeen per
+    # cent of it. So the hub now sets the marker itself for a signed-in
+    # caller, and says nothing about it.
+    chat = _card(
+        "Open the chatbot",
+        "Opens what a patron sees, in a new tab.",
+        ui.action("/librarian/staff-test", "Open the chatbot"))
 
     body = (
         "<h1>Smart Chatbot &mdash; staff hub</h1>"
-        f"{reading}{report}{testing}"
-        "<p><small class='dim'>Bookmark this page &mdash; the links carry "
-        "the access code.</small></p>"
+        f"{reading}{report}{chat}"
     )
+
     return ui.page("Staff hub", body, chrome=False)
 
 
@@ -436,10 +440,26 @@ def build_hub_router(deps: dict):
             # telling it to supply a code that no longer exists.
             from src.api.admin.sso_router import sign_in_redirect
             raise sign_in_redirect(request, "sign in to reach the staff hub")
-        from src.api.staff_test import STAFF, origin_from_cookie_header
+        from src.api.staff_test import (COOKIE as STAFF_COOKIE, STAFF,
+                                        origin_from_cookie_header)
 
         marked = origin_from_cookie_header(
             request.headers.get("cookie")) == STAFF
-        return HTMLResponse(render_librarian_hub(supplied, caller, marked))
+        resp = HTMLResponse(render_librarian_hub(supplied, caller, marked))
+        # MARK THE BROWSER OURSELVES for anybody who signed in.
+        #
+        # This used to be a button the reader had to find and press,
+        # declaring "I am staff, do not bill this to the students". That
+        # made sense when a shared code told us nothing about who held it.
+        # A Miami session tells us, so asking is asking somebody to repeat
+        # what we already read off their assertion -- and every one who
+        # did not bother spent from the students' purse.
+        #
+        # Session cookie, no max-age: gone when the browser closes, so it
+        # cannot quietly relabel next week's desk work as a test.
+        if getattr(caller, "authenticated", False) and not marked:
+            resp.set_cookie(STAFF_COOKIE, STAFF, path="/", httponly=True,
+                            samesite="lax")
+        return resp
 
     return router

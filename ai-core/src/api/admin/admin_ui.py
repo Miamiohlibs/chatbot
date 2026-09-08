@@ -326,8 +326,10 @@ small.dim,.dim{color:hsl(var(--muted-foreground))}
   border-radius:var(--radius);padding:1.1rem 1.2rem;margin-bottom:.75rem;
 }
 .card.attn{border-color:hsl(var(--danger) / .4)}
-/* A state the reader should not have to READ to know. The staff hub
-   says whether test mode is on; the colour says it first. */
+/* A state the reader should not have to READ to know -- the colour says
+   it before the words do. Written for the staff hub's test-mode strip,
+   which went away on 2026-09-08 when the marking became automatic; kept
+   because the next on/off state will want it. */
 .card.on{border-left:3px solid hsl(var(--success));
   background:hsl(var(--success-bg) / .35)}
 .card.on > .q:first-child{color:hsl(var(--success))}
