@@ -416,13 +416,20 @@ def build_hub_router(deps: dict):
     @router.get("/librarian", response_class=HTMLResponse, include_in_schema=False)
     async def librarian_hub(request: Request, caller=Depends(whoami)):
         supplied = request.query_params.get("key", "")
-        # Either door: the shareable code, which reaches any member of
-        # library staff, or a Miami session for somebody on the librarian
-        # or operator list. Making a department head paste a code they
-        # have no reason to know, on a console their own sign-in already
-        # admits them to, is a step that exists for nobody.
-        if getattr(caller, "authenticated", False) and getattr(
-                caller, "is_librarian", False):
+        # Either door: the shareable code, or a Miami session for anybody
+        # the Libraries admit -- which since the third tier means ANY member
+        # of staff, not only the librarian and operator lists.
+        #
+        # `is_librarian` was the test here, and it refused the staff tier at
+        # the door: those people could sign in, earn a role, and still get a
+        # 401 on the one page built for them. Making a colleague paste a
+        # code they have no reason to know, on a console their own sign-in
+        # already admits them to, is a step that exists for nobody.
+        from src.api.admin.sso import ROLE_STAFF as _ROLE_STAFF
+
+        _may = getattr(caller, "may", None)
+        if getattr(caller, "authenticated", False) and callable(_may) \
+                and _may(_ROLE_STAFF):
             pass
         elif not librarian_code or supplied != librarian_code:
             raise HTTPException(

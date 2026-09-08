@@ -356,3 +356,46 @@ def test_a_code_holder_with_no_session_is_still_asked_to_sign_in():
     body = render_librarian_hub("CODE", None, False)
     assert "Sign in with Miami" in body
 
+
+def test_the_staff_tier_gets_through_the_door_with_no_code():
+    """It could sign in, earn a role, and still 401 on the one page built
+    for it -- the hub tested `is_librarian`, which the third tier is not by
+    design. Found while removing the shared codes, where a door that only
+    opens for a code is a door that stops opening."""
+    from src.api.admin.sso import Caller, ROLE_STAFF
+
+    async def _staff():
+        return Caller(role=ROLE_STAFF, uid="someone", via="sso")
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from src.api.admin.hub_router import build_hub_router
+
+    app = FastAPI()
+    app.include_router(build_hub_router(
+        {"admin_token": "TOK", "librarian_code": "CODE", "db": None,
+         "whoami": _staff}))
+    r = TestClient(app).get("/librarian/")
+    assert r.status_code == 200
+    assert "staff hub" in r.text
+
+
+def test_a_stranger_signed_in_to_nothing_is_still_refused():
+    """The tier check must not become "any Miami account"."""
+    from src.api.admin.sso import Caller
+
+    async def _nobody_role():
+        return Caller(role="", uid="stranger", via="sso")
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from src.api.admin.hub_router import build_hub_router
+
+    app = FastAPI()
+    app.include_router(build_hub_router(
+        {"admin_token": "TOK", "librarian_code": "CODE", "db": None,
+         "whoami": _nobody_role}))
+    assert TestClient(app).get("/librarian/").status_code == 401
+
