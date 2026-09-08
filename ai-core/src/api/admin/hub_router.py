@@ -432,11 +432,10 @@ def build_hub_router(deps: dict):
                 and _may(_ROLE_STAFF):
             pass
         elif not librarian_code or supplied != librarian_code:
-            raise HTTPException(
-                status_code=401,
-                detail="Missing or wrong access code. Ask the library web "
-                       "services team for the staff-hub link.",
-            )
+            # A browser gets sent to sign in. It used to get a bare 401
+            # telling it to supply a code that no longer exists.
+            from src.api.admin.sso_router import sign_in_redirect
+            raise sign_in_redirect(request, "sign in to reach the staff hub")
         from src.api.staff_test import STAFF, origin_from_cookie_header
 
         marked = origin_from_cookie_header(

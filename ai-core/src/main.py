@@ -520,8 +520,19 @@ from src.api.admin.etl_approval_router import (  # noqa: E402
     build_etl_approval_router,
 )
 
-app.include_router(build_etl_approval_router(
-    {"admin_token": os.getenv("ADMIN_API_TOKEN", "")}))
+# GUARD PASSED IN, not left to the router's own fallback.
+#
+# It was mounted with only the admin token, so it used its standalone
+# `_require_key` -- which needs ADMIN_API_TOKEN and 401s without one. When
+# the shared codes were retired on 2026-09-08 that made /admin/etl
+# unreachable by ANYBODY: not a bad error page, a door with no key cut for
+# it. The corpus approval page is the web team's whole self-service path.
+from src.api.admin.sso_router import make_admin_guard as _mk_guard  # noqa: E402
+
+app.include_router(build_etl_approval_router({
+    "admin_token": os.getenv("ADMIN_API_TOKEN", ""),
+    "guard": _mk_guard(cfg=_sso_cfg, token=os.getenv("ADMIN_API_TOKEN", "")),
+}))
 logging.info(
     "Corpus review mounted at /admin/etl -- guarded by approver email + "
     "passphrase; it records approval and never runs the apply itself."

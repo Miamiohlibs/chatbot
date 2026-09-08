@@ -490,11 +490,9 @@ def build_ticket_router(deps: dict):
                 who = None
             if who is not None and who.may(ROLE_STAFF):
                 return ""
-        raise HTTPException(
-            status_code=401,
-            detail="Sign in with your Miami account, or use the access code "
-                   "from the library web services team.",
-        )
+        from src.api.admin.sso_router import sign_in_redirect
+        raise sign_in_redirect(
+            request, "sign in with your Miami account to report an answer")
 
     @router.get("/librarian/ticket", response_class=HTMLResponse)
     async def ticket_form(request: Request):

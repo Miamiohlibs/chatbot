@@ -371,6 +371,36 @@ def make_caller_reader(*, cfg: SSOConfig, token: str = ""):
     return peek
 
 
+def sign_in_redirect(request: "Request", detail: str = "") -> "Exception":
+    """The exception to raise when a BROWSER asks for a page it must sign in
+    for -- a 307 to the sign-in, carrying where they were going.
+
+    Every surface with its own guard grew its own bare 401 instead, which
+    was survivable while everyone held a `?key=` link. The moment the
+    shared codes were retired those pages became dead ends: /librarian/,
+    /librarian/ticket and /admin/etl each answered "missing or wrong access
+    code" with no code left to supply and no way to sign in.
+
+    Non-HTML callers (curl, a script, the widget) still get a 401 -- a
+    redirect to a login page is not an answer to an API request.
+    """
+    from urllib.parse import quote
+
+    from fastapi import HTTPException  # type: ignore
+
+    wants_html = "text/html" in (request.headers.get("accept") or "")
+    if not wants_html:
+        return HTTPException(status_code=401,
+                             detail=detail or "sign-in required")
+    nxt = request.url.path
+    if request.url.query:
+        nxt = f"{nxt}?{request.url.query}"
+    return HTTPException(
+        status_code=307, detail="sign-in required",
+        headers={"Location": f"/admin/sso/login?next={quote(nxt, safe='')}"},
+    )
+
+
 def make_admin_guard(*, cfg: SSOConfig, token: str = "",
                      require: str = ROLE_OPERATOR):
     """FastAPI dependency: who is calling, and may they be here.
@@ -434,18 +464,7 @@ def make_admin_guard(*, cfg: SSOConfig, token: str = "",
             # SSO off and the token did not match: nothing else to offer.
             raise HTTPException(status_code=401, detail="admin auth required")
 
-        wants_html = "text/html" in (request.headers.get("accept") or "")
-        if wants_html:
-            nxt = request.url.path
-            if request.url.query:
-                nxt = f"{nxt}?{request.url.query}"
-            from urllib.parse import quote
-            raise HTTPException(
-                status_code=307,
-                detail="sign-in required",
-                headers={"Location": f"/admin/sso/login?next={quote(nxt, safe='')}"},
-            )
-        raise HTTPException(status_code=401, detail="admin auth required")
+        raise sign_in_redirect(request, "admin auth required")
 
     return guard
 

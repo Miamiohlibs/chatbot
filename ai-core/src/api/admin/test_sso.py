@@ -1113,3 +1113,41 @@ def test_a_staff_session_survives_the_round_trip():
     forged = issue_session("stranger", c, role=ROLE_OPERATOR)
     assert read_session_caller(forged, c) is None
 
+
+# --- a browser must always be offered the way in -------------------------
+
+def test_a_browser_gets_sent_to_sign_in_not_a_bare_401():
+    """Retiring the shared codes turned every surface with its own guard
+    into a dead end: /librarian/, /librarian/ticket and /admin/etl each
+    answered "missing or wrong access code" with no code left to supply
+    and no sign-in offered."""
+    from starlette.datastructures import Headers, URL
+
+    from src.api.admin.sso_router import sign_in_redirect
+
+    class _Req:
+        def __init__(self, accept, path="/librarian/", query=""):
+            self.headers = Headers({"accept": accept})
+            self.url = URL(f"https://x{path}" + (f"?{query}" if query else ""))
+
+    html = sign_in_redirect(_Req("text/html,*/*"))
+    assert html.status_code == 307
+    assert html.headers["Location"] == "/admin/sso/login?next=%2Flibrarian%2F"
+
+    # The query string rides along, so the reader lands where they aimed.
+    deep = sign_in_redirect(_Req("text/html", "/librarian/ticket", "day=2026-09-08"))
+    assert "next=%2Flibrarian%2Fticket%3Fday%3D2026-09-08" in deep.headers["Location"]
+
+
+def test_a_script_still_gets_a_401():
+    """A redirect to a login page is not an answer to an API request."""
+    from starlette.datastructures import Headers, URL
+
+    from src.api.admin.sso_router import sign_in_redirect
+
+    class _Req:
+        headers = Headers({"accept": "application/json"})
+        url = URL("https://x/admin/presence.json")
+
+    assert sign_in_redirect(_Req()).status_code == 401
+
