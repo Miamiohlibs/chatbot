@@ -255,9 +255,17 @@ async def _run(guard, req):
     caller is now, because the console has two roles to draw for and every
     dangerous action has a name to write down."""
     from fastapi import HTTPException
+
+    from src.api.admin.sso_router import HtmlDenied
+
+    # Two kinds now. A role refusal raises HtmlDenied, which deliberately
+    # does NOT subclass HTTPException: if it did, an app that forgot to
+    # register the renderer would quietly fall back to a JSON 403 -- the
+    # exact bug that put a {"detail":" envelope on the reader's screen.
+    # Not subclassing makes forgetting it a 500, which somebody notices.
     try:
         return await guard(req)
-    except HTTPException as e:
+    except (HTTPException, HtmlDenied) as e:
         return e
 
 
@@ -557,8 +565,11 @@ async def test_a_librarian_reaching_an_operator_page_is_told_why():
     g = make_admin_guard(cfg=c, token="tok", require=ROLE_OPERATOR)
     e = await _run(g, _Req(cookies={SESSION_COOKIE: issue_session("wardtd", c)}))
     assert e.status_code == 403
-    assert "/librarian/" in e.detail
-    assert "wardtd" in e.detail
+    # html_body, not detail: the refusal stopped being an HTTPException on
+    # 2026-09-08 because FastAPI JSON-encodes detail, and the reader was
+    # shown the envelope around the page.
+    assert "/librarian/" in e.html_body
+    assert "wardtd" in e.html_body
 
 
 @pytest.mark.asyncio
@@ -1150,4 +1161,55 @@ def test_a_script_still_gets_a_401():
         url = URL("https://x/admin/presence.json")
 
     assert sign_in_redirect(_Req()).status_code == 401
+
+
+# --- a refusal is a page, not a JSON envelope ----------------------------
+
+def _wrong_tier_app(handler=True):
+    from fastapi import Depends, FastAPI
+    from starlette.testclient import TestClient
+
+    from src.api.admin.sso import ROLE_LIBRARIAN, issue_session
+    from src.api.admin.sso_router import (install_html_denied_handler,
+                                          make_admin_guard)
+
+    c = cfg(librarian_uids=frozenset({"qum"}))
+    app = FastAPI()
+    if handler:
+        install_html_denied_handler(app)
+    g = make_admin_guard(cfg=c, token="", require=ROLE_OPERATOR)
+
+    @app.get("/admin/")
+    async def home(_=Depends(g)):
+        return {"ok": True}
+
+    from src.api.admin.sso import SESSION_COOKIE as _COOKIE
+
+    client = TestClient(app, raise_server_exceptions=False)
+    client.cookies.set(_COOKIE, issue_session("qum", c, role=ROLE_LIBRARIAN))
+    return client
+
+
+def test_the_wrong_tier_gets_a_page_not_a_json_envelope():
+    """FastAPI JSON-encodes HTTPException.detail, so HTML in there plus a
+    text/html content-type rendered the envelope as part of the page: the
+    reader saw a literal {"detail":" above the heading and "} beneath it.
+    Reported 2026-09-08 with a screenshot."""
+    r = _wrong_tier_app().get("/admin/")
+    assert r.status_code == 403
+    assert r.headers["content-type"].startswith("text/html")
+    assert r.text.lstrip().startswith("<!doctype html")
+    assert '{"detail"' not in r.text
+    assert not r.text.rstrip().endswith('"}')
+    assert "Not your part of the console" in r.text
+    assert "/librarian/" in r.text, "say where their console IS"
+
+
+def test_forgetting_the_handler_is_caught_here_not_in_production():
+    """Without it the refusal is an unhandled exception. This test is the
+    reason that cannot ship quietly."""
+    r = _wrong_tier_app(handler=False).get("/admin/")
+    assert r.status_code != 403, (
+        "if this starts passing, the handler is no longer needed and the "
+        "install_html_denied_handler call in main.py can go")
 

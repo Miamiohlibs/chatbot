@@ -503,7 +503,15 @@ from src.api.admin.killswitch_router import build_killswitch_router  # noqa: E40
 # secret as well; a caller arriving cold is, exactly as before.
 _admin_token = os.getenv("ADMIN_API_TOKEN", "").strip()
 from src.api.admin.sso import load_config as _load_sso_config  # noqa: E402
-from src.api.admin.sso_router import make_caller_reader  # noqa: E402
+from src.api.admin.sso_router import (  # noqa: E402
+    install_html_denied_handler,
+    make_caller_reader,
+)
+
+# Renders a role refusal as a PAGE. Without it the guard's refusal
+# surfaces as a 500, and with the older HTTPException route it showed
+# the reader a JSON envelope wrapped around the heading.
+install_html_denied_handler(app)
 
 _sso_cfg = _load_sso_config()
 

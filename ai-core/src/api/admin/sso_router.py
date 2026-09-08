@@ -64,6 +64,38 @@ from src.api.admin.sso import (
 
 logger = logging.getLogger(__name__)
 
+
+class HtmlDenied(Exception):
+    """A refusal whose body is a PAGE, raised from a dependency.
+
+    FastAPI JSON-encodes HTTPException.detail, so putting HTML in there and
+    setting content-type: text/html renders the JSON envelope as part of
+    the page -- the reader sees a literal {"detail":" above the heading and
+    "} beneath it. Reported 2026-09-08 with a screenshot.
+
+    A dependency cannot return a Response, only raise, so this carries the
+    body and install_html_denied_handler() turns it into one.
+    """
+
+    def __init__(self, html_body: str, status_code: int = 403):
+        super().__init__("access denied")
+        self.html_body = html_body
+        self.status_code = status_code
+
+
+def install_html_denied_handler(app) -> None:
+    """Render HtmlDenied as a page. Call once, on the app.
+
+    Without it the exception surfaces as a 500 -- so this is not optional
+    decoration, and the test that asserts a 403 page is what stops it being
+    forgotten.
+    """
+    from fastapi.responses import HTMLResponse  # type: ignore
+
+    @app.exception_handler(HtmlDenied)
+    async def _render(_request, exc: "HtmlDenied"):  # noqa: ANN202
+        return HTMLResponse(exc.html_body, status_code=exc.status_code)
+
 # Shibboleth's browser-facing logout flow -- NOT the SAML SLO endpoint,
 # which expects a signed LogoutRequest and 400s a plain GET. We link a
 # person here because we cannot end their IdP session for them.
@@ -439,17 +471,13 @@ def make_admin_guard(*, cfg: SSOConfig, token: str = "",
                 who = Caller(role=_role, uid=uid, via="sso")
                 if who.may(require):
                     return who
-                raise HTTPException(
-                    status_code=403,
-                    detail=_denied_page(
-                        "Not your part of the console",
-                        "<p>You are signed in as <code>" + html.escape(uid)
-                        + "</code>, and this page belongs to the operators "
-                          "group.</p><p>The librarian console is at "
-                          "<a href='/librarian/'>/librarian/</a>. If you "
-                          "need this page, ask an operator to add you.</p>"),
-                    headers={"content-type": "text/html; charset=utf-8"},
-                )
+                raise HtmlDenied(_denied_page(
+                    "Not your part of the console",
+                    "<p>You are signed in as <code>" + html.escape(uid)
+                    + "</code>, and this page belongs to the operators "
+                      "group.</p><p>The librarian console is at "
+                      "<a href='/librarian/'>/librarian/</a>. If you "
+                      "need this page, ask an operator to add you.</p>"))
 
         if token and cfg.allow_token_fallback:
             supplied = (
