@@ -927,3 +927,49 @@ async def test_with_the_fallback_off_the_key_names_nobody():
     peek_on = make_caller_reader(cfg=c_on, token="tok")
     who = await peek_on(_Req(query="key=tok"))
     assert who is not None and who.is_operator
+
+
+# --- signing out ---------------------------------------------------------
+
+def _logout_response(c=None):
+    from fastapi import FastAPI
+    from starlette.testclient import TestClient
+
+    from src.api.admin.sso_router import build_sso_router
+
+    app = FastAPI()
+    app.include_router(build_sso_router(c or cfg()))
+    return TestClient(app, raise_server_exceptions=False).get(
+        "/admin/sso/logout")
+
+
+def test_the_expiry_matches_the_cookie_it_is_expiring():
+    """Starlette's delete_cookie defaults to secure=False, httponly=False,
+    so the expiry we sent did not look like the cookie we issued (Secure,
+    HttpOnly, SameSite=lax). Name+path is what identifies a cookie so this
+    mostly worked, but a browser enforcing the Secure pairing would keep
+    the session alive with nothing on screen to say so."""
+    heads = _logout_response().headers.get_list("set-cookie")
+    assert heads, "logout set no cookies at all"
+    for h in heads:
+        low = h.lower()
+        assert "max-age=0" in low, h
+        assert "secure" in low, h
+        assert "httponly" in low, h
+        assert "samesite=lax" in low, h
+
+
+def test_signing_out_says_the_miami_session_is_still_open():
+    """Reported 2026-09-08 as "logout does not work". It did -- our cookie
+    was cleared. But we publish no SingleLogoutService, so the IdP still
+    holds a session and /admin/ lets you back in without a prompt, which
+    is indistinguishable from a sign-out that did nothing.
+
+    We cannot end their Miami session, so the page has to say so rather
+    than claim a sign-out it did not perform."""
+    from src.api.admin.sso_router import _IDP_BROWSER_LOGOUT
+
+    body = _logout_response().text
+    assert "still signed in to Miami" in body
+    assert _IDP_BROWSER_LOGOUT in body
+

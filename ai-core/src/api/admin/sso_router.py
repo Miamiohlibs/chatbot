@@ -59,6 +59,11 @@ from src.api.admin.sso import (
 
 logger = logging.getLogger(__name__)
 
+# Shibboleth's browser-facing logout flow -- NOT the SAML SLO endpoint,
+# which expects a signed LogoutRequest and 400s a plain GET. We link a
+# person here because we cannot end their IdP session for them.
+_IDP_BROWSER_LOGOUT = "https://muidp.miamioh.edu/idp/profile/Logout"
+
 
 def _saml_request(request: Any) -> dict:
     """Translate a Starlette request into the shape python3-saml wants.
@@ -227,15 +232,38 @@ def build_sso_router(cfg: SSOConfig) -> Any:
 
     @router.get("/logout")
     async def logout() -> Response:
+        # SAY WHAT THIS DOES AND DOES NOT DO.
+        #
+        # We publish no SingleLogoutService and implement no SLO, so this
+        # ends OUR session and cannot touch Miami's. The visible effect of
+        # that is a sign-out that looks broken: clear the cookie, click
+        # /admin/ again, and the IdP -- still holding a session -- sends you
+        # straight back in with no prompt. Reported 2026-09-08 as "logout
+        # does not work". It worked; it just was not the whole of what
+        # "logged out" means to a person on a shared machine.
         resp = HTMLResponse(_denied_page(
-            "Signed out.",
-            'You are signed out of the chatbot dashboard. '
+            "Signed out of the chatbot.",
+            "Your chatbot session is cleared. "
+            "<strong>You are still signed in to Miami</strong>, so opening "
+            "the console again will let you back in without asking. "
+            "On a shared computer, finish at "
+            f'<a href="{_IDP_BROWSER_LOGOUT}">Miami\'s sign-out page</a>'
+            ".<br><br>"
             '<a href="/admin/sso/login">Sign in again</a>.'))
         # Every path it was ever set on, including the single one used
         # before 2026-09-01 -- a session left behind at a path the logout
         # forgot is a sign-out that did not sign anybody out.
+        #
+        # ATTRIBUTES MUST MATCH THE SET. Starlette's delete_cookie defaults
+        # to secure=False, httponly=False, so the expiry we sent did not
+        # look like the cookie we issued (Secure, HttpOnly, SameSite=lax).
+        # Name+path is what identifies a cookie, so this mostly worked --
+        # but "mostly" is not a property to leave in a sign-out, and a
+        # browser that does enforce the Secure pairing would keep the
+        # session alive with no way for the reader to tell.
         for path in {*COOKIE_PATHS, COOKIE_PATH}:
-            resp.delete_cookie(SESSION_COOKIE, path=path)
+            resp.delete_cookie(SESSION_COOKIE, path=path,
+                               httponly=True, secure=True, samesite="lax")
         return resp
 
     @router.get("/whoami")
