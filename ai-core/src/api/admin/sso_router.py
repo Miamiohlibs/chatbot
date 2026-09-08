@@ -166,7 +166,21 @@ def build_sso_router(cfg: SSOConfig) -> Any:
             )
         target = safe_next(request.query_params.get("next"))
         auth = _auth(request)
-        return RedirectResponse(auth.login(return_to=target), status_code=302)
+        # ForceAuthn ONLY when arriving from our own sign-out.
+        #
+        # We cannot end Miami's session (no SLO), so signing out and back in
+        # normally costs nothing and asks nothing -- which is what made the
+        # sign-out look broken. ForceAuthn does not end their session either,
+        # but it makes the IdP re-prompt, so the person who just signed out
+        # has to prove who they are again. That is most of what "signed out"
+        # means to somebody on a shared machine.
+        #
+        # Not the default: making every sign-in re-prompt would throw away
+        # the point of single sign-on. Needs no signing key and nothing from
+        # Miami IT -- it is an attribute on the request they already accept.
+        forced = request.query_params.get("force") == "1"
+        return RedirectResponse(
+            auth.login(return_to=target, force_authn=forced), status_code=302)
 
     @router.post("/acs")
     async def acs(request: Request) -> Response:
@@ -248,8 +262,10 @@ def build_sso_router(cfg: SSOConfig) -> Any:
             "the console again will let you back in without asking. "
             "On a shared computer, finish at "
             f'<a href="{_IDP_BROWSER_LOGOUT}">Miami\'s sign-out page</a>'
-            ".<br><br>"
-            '<a href="/admin/sso/login">Sign in again</a>.'))
+            " — that ends the Miami session for every site, which we cannot "
+            "do from here.<br><br>"
+            '<a href="/admin/sso/login?force=1">Sign in again</a>'
+            " (asks for your password, even though Miami still knows you)."))
         # Every path it was ever set on, including the single one used
         # before 2026-09-01 -- a session left behind at a path the logout
         # forgot is a sign-out that did not sign anybody out.

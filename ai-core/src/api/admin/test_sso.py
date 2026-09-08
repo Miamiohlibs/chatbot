@@ -973,3 +973,45 @@ def test_signing_out_says_the_miami_session_is_still_open():
     assert "still signed in to Miami" in body
     assert _IDP_BROWSER_LOGOUT in body
 
+
+def test_signing_in_after_a_sign_out_asks_for_the_password_again():
+    """We cannot end Miami's session, so sign-out then sign-in normally
+    costs nothing and asks nothing -- which is what made the sign-out look
+    broken. ForceAuthn makes the IdP re-prompt. It does not end their
+    session, but it means the person who just signed out has to prove who
+    they are again.
+
+    Not the default: re-prompting on every sign-in throws away the point
+    of single sign-on."""
+    import base64
+    import urllib.parse
+    import zlib
+
+    from fastapi import FastAPI
+    from starlette.testclient import TestClient
+
+    from src.api.admin.sso_router import build_sso_router
+
+    app = FastAPI()
+    app.include_router(build_sso_router(cfg()))
+    c = TestClient(app, raise_server_exceptions=False)
+
+    def _authn_request(url):
+        q = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
+        raw = q.get("SAMLRequest", [""])[0]
+        return zlib.decompress(base64.b64decode(raw), -15).decode()
+
+    plain = c.get("/admin/sso/login", follow_redirects=False)
+    forced = c.get("/admin/sso/login?force=1", follow_redirects=False)
+    assert plain.status_code == forced.status_code == 302
+
+    assert 'ForceAuthn="true"' not in _authn_request(
+        plain.headers["location"]), "every sign-in must not re-prompt"
+    assert 'ForceAuthn="true"' in _authn_request(
+        forced.headers["location"]), "the post-sign-out link must re-prompt"
+
+
+def test_the_sign_out_page_offers_the_re_prompting_link():
+    body = _logout_response().text
+    assert "/admin/sso/login?force=1" in body
+
