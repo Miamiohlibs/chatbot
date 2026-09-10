@@ -285,8 +285,15 @@ Each is wrapped so it loads `/opt/chatbot/.env` first and appends to
 sudo crontab -l
 ```
 
-**Note:** `scripts/digest_email.py` exists but nothing schedules it;
-`scripts.alert_digest` is the one that runs.
+**Note:** `scripts/digest_email.py` is NOT scheduled, and scheduling it
+would not work: it is an unfinished scaffold from 2026-04-24 whose database
+and SMTP halves both still raise `NotImplementedError`. Its docstring used
+to suggest a crontab line, which would have failed silently every Monday.
+It is backlog item B3, kept on purpose.
+
+`scripts.alert_digest` is the one that runs, and it is a different thing:
+one operational email to the maintainer about queued alerts, rather than
+one email per subject librarian about their own unreviewed conversations.
 
 ---
 

@@ -10,16 +10,30 @@ Sustainability matters: librarians won't open a dashboard daily, but
 they will click an email link on Monday. The whole Op 1 review loop
 depends on this email actually going out reliably.
 
-Run via cron: `0 8 * * 1` (Monday 8 AM local time).
+DO NOT CRON THIS YET. Both halves below raise NotImplementedError, so a
+crontab entry would fail every Monday and tell nobody. The intended
+schedule, once the two are wired, is `0 8 * * 1` (Monday 8 AM local) --
+or, better, a line in scripts/morning_jobs.sh, which is where everything
+this service mails from has lived since 2026-08-30.
 
 Usage:
     python -m scripts.digest_email                    # full send
     python -m scripts.digest_email --dry-run          # preview only
     python -m scripts.digest_email --librarian 42     # one person
 
-Status: SCAFFOLD. The SMTP send and the Prisma query both raise
-NotImplementedError in this sandbox; the message-building logic is
-pure and tested.
+Status: SCAFFOLD, unchanged since it was written on 2026-04-24. The SMTP
+send and the Prisma query both still raise NotImplementedError ("week 7
+task"); only the message-building logic is real, and it is tested.
+
+Kept deliberately rather than deleted -- it is backlog item B3, blocked on
+the review surface being worth linking to. That block loosened on
+2026-09-08, when /librarian/ opened to all Libraries staff through SSO
+and the three access levels went live.
+
+Not to be confused with scripts/alert_digest.py, which DOES run daily and
+is a different thing entirely: one operational email to the maintainer
+about queued alerts, versus one email per subject librarian about their
+own unreviewed conversations.
 
 See plan: Operations -> Op 1 "Weekly Monday-morning digest email".
 """
