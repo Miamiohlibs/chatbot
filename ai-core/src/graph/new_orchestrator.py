@@ -2295,15 +2295,20 @@ def _append_unanswered_note(
     if _UNANSWERED_MARKER in answer:
         return response  # idempotent
     shown = missing[0] if len(missing) == 1 else missing[0]
+    # The marker appears ONCE, here. It used to be written into this string
+    # AND prepended at the return, so every note that fired read "You also
+    # asked about You also asked about ...". Live 2026-09-09, on a pasted
+    # multiple-choice homework question. The doubling was invisible to the
+    # tests because nothing asserted on this text at all.
     extra = (
-        f" You also asked about \u201c{shown.rstrip('?.! ')}\u201d and I "
+        f"{_UNANSWERED_MARKER} \u201c{shown.rstrip('?.! ')}\u201d and I "
         f"haven't covered that here"
         + (" (along with the rest of your message)" if len(missing) > 1 else "")
         + ". Ask me that one on its own and I'll take a proper run at it, or "
         "a librarian on Ask Us can pick it up: "
         f"{_ASKUS_URL}"
     )
-    return _dc_replace(response, answer=answer.rstrip() + "\n\n" + _UNANSWERED_MARKER + extra)
+    return _dc_replace(response, answer=answer.rstrip() + "\n\n" + extra)
 
 
 _UNANSWERED_MARKER = "You also asked about"

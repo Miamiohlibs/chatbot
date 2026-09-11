@@ -6410,3 +6410,54 @@ def test_no_subject_means_no_line_at_all():
     from src.graph.new_orchestrator import _subject_referral_line
 
     assert _subject_referral_line("who won the bengals game", _FakeDeps([])) == ""
+
+
+# --- the unanswered-part note said its own name twice ---------------------
+
+
+def _note(answer, message):
+    """Run _append_unanswered_note over a minimal response."""
+    from src.graph.new_orchestrator import _append_unanswered_note, TurnResponse
+
+    resp = TurnResponse(
+        answer=answer, is_refusal=False, refusal_trigger=None, citations=[],
+        confidence="medium", intent="subject_librarian", scope={},
+        model_used="test", tokens={"input": 0, "cached_input": 0, "output": 0},
+        fired_corrections=[], agent_stopped_reason=None, latency_ms=1,
+        cited_chunk_ids=[],
+    )
+    return _append_unanswered_note(resp, message).answer
+
+
+_TWO_PART = ("Who is the history librarian? Also what are the hours on "
+             "Saturday?")
+
+
+def test_the_note_names_itself_once():
+    """Live 2026-09-09, on a pasted multiple-choice homework question:
+    "You also asked about You also asked about “Group of answer choices...".
+    The marker was written into the sentence AND prepended at the return."""
+    out = _note("Your subject librarian is Jenny Presnell.", _TWO_PART)
+    assert out.count("You also asked about") == 1, out
+
+
+def test_the_note_still_names_the_dropped_question():
+    out = _note("Your subject librarian is Jenny Presnell.", _TWO_PART)
+    assert "You also asked about" in out
+    assert "hours" in out.lower()
+    assert "\n\nYou also asked about" in out      # no stray leading space
+
+
+def test_a_single_question_gets_no_note():
+    out = _note("King is open until 1am.", "what time does King close?")
+    assert "You also asked about" not in out
+
+
+def test_the_note_is_idempotent():
+    """The marker is the sentinel; it has to still be findable in the text
+    it produces, or a second pass appends a second note."""
+    from src.graph.new_orchestrator import _UNANSWERED_MARKER
+
+    once = _note("Your subject librarian is Jenny Presnell.", _TWO_PART)
+    assert _UNANSWERED_MARKER in once
+    assert _note(once, _TWO_PART).count(_UNANSWERED_MARKER) == 1
