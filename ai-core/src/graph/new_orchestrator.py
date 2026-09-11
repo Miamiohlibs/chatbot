@@ -1231,6 +1231,10 @@ def _run_turn(
             # cases on 2026-08-18 and answered them with Primo.
             ("adobe_access", _ff.adobe_access_answer),
             ("print_scan_wifi", _ff.printing_scanning_wifi_answer),
+            # "where is the office of the engineering librarians" -- the
+            # same 2026-08-17 ruling as the group below, but with a better
+            # destination than the desk, so it takes its question first.
+            ("staff_office", _staff_office_answer),
             # OPERATOR RULING 2026-08-17, restated 2026-08-18: any library
             # hardware or infrastructure that the WEBSITE does not cover goes
             # to the service desk rather than being answered from memory.
@@ -4672,6 +4676,74 @@ def _staff_directory_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
               "snippet": "Rentschler Library — staff"}],
         )
     return None
+
+
+# Where a LIBRARIAN's office is. Live, 2026-09-07: "where is the office of
+# the engineering librarians" was answered
+#
+#   "Edward King Library is at 151 S. Campus Ave., Oxford, OH 45056 [1].
+#    The subject liaisons directory is the relevant place to check
+#    engineering-librarian details [2]. I haven't covered the engineering
+#    librarians' office location."
+#
+# -- a street address for a building nobody asked about, stated first and
+# with a citation, followed by an admission that the actual question went
+# unanswered. Someone skimming walks to King. Nothing in our data supports
+# sending them there: the Librarian table has name, email, phone, title and
+# campus, and no office column at all, so the address came from the nearest
+# library record rather than from anything about these people.
+#
+# There is no single "engineering librarian" either -- Kristen Adams has
+# Chemical/Paper/Biomedical and Mechanical/Manufacturing, Roger Justus has
+# Electrical/Computer and CS/Software, Krista McDonald has Engineering
+# Technology on the regional campuses -- so this answer deliberately does
+# not name a person. It hands over the directory that lists all of them.
+#
+# Operator ruling 2026-08-17 applies directly: a building fact we cannot
+# source goes to the desk rather than to memory. Saying "I don't know which
+# room" is the whole value here; the failure was answering anyway.
+_STAFF_OFFICE_PERSON_RE = re.compile(
+    r"\b(librarians?|liaisons?|archivists?)\b", re.IGNORECASE,
+)
+_STAFF_OFFICE_WHERE_RE = re.compile(
+    r"\bwhere\b|\bwhich\s+(floor|building|room)\b|\bwhat\s+(floor|room)\b",
+    re.IGNORECASE,
+)
+_STAFF_OFFICE_WORD_RE = re.compile(r"\boffices?\b", re.IGNORECASE)
+# "where do I find her office hours" asks WHEN, not WHERE, and the dean's
+# office has its own answer earlier in the table. Post/box office are not
+# ours at all.
+_STAFF_OFFICE_EXCLUDE_RE = re.compile(
+    r"\boffice\s+hours?\b|\bdean'?s?\b|\b(post|box)\s+office\b",
+    re.IGNORECASE,
+)
+
+
+def _staff_office_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
+    """Where a librarian's office is -- which we do not know. See above."""
+    m = message or ""
+    if _STAFF_OFFICE_EXCLUDE_RE.search(m):
+        return None
+    if not (_STAFF_OFFICE_PERSON_RE.search(m)
+            and _STAFF_OFFICE_WHERE_RE.search(m)
+            and _STAFF_OFFICE_WORD_RE.search(m)):
+        return None
+    return (
+        "I don't have office locations for individual librarians, so I can't "
+        "tell you which building or room to go to -- and I'd rather say that "
+        "than send you to the wrong door.\n\n"
+        "The subject liaisons directory lists every subject librarian with "
+        "their email and phone [1], and the staff directory covers everyone "
+        "else [2]. Emailing to arrange a time is the surer route than "
+        "dropping by: librarians teach and hold research consultations, so "
+        "they are often away from their desk. The service desk at the library "
+        "you're in can also point you.",
+        [{"n": 1, "url": _LIAISONS_URL,
+          "snippet": "Miami University Libraries — subject liaisons "
+                     "directory"},
+         {"n": 2, "url": _STAFF_DIRECTORY_URL,
+          "snippet": "Miami University Libraries — Staff"}],
+    )
 
 
 # Case #24: lockers had no searchable chunk, so the bot listed everything
@@ -10984,9 +11056,20 @@ def _subject_referral_line(message: str, deps: "OrchestratorDeps") -> str:
         r = rows[0]
         phone = str(r.get("phone") or "").strip()
         contact = f"{r['email']}, {phone}" if phone else r["email"]
-        return (f"\n\nYou did mention {subject.lower()} -- for help with the "
-                f"research itself, that subject's librarian is {r['name']} "
-                f"({contact}), and they can meet with you.")
+        # CONDITIONAL, never an assertion about what the patron typed.
+        # The old wording was "You did mention <subject>", and the alias
+        # match it rests on is a containment match on the whole message, so
+        # one ordinary English word became a claim about the person's field.
+        # Live, 2026-09-07: "the government office that issues patents" was
+        # refused with "You did mention political science" -- `government`
+        # is an alias for Political Science, which is the right mapping for
+        # "who is the government librarian?" and a falsehood as a report of
+        # what was said. Telling somebody what they said, wrongly, inside a
+        # refusal is the part that stings; the referral itself is still
+        # worth offering, so it is offered as an if.
+        return (f"\n\nIf this is for {subject.lower()} research, that "
+                f"subject's librarian is {r['name']} ({contact}), and they "
+                f"can meet with you.")
     except Exception:  # noqa: BLE001 -- a refusal must still be a refusal
         log.info("refusal referral unavailable", exc_info=True)
         return ""

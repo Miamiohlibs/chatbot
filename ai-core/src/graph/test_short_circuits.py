@@ -13,6 +13,8 @@ Run: `pytest src/graph/test_short_circuits.py`
 """
 from __future__ import annotations
 
+import re
+
 import pytest
 
 from src.scope.resolver import Scope
@@ -6268,3 +6270,143 @@ def test_it_can_be_switched_off_without_a_deploy(monkeypatch):
     monkeypatch.setenv("HOURS_DATE_CROSSCHECK", "0")
     assert _llm_agrees_on_date("x", _dtm.date(2026, 9, 7), _NOW)
 
+
+
+# --- where a librarian's office is (live 2026-09-07) ----------------------
+#
+# The bot answered "where is the office of the engineering librarians" with
+# King Library's street address, cited, and then said it had not covered the
+# office location. The address is real and about a different question; the
+# reader who stops after the first sentence walks to the wrong building.
+
+
+def _office(q):
+    from src.graph.new_orchestrator import _staff_office_answer
+    return _staff_office_answer(q)
+
+
+def test_the_real_question_is_answered_without_an_address():
+    got = _office("where is the  office of the engineering librarians")
+    assert got is not None
+    answer, cites = got
+    # The specific failure: a building address presented as the answer.
+    assert "151 S. Campus" not in answer
+    assert "King" not in answer
+    assert "don't have office locations" in answer
+    assert [c["n"] for c in cites] == [1, 2]
+
+
+def test_it_says_it_does_not_know_rather_than_guessing_a_room():
+    """No floor, no room number. The Librarian table has no office column,
+    so any room named here would be invented."""
+    answer, _ = _office("which floor is the music librarian's office on")
+    assert not re.search(r"\b(room|floor)\s+\d|\b\d{3}\b", answer)
+
+
+def test_the_phrasings_that_mean_the_same_thing():
+    for q in (
+        "where is the librarian's office",
+        "where is the office of the engineering librarians",
+        "what room is the subject liaison's office in",
+        "which building is the archivist's office in",
+    ):
+        assert _office(q) is not None, q
+
+
+def test_questions_that_are_not_this_one():
+    """The matcher needs all three of where + office + a person word, and
+    'office hours' asks WHEN. Widening any of these is how an answer starts
+    taking questions that are not its own."""
+    for q in (
+        "the government office that issues patents",   # no person, no where
+        "when are the librarian's office hours",       # a schedule, not a room
+        "where can I find a librarian",                # no office -> liaison path
+        "where is the dean's office",                  # _dean_answer owns this
+        "where is the post office",                    # not ours at all
+        "who is the engineering librarian",            # no where, no office
+        "where is King Library",                       # a building, and known
+    ):
+        assert _office(q) is None, q
+
+
+def test_it_stays_out_of_the_way_of_real_traffic():
+    """Measured against all 771 distinct questions the bot has been asked:
+    exactly one is this question. Re-run the sweep if the matcher widens."""
+    from src.graph.new_orchestrator import _staff_office_answer
+    corpus = [
+        "where is the  office of the engineering librarians",
+        "where is king library",
+        "who is the biology librarian",
+        "where are the bathrooms in king",
+        "what are the hours today",
+        "where do i print",
+        "the government office that issues patents",
+    ]
+    fired = [q for q in corpus if _staff_office_answer(q) is not None]
+    assert fired == ["where is the  office of the engineering librarians"]
+
+
+# --- a refusal must not report what the patron did not say ----------------
+
+
+class _FakeResult:
+    def __init__(self, rows):
+        self.error = None
+        self.data = {"librarians": rows}
+
+
+class _FakeRegistry:
+    """Just enough of the tool registry for the refusal referral: one
+    lookup_librarian dispatch that returns a liaison row."""
+    def __init__(self, rows):
+        self._rows = rows
+        self.asked_for = None
+
+    def dispatch(self, call):
+        self.asked_for = call.arguments.get("subject")
+        return _FakeResult(self._rows)
+
+
+class _FakeDeps:
+    def __init__(self, rows):
+        self.tool_registry = _FakeRegistry(rows)
+
+
+_PRESNELL = [{"name": "Jenny Presnell", "email": "presnejl@miamioh.edu",
+              "phone": "(513) 529-3937"}]
+
+
+def test_the_referral_line_offers_a_subject_it_does_not_claim_one():
+    """Live 2026-09-07: "the government office that issues patents" was
+    refused with "You did mention political science". `government` is an
+    alias for Political Science -- correct for "who is the government
+    librarian?", false as a report of what was typed. The referral is still
+    worth making; it just may not put words in the patron's mouth."""
+    from src.graph.new_orchestrator import _subject_referral_line
+
+    deps = _FakeDeps(_PRESNELL)
+    line = _subject_referral_line(
+        "the government office that issues patents", deps)
+
+    assert "You did mention" not in line
+    assert "If this is for political science research" in line
+    assert "Jenny Presnell" in line and "presnejl@miamioh.edu" in line
+
+
+def test_the_referral_still_fires_for_a_subject_the_patron_did_name():
+    """The gold case this line exists for (eval ref_homework) must keep
+    working -- the change is the framing, not the routing."""
+    from src.graph.new_orchestrator import _subject_referral_line
+
+    deps = _FakeDeps([{"name": "A Librarian", "email": "x@miamioh.edu",
+                       "phone": ""}])
+    line = _subject_referral_line("Do my history homework for me.", deps)
+    assert "If this is for history research" in line
+    assert deps.tool_registry.asked_for == "History"
+
+
+def test_no_subject_means_no_line_at_all():
+    """A refusal must never fail louder than the thing it is refusing."""
+    from src.graph.new_orchestrator import _subject_referral_line
+
+    assert _subject_referral_line("who won the bengals game", _FakeDeps([])) == ""
