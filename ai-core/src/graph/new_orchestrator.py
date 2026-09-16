@@ -5570,6 +5570,28 @@ _FOLLOW_UP_SHAPE_RE = re.compile(
     re.IGNORECASE,
 )
 
+# A DANGLING PLURAL PRONOUN IS AN ANTECEDENT REQUEST.
+#
+# Live 2026-09-11:
+#   "How many libraries are there"  -> "four Oxford-campus locations"
+#   "what are they called?"         -> REFUSED as outside the bot's scope
+#
+# Four words that name nothing, so the stateless classifier had nothing to
+# hold on to -- and none of the shapes above catch it: no "and", no "what
+# about", no "the other one". The pronoun IS the shape.
+#
+# PLURALS ONLY. "it", "that" and "this" were measured too: across the 774
+# distinct questions the bot has been asked, they/them/those/these newly
+# catch exactly this one message and nothing else, while adding it/that/this
+# sweeps in 17 -- "is the library open this weekend", "is there a makerspace
+# on this campus", "this is a test", "the government office that issues
+# patents". Those are new questions wearing a demonstrative, and inheriting
+# the previous turn's intent for them would be a worse bug than the one
+# being fixed.
+_FOLLOW_UP_PRONOUN_RE = re.compile(
+    r"\b(?:they|them|those|these)\b", re.IGNORECASE,
+)
+
 # If the message names its own subject it is a new question, not a reply.
 # Reuses the find-help material test plus the library/campus aliases, so
 # there is no third vocabulary list to keep in sync.
@@ -5602,7 +5624,9 @@ def _is_context_follow_up(message: str, last_turn: dict) -> bool:
         return False
     if _names_its_own_topic(m):
         return False
-    return explicit or bool(_FOLLOW_UP_SHAPE_RE.search(m))
+    return (explicit
+            or bool(_FOLLOW_UP_SHAPE_RE.search(m))
+            or bool(_FOLLOW_UP_PRONOUN_RE.search(m)))
 
 
 
@@ -5825,8 +5849,20 @@ def _makerspace_instruction_answer(
         "work out the session with you.\n\n"
         f"For anything more general, the MakerSpace is on {_MS_GENERAL_EMAIL} "
         f"or {_MS_GENERAL_PHONE} [1].\n\n"
-        "It's on the **third floor of King Library, room 303** [2], open "
-        "Monday-Friday 9am-4pm by appointment.",
+        # NO SCHEDULE HERE. This used to end "open Monday-Friday 9am-4pm by
+        # appointment" -- a week's opening hours written into a constant,
+        # cited to the MakerSpace page as though the page still said it.
+        #
+        # A librarian filed a rating-1 report: "The makerspace is open
+        # Sundays noon-4pm. The chatbot says it is closed on Sundays." The
+        # turn they rated came from the LIVE LibCal path, so the calendar
+        # said closed too -- but this line asserts Monday-Friday from code,
+        # where no calendar update can ever reach it, and it would have gone
+        # on saying so after LibCal was fixed. The room number stays: a room
+        # is a building fact the page carries. The days and times do not.
+        "It's on the **third floor of King Library, room 303** [2], and "
+        "visits are by appointment. Ask me for the MakerSpace's hours if "
+        "you need them -- those come live from the calendar.",
         [{"n": 1, "url": _MAKERSPACE_GUIDE_URL,
           "snippet": "Miami University Libraries — MakerSpace guide"},
          {"n": 2, "url": _MAKERSPACE_PAGE_URL,

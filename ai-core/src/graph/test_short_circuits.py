@@ -6461,3 +6461,142 @@ def test_the_note_is_idempotent():
     once = _note("Your subject librarian is Jenny Presnell.", _TWO_PART)
     assert _UNANSWERED_MARKER in once
     assert _note(once, _TWO_PART).count(_UNANSWERED_MARKER) == 1
+
+
+# --- a dangling plural pronoun is a follow-up ----------------------------
+#
+# Live 2026-09-11: "How many libraries are there" -> "four Oxford-campus
+# locations", then "what are they called?" -> refused as out of scope.
+
+
+_SPACE_TURN = {"intent": "space_info", "campus": "oxford", "library": "king"}
+
+
+_NO_LAST = object()
+
+
+def _followup(message, last=_NO_LAST):
+    from src.graph.new_orchestrator import _is_context_follow_up
+    # `last or _SPACE_TURN` would turn an explicit empty dict back into a
+    # history, which is exactly what test_no_history_means_no_inheritance
+    # is trying to rule out.
+    return _is_context_follow_up(
+        message, _SPACE_TURN if last is _NO_LAST else last)
+
+
+def test_what_are_they_called_is_a_follow_up():
+    assert _followup("what are they called?")
+
+
+def test_the_other_plural_pronouns_too():
+    for q in ("where are they", "how much are they", "can I use them",
+              "what are those", "are these free"):
+        assert _followup(q), q
+
+
+def test_the_shapes_that_already_worked_still_do():
+    for q in ("and the Oxford one", "what about hamilton", "no I meant Oxford"):
+        assert _followup(q), q
+
+
+def test_a_demonstrative_is_not_a_pronoun_follow_up():
+    """Measured across all 774 distinct real questions: adding it/that/this
+    sweeps in 17 messages that are new questions, not replies. Keeping the
+    rule to plurals is what makes it safe."""
+    for q in ("is the library open this weekend",
+              "is there a makerspace on this campus",
+              "this is a test",
+              "cancel it"):
+        assert not _followup(q), q
+
+
+def test_no_history_means_no_inheritance():
+    """The first message of a conversation has nothing to inherit."""
+    assert not _followup("what are they called?", {})
+    assert not _followup("what are they called?", {"intent": None})
+
+
+def test_a_long_message_is_a_question_not_a_reply():
+    """The word budget still applies -- a pronoun inside a full question
+    does not make it a follow-up."""
+    assert not _followup(
+        "I read that some libraries have quiet floors and I wondered "
+        "whether they are bookable here")
+
+
+# --- the MakerSpace week, as LibCal actually publishes it -----------------
+#
+# A librarian filed a rating-1 report on 2026-09-01: "The makerspace is open
+# Sundays noon-4pm. The chatbot says it is closed on Sundays."
+#
+# The operator later produced the LibCal admin view for the week of
+# Sun 2026-09-27 -- Sat 2026-10-03, and it reads:
+#
+#   Sun 12pm-4pm | Mon 9am-5pm | Tue 9am-5pm | Wed 9am-7pm
+#   Thu 9am-7pm  | Fri 9am-5pm | Sat Closed
+#
+# Every row the bot gave that day matched this pattern EXCEPT Sunday, and
+# the Sunday it was asked about was 2026-09-06 -- Labor Day weekend. So the
+# calendar was right, the reader was right, and the answer was right about
+# the week it covered; what was wrong was that it read as a standing
+# timetable (fixed 2026-09-04 in 0eff364, which added "This week (31 Aug -
+# 6 Sep) ... Hours vary from week to week").
+#
+# These lock the reader against the real published week, because "Sunday is
+# closed" is the specific thing a librarian went to the trouble of
+# reporting, and nothing in the suite held LibCal's own numbers.
+
+_LIBCAL_MAKERSPACE_WEEK = """\
+• **Monday (2026-09-28)**: 9am to 5pm
+• **Tuesday (2026-09-29)**: 9am to 5pm
+• **Wednesday (2026-09-30)**: 9am to 7pm
+• **Thursday (2026-10-01)**: 9am to 7pm
+• **Friday (2026-10-02)**: 9am to 5pm
+• **Saturday (2026-10-03)**: Closed
+• **Sunday (2026-10-04)**: 12pm to 4pm
+"""
+
+
+def test_a_published_sunday_survives_the_week_collapse():
+    """The reported failure, run against LibCal's real rows: Sunday must
+    come out as its own open clause, never folded in with Saturday."""
+    from src.graph.new_orchestrator import _collapse_week
+
+    out = _collapse_week(_LIBCAL_MAKERSPACE_WEEK)
+    assert "Sunday, 12pm to 4pm" in out, out
+    assert "closed Saturday and Sunday" not in out.lower(), out
+    assert "closed Saturday" in out, out
+
+
+def test_the_whole_published_week_comes_back_intact():
+    from src.graph.new_orchestrator import _collapse_week
+
+    assert _collapse_week(_LIBCAL_MAKERSPACE_WEEK) == (
+        "Monday and Tuesday, 9am to 5pm; Wednesday and Thursday, 9am to 7pm; "
+        "Friday, 9am to 5pm; Sunday, 12pm to 4pm; closed Saturday"
+    )
+
+
+def test_a_libcal_interval_for_sunday_reads_as_open():
+    """One rung lower: the day reader itself. "closed" and "not posted"
+    render differently, which is how we know the 2026-09-06 answer came
+    from LibCal saying closed rather than from missing data."""
+    from src.tools.libcal_comprehensive_tools import describe_libcal_day
+
+    state, display = describe_libcal_day(
+        {"status": "open", "hours": [{"from": "12pm", "to": "4pm"}]})
+    assert (state, display) == ("open", "12pm to 4pm")
+    assert describe_libcal_day({"status": "closed", "hours": []})[0] == "closed"
+    assert describe_libcal_day(None)[0] == "unknown"
+
+
+def test_the_instruction_answer_states_no_schedule_of_its_own():
+    """It used to end "open Monday-Friday 9am-4pm by appointment" -- a
+    standing claim in a constant, which no LibCal correction could reach."""
+    from src.graph.new_orchestrator import _makerspace_instruction_answer
+
+    answer, _ = _makerspace_instruction_answer(
+        "Can I schedule a workshop for my class in the makerspace?")
+    assert "Monday-Friday" not in answer
+    assert not re.search(r"\d\s*(am|pm)\s*[-–]\s*\d\s*(am|pm)", answer), answer
+    assert "room 303" in answer.lower()
