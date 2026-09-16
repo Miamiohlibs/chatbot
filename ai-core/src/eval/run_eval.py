@@ -626,11 +626,16 @@ def run_eval(
     results_out: Optional[Path] = None,
     skip_ids_in: Optional[Path] = None,
     judge_model: str = "",
+    gold_path: Optional[Path] = None,
 ) -> EvalReport:
     """Run the eval suite.
 
     Args:
         filter_category: If set, only run gold cases in this category.
+        gold_path: Gold set to run. None -> src/eval/golden_set.jsonl.
+            Pass golden_real_traffic.jsonl to score the questions people
+            actually asked; that is a SEPARATE number from the curated
+            set and the two must not be compared.
         scope_only: True -> only exercise src/scope/resolver.py (legacy mode).
         with_judge: True -> after each turn, run the LLM-as-judge against
             the bot's response. Skips cases where the response is
@@ -648,7 +653,8 @@ def run_eval(
             with_judge=True, uses `_real_judge_llm` (calls OpenAI).
             Tests pass a stub.
     """
-    questions = load_golden_set()
+    questions = (load_golden_set(gold_path) if gold_path
+                 else load_golden_set())
     if filter_category:
         questions = [q for q in questions if q.category == filter_category]
 
@@ -1204,7 +1210,8 @@ def _result_row(r: "EvalResult") -> dict:
     }
 
 
-def _eval_budget_ok(filter_category: "Optional[str]") -> bool:
+def _eval_budget_ok(filter_category: "Optional[str]",
+                    gold_path: "Optional[Path]" = None) -> bool:
     """False when this run would breach the month's eval purse.
 
     A category filter charges pro-rata rather than the full-run estimate, so
@@ -1227,7 +1234,8 @@ def _eval_budget_ok(filter_category: "Optional[str]") -> bool:
             return True
         estimate = B.EVAL_RUN_ESTIMATE_USD
         if filter_category:
-            gold = load_golden_set()
+            gold = (load_golden_set(gold_path) if gold_path
+                    else load_golden_set())
             share = sum(1 for c in gold
                         if getattr(c, "category", "") == filter_category)
             if share and len(gold):
@@ -1354,6 +1362,18 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Run the smart-chatbot eval suite.")
     parser.add_argument("--filter", help="Only run questions in this category.")
     parser.add_argument(
+        "--gold",
+        type=Path,
+        default=None,
+        help=(
+            "Gold set to run instead of src/eval/golden_set.jsonl. "
+            "golden_real_traffic.jsonl holds the questions real people "
+            "actually asked, which is a different measurement from the "
+            "curated set and should be reported as its own number -- the "
+            "two are not comparable."
+        ),
+    )
+    parser.add_argument(
         "--results-out",
         default="eval_results.jsonl",
         help=(
@@ -1438,7 +1458,7 @@ def main() -> int:
     # AND leaves a half-finished result set that cannot be compared to
     # anything. --no-budget-gate exists for a deliberate override.
     if not args.scope_only and not args.no_budget_gate:
-        if not _eval_budget_ok(args.filter):
+        if not _eval_budget_ok(args.filter, args.gold):
             return 3
 
     # Stream per-case rows to disk DURING the run (flushed per turn)
@@ -1454,6 +1474,7 @@ def main() -> int:
         with_real_llm=args.with_real_llm,
         results_out=_results_out,
         judge_model=args.judge_model,
+        gold_path=args.gold,
     )
     _print_report(report, verbose=args.verbose, scope_only=args.scope_only)
 
