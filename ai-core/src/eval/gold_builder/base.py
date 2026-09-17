@@ -125,6 +125,15 @@ HEADER = """\
 
 ROWS = []
 
+# Destinations that are never a WRONG citation, whatever was asked. The
+# first run scored 56 rows down on "some_invalid" citations, and the four
+# commonest offenders were Ask Us, the liaisons directory, Databases A-Z
+# and Primo -- the bot's general navigation, cited alongside a correct
+# answer. allowed_urls is meant to catch a reply pointing somewhere it
+# should not, not to punish "...and a librarian on Ask Us can help".
+ALWAYS_OK = (ASKUS, LIAISONS, DBS, PRIMO, HOURS, GUIDES)
+
+
 def g(id, question, intent, answer, *, campus="oxford", library=None,
       outcome="answer", urls=(), category="", notes=None, origin=None):
     """One gold row. `answer` is the rubric; "REFUSAL" for refusal rows."""
@@ -132,7 +141,9 @@ def g(id, question, intent, answer, *, campus="oxford", library=None,
         "id": id, "question": question, "intent": intent,
         "scope_campus": campus, "scope_library": library,
         "expected_answer": answer, "expected_outcome": outcome,
-        "allowed_urls": list(urls), "category": category,
+        "allowed_urls": sorted(set(urls) | set(ALWAYS_OK),
+                               key=lambda u: (u not in urls, u)),
+        "category": category,
     }
     if notes:
         row["notes"] = notes

@@ -122,9 +122,13 @@ g("rt_str_wait_library_close", "wait, what time does the library close",
 g("rt_str_hamilton_loan",
   "how long can a student keep a book from the Hamilton library",
   "loan_policy",
-  "The student loan period for a book borrowed at Rentschler. Circulation "
-  "policy is essentially the same across campuses, so Oxford's number is "
-  "acceptable -- but the answer should say it applies at Hamilton rather "
-  "than silently answering about Oxford.",
+  "Rentschler's OWN student loan period, from the Hamilton checking-out "
+  "page -- it publishes its own figures and they are not Oxford's. "
+  "CORRECTED 2026-09-17: this row first said the policy was essentially "
+  "the same on every campus and scored the bot wrong for citing "
+  "Rentschler. The corpus carries "
+  "ham.miamioh.edu/library/services/checking-out-materials with Hamilton's "
+  "own periods, and reading the campus's own page is the behaviour we "
+  "want.",
   campus="hamilton", library="rentschler",
   urls=[CIRC, CIRC_FINES, HAM], category=C)

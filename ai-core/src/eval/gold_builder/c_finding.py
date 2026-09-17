@@ -13,9 +13,10 @@ C = "finding"
 
 def item(id, q, extra="", intent="find_resource", **kw):
     g(id, q, intent,
-      "Point at Primo to search for it, with interlibrary loan as the route "
-      "when Miami does not hold it. Do not assert whether we own this "
-      f"particular item. {extra}".strip(),
+      "Point at Primo to search for it, and do not assert whether we own "
+      "this particular item. Naming interlibrary loan as the fallback is "
+      "a bonus, not a requirement -- on a topic search you look first and "
+      f"request second. {extra}".strip(),
       urls=[PRIMO, ILL], category=C, **kw)
 
 item("rt_find_totalitarianism_1", "I'm looking for a book about totalitarianism")
@@ -115,10 +116,10 @@ g("rt_find_start_ai_articles",
 # --- named databases ------------------------------------------------------
 def db(id, q, name, **kw):
     g(id, q, "databases",
-      f"Whether the Libraries subscribe to {name} and how to reach it -- "
-      "through Databases A-Z, signing in with Miami credentials. Do not "
-      "assert a subscription that no source states, and do not refuse: the "
-      "A-Z list is the answer to 'do we have X'.",
+      f"Point at Databases A-Z as the place to look {name} up. That IS the "
+      "answer to 'do we have X' and a refusal is wrong. Mentioning the "
+      "Miami sign-in is helpful but not required, and asserting a "
+      "subscription no source states is worse than omitting it.",
       urls=[DBS, ASKUS], category=C, **kw)
 
 db("rt_db_jstor_1", "is JSTOR available", "JSTOR")

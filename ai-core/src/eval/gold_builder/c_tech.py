@@ -85,14 +85,23 @@ g("rt_tech_ham_equipment", "what services does Rentschler Library offer",
   category=C)
 
 # --- printing, scanning, wifi --------------------------------------------
+# The bot answers both of these with "$0.10 a page, colour $0.25, pay
+# through MUlaa". Those figures are real -- and they are published on
+# RENTSCHLER's page (ham.miamioh.edu/library/services/
+# computers-printing-and-copying), for the Hamilton campus. The question
+# is Oxford's. So the fault is not the quoting, it is the campus: a
+# sourced number carried across a boundary the source never crossed, which
+# is the same shape as the Wertz laptop answer.
 g("rt_print_cost", "how much is printing?", "printing_wifi",
-  "Point at the Printing & WiFi page and let it carry the price. Quoting a "
-  "per-page cost is forbidden -- it changes and cannot be verified.",
+  "Oxford's printing cost, or the Printing & WiFi page if we do not hold "
+  "an Oxford figure. Quoting Rentschler's Hamilton prices for an Oxford "
+  "question is wrong even though the numbers are real and sourced.",
   library="king", urls=[PRINTING], category=C)
 
 g("rt_print_free", "Is there free printing?", "printing_wifi",
-  "Point at the Printing & WiFi page rather than asserting free or paid "
-  "printing with a figure.", library="king", urls=[PRINTING], category=C)
+  "Whether Oxford printing is free or charged, from an Oxford source, or "
+  "the Printing & WiFi page. Not Hamilton's per-page figures.",
+  library="king", urls=[PRINTING], category=C)
 
 g("rt_print_color", "can i print in color", "printing_wifi",
   "Colour printing exists; the Printing & WiFi page carries where and what "

@@ -89,12 +89,16 @@ g("rt_room_gh_120_today",
   campus="middletown", library="gardner_harvey",
   urls=[ROOMS, MID_LIBCAL, MID], category=C)
 
+# CORRECTED 2026-09-17. This row assumed Armstrong is not ours. The room
+# reservations page says otherwise, verbatim: "our room reservation system
+# allows you to reserve rooms in King, Art & Architecture Libraries, CIM
+# studio rooms and Armstrong Student Center study rooms."
 g("rt_room_armstrong", "can I reserve a study room at Armstrong?",
   "room_booking",
-  "Armstrong Student Center is NOT a library: say the Libraries' booking "
-  "covers library spaces and point them at the right place, rather than "
-  "booking a library room as though it were Armstrong.",
-  library="king", urls=[ROOMS, LIBCAL, ASKUS], category=C)
+  "YES -- Armstrong Student Center study rooms are bookable through the "
+  "Libraries' own reservation system, alongside King and Art & "
+  "Architecture. Point at the reservation page.",
+  library="king", urls=[ROOMS, LIBCAL], category=C)
 
 g("rt_room_rentschler_groups", "are there group study rooms at Rentschler",
   "room_booking",
@@ -230,10 +234,17 @@ g("rt_space_when_built_2", "when did King Library built", "space_info",
   "Same history; broken grammar must not change the answer.",
   library="king", urls=[KING], category=C)
 
+# CORRECTED 2026-09-17. This row first said BEST was "not one of the
+# locations we hold hours for". It is: the corpus carries
+# lib.miamioh.edu/about/locations/best-library, "B.E.S.T. Library is
+# permanently closing in Laws Hall. Materials and staff are now located at
+# King Library." The bot answered exactly that and the gold marked it
+# wrong. Checking the corpus before trusting a rubric is the lesson.
 g("rt_space_best_library", "What are the hours of BEST library?", "hours",
-  "BEST Library is not one of the Miami University Libraries locations we "
-  "hold hours for: say so and point at the hours page or Ask Us rather "
-  "than giving King's hours.", urls=[HOURS, ASKUS], category=C)
+  "B.E.S.T. Library has permanently closed and its materials and staff "
+  "moved to King Library -- say so rather than giving it hours. Do not "
+  "answer with King's hours as though BEST were open.",
+  urls=[HOURS, ASKUS, KING], category=C)
 
 g("rt_space_gh_where", "where is gardner harvey library", "location_directions",
   "Gardner-Harvey Library is on the Middletown campus; give its page.",
