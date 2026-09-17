@@ -32,10 +32,14 @@ liaison("rt_lia_math", "Who is the subject librarian for Math",
         "Write the name without the middle initial.")
 liaison("rt_lia_nursing", "Who is the subject librarian for Nursing?",
         "Nursing", "Ginny Boehme", "boehmemv@miamioh.edu")
+# OPERATOR RULING 2026-09-17: "Rob Withers" is acceptable. We do not use
+# middle names when we mention people, and whether "O'Brien Withers" is a
+# double surname or a middle name is not worth failing an answer over. The
+# email is the part that has to be right.
 liaison("rt_lia_religion", "Who is the subject librarian for religion?",
-        "Religion", "Rob O'Brien Withers", "witherre@miamioh.edu",
-        "The surname is hyphenated/apostrophised, not a middle name -- keep "
-        "it whole.")
+        "Religion", "Rob Withers", "witherre@miamioh.edu",
+        "\"Rob O'Brien Withers\" in full is equally correct -- either form "
+        "passes, as long as the email is right.")
 liaison("rt_lia_education", "Who is the education librarian?",
         "Education", "Abigail Morgan", "morgan55@miamioh.edu")
 liaison("rt_lia_history", "Who is the best person to contact about history",

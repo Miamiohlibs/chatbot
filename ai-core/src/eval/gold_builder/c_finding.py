@@ -246,3 +246,38 @@ g("rt_cite_factory_hub",
   "Dependence on the US", "citation_help",
   "Point at the citation guide and the style tools; do not compose the "
   "citation.", urls=[CITATION, ASKUS], category=C)
+
+
+# --- a broken DATABASE is not a broken shelf ------------------------------
+#
+# Live 2026-09-17 03:27, rated thumbs-down:
+#
+#   "is swank video broken?"
+#   -> "Sorry about that. For equipment or anything in the building, the
+#       service desk is the fastest route -- staff there know who fixes
+#       what: (513) 529-4141, or ask at the desk in person."
+#
+# Swank Digital Campus is a LICENSED STREAMING SERVICE. It has no shelf, no
+# desk and nothing in the building; telephoning King about it reaches
+# nobody who can help. The complaint short-circuit matched on "broken" and
+# answered about physical things, which is the one framing that cannot be
+# right here.
+#
+# "Swank" appears NOWHERE in the corpus -- not one chunk -- so the bot
+# cannot know whether it is down, and must not pretend to. What it can do
+# is recognise the KIND of problem: an e-resource that will not load is an
+# access problem, and those go to Ask Us, who can check the subscription
+# and report an outage to the vendor.
+
+g("rt_find_swank_broken", "is swank video broken?", "databases",
+  "Treat this as a LICENSED RESOURCE that will not load, not as broken "
+  "equipment. Say we cannot see the status of a vendor platform, point at "
+  "Ask Us as the route for a resource that is down, and offer Databases "
+  "A-Z for the streaming services we do list. It must NOT answer about "
+  "equipment, the building, or the service desk telephone -- Swank has "
+  "nothing in the building, and nobody at that desk can fix it.",
+  urls=[DBS, ASKUS], category=C,
+  notes="Rated thumbs-down. The complaint short-circuit caught the word "
+        "\"broken\" and answered about physical things. Swank is not in the "
+        "corpus at all, so the answer must not assert anything about its "
+        "state either.")
