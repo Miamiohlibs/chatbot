@@ -169,11 +169,16 @@ g("rt_hours_art_labor_day",
   category=C)
 
 g("rt_hours_music_close", "when does music library close", "hours",
-  "The Amelia Hoover Music Library is CLOSED -- its collection moved into "
-  "King. Say that rather than giving hours.", library="king",
+  "The Amos Music Library is CLOSED -- it shut in 2023 and its collection "
+  "moved into King. Say that rather than giving hours.", library="king",
   urls=[MUSIC, KING], category=C,
   notes="Closure, not a schedule. Giving hours for a closed library sends "
-        "somebody to a locked door.")
+        "somebody to a locked door. "
+        "CORRECTED 2026-09-22: this row first called it the Amelia Hoover "
+        "Music Library. There is no such library -- the name was "
+        "invented, in a rubric written to stop the bot inventing "
+        "things. scripts/verify_gold.py catches a proper noun that "
+        "appears in no source we hold, and this was its first find.")
 
 g("rt_hours_makerspace_close_today", "when does Makerspace close today", "hours",
   "Today's closing time for the King MakerSpace specifically, from LibCal -- "

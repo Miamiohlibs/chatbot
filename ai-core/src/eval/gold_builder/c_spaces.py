@@ -136,9 +136,14 @@ g("rt_space_music_section_2", "do we have a music section in King", "space_info"
   library="king", urls=[MUSIC, KING], category=C)
 
 g("rt_space_music_where_1", "Where is the music library?", "space_info",
-  "The Amelia Hoover Music Library is closed; the collection is in King. Do "
+  "The Amos Music Library closed in 2023 and its collection is in King. Do "
   "not give directions to a closed building.",
-  library="king", urls=[MUSIC, KING], category=C)
+  library="king", urls=[MUSIC, KING], category=C,
+  notes="CORRECTED 2026-09-22: this row first called it the Amelia Hoover "
+        "Music Library. There is no such library -- the name was "
+        "invented, in a rubric written to stop the bot inventing "
+        "things. scripts/verify_gold.py catches a proper noun that "
+        "appears in no source we hold, and this was its first find.")
 
 g("rt_space_music_where_2", "where is the music library", "space_info",
   "The Music Library is closed and its collection is in King.",
