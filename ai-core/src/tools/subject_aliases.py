@@ -38,6 +38,16 @@ SUBJECT_ALIASES = {
     "japanese": "Asian/Asian-American Studies",
     "chinese": "Asian/Asian-American Studies",
     "data science": "Information Systems & Analytics",
+
+    # The Subject table has "Artificial Intelligence Center" (Anna Shaw) and
+    # nothing resolved to it, so "Who is the AI librarian?" reached the
+    # agent with no subject and it named Laura Birkenhauer -- the Student
+    # Success Librarian, whose subject is Student Affairs. Live 2026-08-17.
+    # Bare "ai" is two letters, under the containment floor, so it only
+    # counts when it IS the whole query -- which is exactly right.
+    "artificial intelligence": "Artificial Intelligence Center",
+    "ai literacy": "Artificial Intelligence Center",
+    "ai": "Artificial Intelligence Center",
     "supply chain": "Management",
 
     # Sciences

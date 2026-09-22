@@ -223,6 +223,75 @@ def _strip_contact_lines(answer: str,
     return text.strip(), dropped
 
 
+# --- printing prices ------------------------------------------------------
+#
+# OPERATOR RULING, restated 2026-09-22: NEVER state a per-page printing
+# price, even when a source appears to give one. University IT changes
+# these and a stale figure costs the patron money at the machine.
+#
+# Prompt rule 10 has said so since July and the model states them anyway.
+# On 2026-09-16 "how much is printing?" -- an OXFORD question -- came back
+# with a bold list, "Black and white: $0.10 a page / Colour: $0.25 a page",
+# lifted from Rentschler's HAMILTON page. Two faults in one answer: a price
+# at all, and another campus's price. Prose in a prompt is not enforcement;
+# this is.
+#
+# The whole LINE goes, not just the number, because "Black and white:" left
+# on its own is worse than either.
+_PRICE_RE = re.compile(
+    r"\$\s?\d+(?:\.\d{1,2})?|\b\d{1,3}\s?(?:c|¢|cents?)\b(?=[^\w]|$)",
+    re.IGNORECASE,
+)
+_PRINTING_CONTEXT_RE = re.compile(
+    r"\b(print|prints|printing|printer|printers|photocopy|photocopies|"
+    r"copier|copies|copy)\b", re.IGNORECASE)
+_PRINTING_PAGE = "https://www.lib.miamioh.edu/use/technology/printing/"
+
+
+def _strip_printing_prices(answer: str) -> "tuple[str, int]":
+    """Drop any line that prices printing. Returns (kept, lines_dropped).
+
+    Scoped to lines that mention printing AND carry a money figure, so a
+    fine, a replacement charge or a room rate is untouched -- those are
+    real numbers the patron needs and no ruling forbids them.
+    """
+    text = answer or ""
+    if not (_PRINTING_CONTEXT_RE.search(text) and _PRICE_RE.search(text)):
+        return text, 0
+    kept, dropped = [], 0
+    for line in text.splitlines():
+        if _PRICE_RE.search(line) and _PRINTING_CONTEXT_RE.search(line):
+            dropped += 1
+            continue
+        kept.append(line)
+    if not dropped:
+        # The price and the word "printing" are in the same answer but not
+        # the same line -- "Printing is charged by the page:" then a bare
+        # "- $0.10". Take the money lines too; a naked figure under a
+        # printing sentence is the same claim split in two.
+        #
+        # `kept` is RESET first. Without that it still holds every line
+        # from the pass above, and the answer comes back doubled -- the
+        # priced version followed by the stripped one, which is worse than
+        # doing nothing.
+        kept = []
+        for line in text.splitlines():
+            if _PRICE_RE.search(line):
+                dropped += 1
+            else:
+                kept.append(line)
+    out = "\n".join(kept)
+    while "\n\n\n" in out:
+        out = out.replace("\n\n\n", "\n\n")
+    if dropped:
+        out = out.rstrip() + (
+            f"\n\nPrinting costs change, so I would rather not quote one: "
+            f"the Printing & WiFi page has the current charges -- "
+            f"{_PRINTING_PAGE}"
+        )
+    return out.strip(), dropped
+
+
 def _carries_substance(text: str) -> bool:
     """Is there still an answer here, or only punctuation and markers?"""
     stripped = _EMAIL_RE.sub(" ", text or "")
@@ -560,6 +629,14 @@ def process_synthesizer_output(
                 ),
             )
         )
+
+    # Enforce the no-printing-price ruling on the way out, whatever else
+    # happened above. See _strip_printing_prices.
+    _priced, _n = _strip_printing_prices(output.answer)
+    if _n:
+        logger.info("printing: removed %d priced line(s) and pointed at the "
+                    "Printing & WiFi page instead", _n)
+        output = replace(output, answer=_priced)
 
     # --- Decide ---
     if not failures:

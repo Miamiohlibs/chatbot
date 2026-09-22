@@ -208,23 +208,33 @@ g("rt_space_mid_computer_lab",
   urls=[MID, MID_TEC], category=C)
 
 # --- counting and naming the libraries ------------------------------------
+# OPERATOR RULING 2026-09-22: Oxford has TWO libraries, King and Art &
+# Architecture. That is the whole list. Walter Havighurst Special
+# Collections is a department on King's third floor, not a third library,
+# and the LibAnswers FAQ that says "four" is wrong. Our own Library table
+# agrees with the operator: two Oxford rows.
+#
+# Live 2026-09-11 the bot said "four Oxford-campus locations", then listed
+# three, then narrated its own evidence -- "the sources provided identify
+# three Oxford library locations rather than four."
 g("rt_space_how_many", "How many libraries are there", "space_info",
-  "Name the locations rather than asserting a count the sources disagree "
-  "on: King and the Art & Architecture (Wertz) Library at Oxford, with "
-  "Walter Havighurst Special Collections inside King, plus Rentschler at "
-  "Hamilton and Gardner-Harvey at Middletown. A count and a list that "
-  "contradict each other is the failure to avoid.",
+  "TWO at Oxford -- King Library and the Art & Architecture (Wertz) "
+  "Library -- plus Rentschler at Hamilton and Gardner-Harvey at "
+  "Middletown. Special Collections is a department inside King, not a "
+  "separate library. A count and a list that contradict each other is the "
+  "failure to avoid.",
   urls=[HOURS, KING, WERTZ, HAM, MID], category=C,
   notes="Live 2026-09-11: answered 'four Oxford-campus locations', then "
         "listed three and said the sources showed three.")
 
 g("rt_space_four_names",
   "what are the four libraries on oxford's campus called?", "space_info",
-  "List the Oxford locations we can source -- King, Art & Architecture "
-  "(Wertz), and Walter Havighurst Special Collections within King. If that "
-  "is three rather than four, say so plainly without narrating the "
-  "evidence bundle ('the sources provided identify three...').",
-  urls=[HOURS, KING, WERTZ, SPEC], category=C)
+  "There are TWO Oxford libraries, not four: King Library and the Art & "
+  "Architecture (Wertz) Library. Correct the premise plainly. Do not pad "
+  "the list to four, and do not narrate the evidence bundle ('the sources "
+  "provided identify three...').",
+  urls=[HOURS, KING, WERTZ], category=C,
+  notes="The patron's premise is wrong and the answer has to say so.")
 
 g("rt_space_named_after", "Who is the library named after", "space_info",
   "Edgar Weld King, a longtime library director and benefactor.",
@@ -339,11 +349,20 @@ g("rt_sc_reservation", "how to make reservation to special collections",
   "How to request materials or arrange a visit, from the visiting page.",
   library="special", urls=[SPEC, SPEC_VISIT], category=C)
 
+# KEPT, on the operator's ruling 2026-09-22. Verified: the crawled
+# Special Collections pages do NOT state this -- the department does, and
+# it is recorded as a DEPT ruling in src/graph/special_collections.py.
+# Note the question names no department at all; it was turn N of a Special
+# Collections thread, so asking which service is also a fair reply. What
+# is not fair is "I don't have a reliable answer to that".
 g("rt_sc_dropins",
   "Do I need to make an appointment before visiting, or are drop-ins "
   "allowed?", "special_collections",
-  "Drop-ins ARE allowed; booking ahead only means materials are ready when "
-  "you arrive. Saying access is by appointment reads as a closed door.",
+  "Drop-ins ARE welcome -- no appointment needed -- and booking ahead only "
+  "means staff can retrieve materials before you arrive. Saying access is "
+  "by appointment reads as a closed door. Asking which service they mean "
+  "is also acceptable, since the question names none; a flat refusal is "
+  "not.",
   library="special", urls=[SPEC, SPEC_VISIT], category=C,
   notes="Rated thumbs-down when answered as appointment-only.")
 

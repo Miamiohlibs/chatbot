@@ -1103,6 +1103,13 @@ def _run_turn(
             # liaison ask, not a directory ask, and deserves the
             # which-subject question rather than a directory pointer.
             ("my_librarian_ask_subject", _my_librarian_ask_subject),
+            # Three answers that exist because the question was REFUSED,
+            # not mis-answered: the words carried no library vocabulary and
+            # the turn died before anything could retrieve. Narrow matchers,
+            # each measured against all 774 distinct real questions.
+            ("crowd_index", _crowd_index_answer),
+            ("library_jobs", _library_jobs_answer),
+            ("writing_center", _writing_center_answer),
             ("staff_directory", _staff_directory_answer),
             # BEFORE lockers. Two different services share the word: King's
             # Faculty and Graduate Reading Room lockers (yearly assignment,
@@ -2889,7 +2896,12 @@ _ASKUS_URL = "https://www.lib.miamioh.edu/research/research-support/ask/"
 # locations were getting confused/refused (Music) or conflated with "best
 # library" = flagship (BEST). Answer the closure deterministically.
 _CLOSED_LIBRARY_RE = re.compile(
-    r"(b\.?e\.?s\.?t\.?\s+librar|amos\s+music|music\s+librar(y|ies)\b)",
+    r"(b\.?e\.?s\.?t\.?\s+librar|amos\s+music|music\s+librar(y|ies)\b"
+    # "Does King Library have a music section?" is the same question wearing
+    # different words, and it was answered with the generic search-Primo
+    # boilerplate -- true, and silent about the one fact that matters, which
+    # is that the collection is in King BECAUSE the Music Library closed.
+    r"|music\s+(section|collection|department)\b)",
     re.IGNORECASE,
 )
 
@@ -4049,6 +4061,16 @@ def _not_there_campus_answer(
     return None
 
 
+# A reference work ABOUT periodicals -- a directory, an index, a citation
+# database -- is a database question, and Databases A-Z is its answer. The
+# newspapers guide covers reading newspapers.
+_NEWS_NOT_A_PAPER_RE = re.compile(
+    r"\b(directory|index|indexes|indices|abstracts?|metrics?|impact\s+factor"
+    r"|citation\s+database|ulrich|mla\s+directory)\b",
+    re.IGNORECASE,
+)
+
+
 def _newspaper_answer(
     message: str, scope: "Optional[Scope]" = None,
 ) -> "Optional[tuple[str, list[dict]]]":
@@ -4066,6 +4088,14 @@ def _newspaper_answer(
     # guide, because _NYT_RE matched a paper the sentence named only as
     # background.
     if _PURCHASE_ASK_RE.search(m):
+        return None
+    # A DIRECTORY, INDEX or database ABOUT periodicals is not a periodical.
+    # "Do we have institutional access to the MLA Directory of Periodicals?
+    # I need to search the metrics of a few journals" (live 2026-08-20) came
+    # back with the Newspapers guide, which lists how to read newspapers and
+    # says nothing about journal metrics. The word "periodicals" is doing all
+    # the work in that match and it is the wrong word to follow.
+    if _NEWS_NOT_A_PAPER_RE.search(m):
         return None
     # Specific named papers -> most specific verified page.
     if _NYT_RE.search(m):
@@ -6097,9 +6127,27 @@ _COMPLAINT_WEBSITE_RE = re.compile(
     re.IGNORECASE,
 )
 # Things the service desk cannot help with -- leave these to their own paths.
+#
+# ONLINE RESOURCES BELONG HERE TOO. A licensed platform that will not load
+# has no shelf, no counter and nothing in the building, so "ask at the desk,
+# (513) 529-4141" reaches nobody who can fix it. Two live cases:
+#
+#   2026-09-17  "is swank video broken?"        -> rated thumbs-down
+#   2026-08-11  "My laptop is broken. how long can I check one out"
+#
+# The first is a streaming subscription; the second is not a complaint at
+# all -- the broken laptop is why they are asking, and the question is the
+# loan period. Both matched on the word "broken" alone.
 _COMPLAINT_EXCLUDE_RE = re.compile(
     r"\b(my\s+account|password|canvas|blackboard|wifi\s+password|parking"
-    r"|financial\s+aid|tuition|grade|professor|advisor)\b",
+    r"|financial\s+aid|tuition|grade|professor|advisor)\b"
+    # a named online service, or the generic words for one
+    r"|\b(swank|kanopy|jstor|ebsco|primo|ohiolink|libguides?|libanswers"
+    r"|database|databases|ebook|e-?book|journal|streaming|video\s+service"
+    r"|article|articles)\b"
+    # "my X is broken, <the real question>" -- the fault is context, and
+    # the thing being asked about is somebody else's
+    r"|\bmy\s+(laptop|computer|phone|tablet|charger)\b",
     re.IGNORECASE,
 )
 
@@ -6134,7 +6182,12 @@ _DEAN_RE = re.compile(
     + _NOT_THE_ORGANISATION
     + r"|(?:runs|leads|manages|oversees|directs|heads)\s+the\s+"
     + _LIBRARY_WORD + _NOT_THE_ORGANISATION
-    + r"|in\s+charge\s+of\s+the\s+" + _LIBRARY_WORD
+    # "in change of" -- live 2026-08-27, the same student, two typos in one
+    # sentence. The r/b transposition in "lirbary" is already tolerated by
+    # _LIBRARY_WORD; the dropped r in "charge" was not, so the turn fell
+    # through to the subject path and was told nobody covers "library
+    # administration leadership dean director".
+    + r"|in\s+chan?r?ge\s+of\s+the\s+" + _LIBRARY_WORD
     + _NOT_THE_ORGANISATION
     + r"|" + _LIBRARY_WORD + r"\s+(?:director|dean)"
     + r"|led\s+by)\b",
@@ -6362,6 +6415,110 @@ def _complaint_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
           "snippet": "Ask Us — Miami University Libraries"},
          {"n": 2, "url": _WEBSITE_FEEDBACK_URL,
           "snippet": "Miami University Libraries — website feedback"}],
+    )
+
+
+_KING_LIBRARY_URL = "https://www.lib.miamioh.edu/about/locations/king-library/"
+"""King's own page: the Crowd Index, the building history, and the list of
+venues that names the Howe Writing Center."""
+_EMPLOYMENT_URL = "https://www.lib.miamioh.edu/about/organization/employment/"
+
+# --- three questions the site answers and the bot refused ----------------
+#
+# All live, all 2026-09, all the same shape: the phrasing carried no
+# library vocabulary for a stateless classifier to hold on to, so the turn
+# died at the out_of_scope refusal while the answer sat in the corpus.
+
+# "What is the Crowd Index?" and "What is the King Crowd Index" -> refused
+# twice on 2026-09-11. Reworded as "Is the library busy" the same session,
+# it answered from this very text. King's own page carries it.
+_CROWD_INDEX_RE = re.compile(r"\bcrowd\s*index\b", re.IGNORECASE)
+
+
+def _crowd_index_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
+    if not _CROWD_INDEX_RE.search(message or ""):
+        return None
+    return (
+        "The **Crowd Index** is King Library's occupancy estimate. It counts "
+        "the devices connected to King's wifi and shows that as a percentage "
+        "of the building's 600-person maximum, so it is an approximation "
+        "rather than a headcount -- but it gives you a fair idea of how busy "
+        "the building is right now [1].\n\n"
+        "It is on the King Library page, and on the front page of the "
+        "Libraries' website.",
+        [{"n": 1, "url": _KING_LIBRARY_URL,
+          "snippet": "Miami University Libraries — King Library"}],
+    )
+
+
+# "Careers" -- one word, refused on 2026-09-09, while "How do I get a job at
+# the library" is answered. The capability exists; only the routing was
+# missing. Deliberately narrow: the message has to be ABOUT working here,
+# not merely contain the word "job" ("I have a job for you" is not this).
+_JOBS_RE = re.compile(
+    r"^\W*(careers?|jobs?|employment|vacancies|openings?|hiring)\W*$"
+    r"|\b(jobs?|careers?|employment|vacanc\w+|openings?|hiring|"
+    r"student\s+worker|work\s+study)\b[^.?!]{0,30}"
+    r"\b(librar\w+|here|with\s+you)\b"
+    r"|\b(work|working)\s+(at|for|in)\s+the\s+librar\w+",
+    re.IGNORECASE,
+)
+
+
+def _library_jobs_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
+    if not _JOBS_RE.search(message or ""):
+        return None
+    return (
+        "Miami University Libraries posts its openings on the Libraries' "
+        "employment page [1] -- student positions, staff positions and "
+        "faculty librarian posts all link from there into Miami's Workday "
+        "job system, which is where you apply.",
+        [{"n": 1, "url": _EMPLOYMENT_URL,
+          "snippet": "Miami University Libraries — Employment"}],
+    )
+
+
+# "If you are writing an essay or report, there is a place in King Library
+# you can go to for help. What is the name of this place?" -- asked by two
+# students within minutes on 2026-09-09, which is what a class assignment
+# looks like, and rated thumbs-down. Both were answered with a subject
+# librarian. The question asks for the NAME OF A PLACE, and King's own page
+# names it: "Popular venues include the Makerspace, the Sidley Lounge and
+# The Howe Writing Center."
+_WRITING_HELP_RE = re.compile(
+    r"\b(writing|write|essay|essays|paper|papers|report|reports|thesis)\b"
+    r"[^.?!]{0,60}\b(help|helped|assistance|support|tutor|tutoring|feedback"
+    r"|place|center|centre|where)\b"
+    r"|\b(help|assistance|tutor|tutoring|place|center|centre)\b"
+    r"[^.?!]{0,60}\b(writing|essay|paper|report)\b"
+    r"|\bwriting\s+(cent(er|re)|help|support)\b",
+    re.IGNORECASE,
+)
+# Research help is a different service with its own answer, and citation
+# help is a third. This one is about the WRITING.
+_WRITING_NOT_THIS_RE = re.compile(
+    r"\b(cite|citation|citing|apa|mla\b|chicago\s+style|bibliograph\w+"
+    r"|zotero|endnote|database|databases|peer[\s-]?reviewed|find\s+articles"
+    r"|find\s+books|literature\s+review)\b",
+    re.IGNORECASE,
+)
+
+
+def _writing_center_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
+    m = message or ""
+    if _WRITING_NOT_THIS_RE.search(m) or not _WRITING_HELP_RE.search(m):
+        return None
+    return (
+        "That's the **Howe Writing Center**, in King Library -- King's own "
+        "page lists it among the building's venues, alongside the MakerSpace "
+        "and the Sidley Lounge [1].\n\n"
+        "It is run by Miami's Howe Center for Writing Excellence rather than "
+        "by the Libraries, so for hours and appointments go to them "
+        "directly. If what you actually want is help FINDING sources rather "
+        "than help writing, that is a subject librarian and I can name "
+        "yours.",
+        [{"n": 1, "url": _KING_LIBRARY_URL,
+          "snippet": "Miami University Libraries — King Library"}],
     )
 
 

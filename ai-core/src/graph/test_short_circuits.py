@@ -6600,3 +6600,175 @@ def test_the_instruction_answer_states_no_schedule_of_its_own():
     assert "Monday-Friday" not in answer
     assert not re.search(r"\d\s*(am|pm)\s*[-–]\s*\d\s*(am|pm)", answer), answer
     assert "room 303" in answer.lower()
+
+
+# --- the operator's rulings of 2026-09-22 --------------------------------
+
+
+def test_a_printing_price_never_survives_the_post_processor():
+    """RULING: never state a per-page price, even when a source gives one.
+    Live 2026-09-16 an OXFORD question came back with "Black and white:
+    $0.10 a page / Colour: $0.25", figures published on RENTSCHLER's page."""
+    from src.synthesis.post_processor import _strip_printing_prices
+
+    out, n = _strip_printing_prices(
+        "**Printing is not free** -- it is charged by the page:\n\n"
+        "- **Black and white: $0.10 a page**\n"
+        "- **Colour: $0.25 a page**\n\nYou pay through MUlaa [1].")
+    assert n == 2
+    assert "$0.10" not in out and "$0.25" not in out
+    assert "MUlaa" in out                      # the rest of the answer stays
+    assert "use/technology/printing" in out    # and it points somewhere
+
+
+def test_a_bare_price_under_a_printing_sentence_goes_too():
+    from src.synthesis.post_processor import _strip_printing_prices
+
+    out, n = _strip_printing_prices(
+        "Printing is charged by the page:\n- $0.10\n- $0.25\nPay with MUlaa.")
+    assert n == 2 and "$0." not in out
+
+
+def test_the_stripped_answer_is_not_doubled():
+    """The fallback branch appends to `kept`, which the first pass has
+    already filled. Without a reset the answer comes back twice -- priced,
+    then stripped -- which is worse than leaving it alone."""
+    from src.synthesis.post_processor import _strip_printing_prices
+
+    out, _ = _strip_printing_prices(
+        "Printing is charged by the page:\n- $0.10\nPay with MUlaa.")
+    assert out.count("Pay with MUlaa") == 1
+    assert out.count("Printing is charged") == 1
+
+
+def test_a_charge_that_is_not_printing_is_left_alone():
+    """A replacement charge and a fine are real numbers the patron needs."""
+    from src.synthesis.post_processor import _strip_printing_prices
+
+    for text in ("Replacement charges for a lost laptop are up to $2,000 [1].",
+                 "Overdue fines are $0.25 a day for recalled items [1]."):
+        assert _strip_printing_prices(text) == (text, 0)
+
+
+def test_the_crowd_index_is_answerable():
+    """Refused twice on 2026-09-11, then answered from this very text when
+    the same session reworded it as "is the library busy"."""
+    from src.graph.new_orchestrator import _crowd_index_answer
+
+    answer, cites = _crowd_index_answer("What is the Crowd Index?")
+    assert "wifi" in answer.lower()
+    assert "600" in answer
+    assert "king-library" in cites[0]["url"]
+
+
+def test_one_word_careers_reaches_the_employment_page():
+    """Refused on 2026-09-09 while "How do I get a job at the library" was
+    answered."""
+    from src.graph.new_orchestrator import _library_jobs_answer
+
+    for q in ("Careers", "jobs at the libraries",
+              "How do I get a job at the library", "hiring at the library"):
+        assert _library_jobs_answer(q) is not None, q
+    for q in ("I need a book about careers", "how do i renew a book",
+              "who is in charge of the library"):
+        assert _library_jobs_answer(q) is None, q
+
+
+def test_the_writing_place_in_king_is_named():
+    """Two students asked this within minutes -- a class assignment -- and
+    both were answered with a subject librarian. The question asks for the
+    name of a PLACE, and King's page names it."""
+    from src.graph.new_orchestrator import _writing_center_answer
+
+    answer, cites = _writing_center_answer(
+        "If you are writing an essay or report, there is a place in King "
+        "Library you can go to for help. What is the name of this place?")
+    assert "Howe Writing Center" in answer
+    assert "king-library" in cites[0]["url"]
+
+
+def test_citation_help_is_not_the_writing_centre():
+    from src.graph.new_orchestrator import _writing_center_answer
+
+    for q in ("how do I create a citation in apa style",
+              "how can I cite an AI like chatGPT in my paper, in APA style?",
+              "I need peer-reviewed articles on teen mental health"):
+        assert _writing_center_answer(q) is None, q
+
+
+def test_a_broken_online_service_is_not_a_broken_shelf():
+    """Swank Digital Campus has no desk and nothing in the building, so
+    "call (513) 529-4141" reaches nobody who can fix it. Rated thumbs-down
+    2026-09-17."""
+    from src.graph.new_orchestrator import _complaint_answer
+
+    for q in ("is swank video broken?", "why can't i download an ebook",
+              "jstor is down", "the databases are not working"):
+        assert _complaint_answer(q) is None, q
+
+
+def test_a_broken_laptop_is_context_not_the_question():
+    """"My laptop is broken. how long can I check one out" asks the loan
+    period; the fault is why they are asking."""
+    from src.graph.new_orchestrator import _complaint_answer
+
+    assert _complaint_answer(
+        "My laptop is broken. how long can I check one out") is None
+
+
+def test_a_genuinely_broken_thing_still_reaches_the_desk():
+    from src.graph.new_orchestrator import _complaint_answer
+
+    for q in ("the printer on the second floor is jammed",
+              "the scanner is out of order"):
+        assert _complaint_answer(q) is not None, q
+
+
+def test_a_directory_of_periodicals_is_not_a_newspaper():
+    """Live 2026-08-20: a question about journal metrics in the MLA
+    Directory of Periodicals came back with the Newspapers guide."""
+    from src.graph.new_orchestrator import _newspaper_answer
+
+    assert _newspaper_answer(
+        "Do we have institutional access to the MLA Directory of "
+        "Periodicals? I need to search the metrics of a few journals.") is None
+    for q in ("how can I get today's issue of the Cincinnati Enquirer?",
+              "where can I find Dayton Daily News", "how to get NYT"):
+        assert _newspaper_answer(q) is not None, q
+
+
+def test_two_typos_in_one_sentence_still_reach_the_dean():
+    """Live 2026-08-27. "lirbary" was already tolerated; "in change of" was
+    not, so the turn fell through and was told nobody covers "library
+    administration leadership dean director"."""
+    from src.graph.new_orchestrator import _dean_answer
+
+    for q in ("who is in change of the lirbary", "who is in charge of the lirbary",
+              "who is in charge of the library"):
+        assert _dean_answer(q) is not None, q
+
+
+def test_a_music_section_is_the_closed_music_library():
+    """"Does King Library have a music section?" was answered with the
+    generic search-Primo boilerplate -- silent on the one fact that
+    matters, which is why the collection is in King."""
+    from src.graph.new_orchestrator import _closed_library_answer
+
+    for q in ("Does King Library have a music section?",
+              "do we have a music section in King", "where is the music library"):
+        assert _closed_library_answer(q) is not None, q
+    # The Music SUBJECT liaison still exists; only the building closed.
+    for q in ("who is the music librarian",
+              "what is the name of the music librarian"):
+        assert _closed_library_answer(q) is None, q
+
+
+def test_ai_resolves_to_the_centre_we_actually_hold():
+    """"Who is the AI librarian?" named Laura Birkenhauer -- the Student
+    Success Librarian, whose subject is Student Affairs. Nothing resolved
+    to the Artificial Intelligence Center, which is Anna Shaw's."""
+    from src.tools.subject_aliases import find_subject_by_alias
+
+    for q in ("ai", "artificial intelligence", "AI literacy",
+              "who is the artificial intelligence librarian"):
+        assert find_subject_by_alias(q) == "Artificial Intelligence Center", q
