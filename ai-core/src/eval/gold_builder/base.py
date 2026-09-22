@@ -184,6 +184,7 @@ HAM_LIBCAL = "https://muohio.libcal.com/reserve/hamilton"
 MID_LIBCAL = "https://muohio.libcal.com/reserve/middletown"
 MAKER_STAFF= "https://libguides.lib.miamioh.edu/create/about-makerspace/staff"
 SOFT_ALT   = "https://www.lib.miamioh.edu/software/"
+MYGUIDE    = "https://www.lib.miamioh.edu/myguide"
 POLICIES   = ("https://docs.google.com/document/d/"
               "1ZQdegDmo_8V7_aM8EMzpr57lQ5-kOj_jgtCqsbJ8_d4/edit?tab=t.0")
 GIFTS      = "https://libguides.lib.miamioh.edu/additional-policies/gifts-policy"

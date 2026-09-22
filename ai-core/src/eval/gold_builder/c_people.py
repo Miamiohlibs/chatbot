@@ -311,9 +311,9 @@ g("rt_res_film_guide_typo", "is there a subject quide for film studies?",
   "liaison.", urls=[GUIDES, LIAISONS], category=C)
 
 g("rt_res_myguide", "is there a myguide", "research_consultation",
-  "MyGuide is Miami's personalised research guide; point at the guides hub "
-  "or explain how to reach it. Do not refuse.",
-  urls=[GUIDES, LIAISONS], category=C)
+  "YES -- MyGuide is at lib.miamioh.edu/myguide, listed on the Libraries' "
+  "own home page. Name it and link it; refusing is wrong.",
+  urls=[MYGUIDE, GUIDES, LIAISONS], category=C)
 
 g("rt_res_engineering_offices",
   "where is the  office of the engineering librarians", "location_directions",

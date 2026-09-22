@@ -77,18 +77,23 @@ g("rt_bor_renew_ohiolink",
   urls=[CIRC_OL, MYACCOUNT], category=C,
   notes="Kevin Messner quoted the banner on this exact question.")
 
+# The Libraries' postal address IS published (Contact Us: King Library,
+# 151 South Campus Avenue). What is NOT published is that you may post
+# books back to it -- the pages describe the book drop and the courier
+# services instead. So the address is not the problem; presenting it as a
+# returns address is.
 g("rt_bor_return_mail", "I've gone home for the summer. Can I return books "
   "by mail", "circulation_basic",
-  "Whether items can be returned by post, and how -- the home delivery / "
-  "return route, or contacting circulation. Do not state a mailing address "
-  "that is not in a cited source.",
-  urls=[HOME_DELIV, CIRC, ASKUS], category=C)
+  "Nothing we publish says items may be posted back, so do not invent a "
+  "returns-by-mail procedure: say the published routes are the book drop "
+  "and the delivery services, and send them to circulation to arrange "
+  "anything else.", urls=[HOME_DELIV, CIRC, ASKUS], category=C)
 
 g("rt_bor_mailing_address", "What is the mailing address for the library",
   "location_directions",
-  "The Libraries' mailing address if it is in a cited source; otherwise send "
-  "them to the service desk rather than guessing. King's street address is "
-  "acceptable only if the source gives it as the mailing address.",
+  "Miami University Libraries, King Library, 151 South Campus Avenue, "
+  "Oxford, Ohio 45056, with the desk on (513) 529-4141 -- the Contact Us "
+  "page carries exactly this.",
   library="king", urls=[KING, ASKUS], category=C)
 
 g("rt_bor_hold_no_news",
@@ -160,10 +165,15 @@ g("rt_ill_turnaround", "how long does an ILL request take", "interlibrary_loan",
   notes="This was answered with HOME DELIVERY day counts -- real numbers for "
         "a different service.")
 
+# CORRECTED 2026-09-22: we do not publish a delivery time for OhioLINK,
+# so demanding one asked the bot to invent a number. Saying so plainly and
+# offering MyAccount is the honest answer.
 g("rt_ill_ohiolink_turnaround", "how long does OhioLINK take",
   "interlibrary_loan",
-  "OhioLINK's delivery time specifically, kept apart from ILL's.",
-  urls=[CIRC_OL, PRIMO], category=C)
+  "No arrival time is published for OhioLINK -- it depends which library "
+  "sends the item. Say that rather than guessing a number of days, and "
+  "point at MyAccount for a request already placed.",
+  urls=[CIRC_OL, PRIMO, MYACCOUNT], category=C)
 
 g("rt_ill_when_arrive", "When will my OhioLINK request arrive?",
   "interlibrary_loan",
@@ -182,10 +192,16 @@ g("rt_ill_arrived_yet", "Has my interlibrary loan request arrived yet",
   "system and offer the desk. Do not invent a status.",
   urls=[MYACCOUNT, ILL], category=C)
 
+# CORRECTED 2026-09-22. This row said OhioLINK's period is "not Miami's
+# six-week undergraduate loan", implying the bot had carried Miami's number
+# across. The OhioLINK & ILL page says items "may be renewed up to 2 more
+# six-week times" -- six weeks is OhioLINK's own figure too, and the bot
+# cited the right page for it.
 g("rt_ill_ohiolink_loan_length",
   "how long can i check out a book from ohiolink?", "loan_policy",
-  "OhioLINK's loan period from the OhioLINK & ILL page -- not Miami's "
-  "six-week undergraduate loan.", urls=[CIRC_OL, MYACCOUNT], category=C)
+  "OhioLINK's loan period from the OhioLINK & ILL page: six weeks, "
+  "renewable up to two more six-week terms unless another patron has "
+  "requested the item.", urls=[CIRC_OL, MYACCOUNT], category=C)
 
 g("rt_ill_request_ohiolink", "how do I request a book from OhioLINK",
   "interlibrary_loan",

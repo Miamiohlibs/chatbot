@@ -276,12 +276,17 @@ g("rt_space_mid_sept12",
   "Middletown calendar.", campus="middletown", library="gardner_harvey",
   urls=[HOURS, MID_CAL, MID], category=C)
 
+# CORRECTED 2026-09-22. This row said we hold no borrowing rule for SWORD.
+# Its own page states one: "Items in the depository may be requested
+# through catalogs of the cooperating libraries ... or through the OhioLINK
+# catalog." That is the answer, and it was sitting in the corpus.
 g("rt_space_sword_borrow",
   "can library affiliates borrow items held at SWORD?", "circulation_basic",
-  "SWORD is the Middletown regional collection: answer from its own page or "
-  "say plainly that the borrowing rule for SWORD holdings is not something "
-  "we hold, and route to the desk. Do not apply Oxford's circulation rule "
-  "to it.", campus="middletown", urls=[SWORD, CIRC, ASKUS], category=C)
+  "YES -- SWORD is the Southwest Ohio Regional Depository on the Middletown "
+  "campus, and items in it are requested through the cooperating libraries' "
+  "catalogues or through OhioLINK. Give that route rather than applying "
+  "Oxford's shelf rules to a storage facility.",
+  campus="middletown", urls=[SWORD, PRIMO, CIRC], category=C)
 
 # --- MakerSpace as a place ------------------------------------------------
 g("rt_ms_where", "wheres the makerspace", "location_directions",
