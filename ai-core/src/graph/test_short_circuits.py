@@ -6772,3 +6772,23 @@ def test_ai_resolves_to_the_centre_we_actually_hold():
     for q in ("ai", "artificial intelligence", "AI literacy",
               "who is the artificial intelligence librarian"):
         assert find_subject_by_alias(q) == "Artificial Intelligence Center", q
+
+
+def test_the_deterministic_printing_answer_quotes_no_price_either():
+    """The first pass at the 2026-09-22 ruling guarded the post-processor,
+    and this answer never goes near it: the figures were written into the
+    short-circuit itself. Measured in the 2026-09-22 eval, which still had
+    "Black and white: $0.10 a page" on both printing rows."""
+    from src.graph.facility_facts import printing_cost_answer
+
+    for q in ("how much is printing?", "Is there free printing?",
+              "do I have to pay to print", "can i print in color"):
+        got = printing_cost_answer(q)
+        if got is None:
+            continue
+        answer, cites = got
+        assert "$0.10" not in answer and "$0.25" not in answer, q
+        assert not re.search(r"\$\s?\d", answer), (q, answer)
+        # The yes/no survives -- charged-versus-free is stable, the rate is not.
+        assert "not free" in answer.lower()
+        assert any("technology/printing" in c["url"] for c in cites), q

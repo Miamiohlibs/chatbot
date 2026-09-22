@@ -409,9 +409,23 @@ through MUlaa with their student ID. Both live in the index, checked
 # Excluding them is not enough on its own: we know the answer exactly, so the
 # honest thing is to give it. "Free?" deserves yes or no, not a link.
 #
-# NOTE this is NOT affected by the 2026-08-17 "building facts go to the desk"
-# ruling: these figures come from a published FAQ, not from memory. The rule
-# is about unsourced claims, not about declining to be useful.
+# OPERATOR RULING 2026-09-22 SUPERSEDES THE FIGURES, NOT THE ANSWER.
+#
+# The note that used to sit here said the 2026-08-17 ruling did not apply,
+# because these numbers come from a published FAQ rather than from memory.
+# That reasoning was sound and the operator has overruled the conclusion:
+# "never quote a per-page price, even when we have one -- point them at the
+# page". Prices change, the FAQ lags, and a stale figure costs the patron
+# money at the machine.
+#
+# So the yes/no survives -- "is printing free" deserves an answer, and
+# charged-versus-free is stable -- and the figures go. Note the FAQ the
+# numbers came from is also where MUlaa is described, so that stays too:
+# HOW you pay is not WHAT it costs.
+#
+# This was missed on the first pass of the ruling, which added a guard to
+# the post-processor. Nothing reaches it here: this is a deterministic
+# short-circuit and the text never goes near the synthesizer.
 _PRINT_COST_RE = re.compile(
     r"\b(free|cost|costs|price|pricing|how\s+much|charge|charges|"
     r"pay|paid|paying|fee|fees|expensive|cheap|per\s+page)\b",
@@ -435,15 +449,19 @@ def printing_cost_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
                      r"copier|copy|copies|per\s+page)\b", m, re.IGNORECASE):
         return None
     return (
-        "**Printing is not free** -- it is charged by the page:\n\n"
-        "- **Black and white: $0.10 a page**\n"
-        "- **Colour: $0.25 a page**\n\n"
+        "**Printing is not free** -- it is charged by the page, and colour "
+        "costs more than black and white.\n\n"
+        "I would rather not quote you a rate: they change, and a stale one "
+        "costs you money at the machine. The Printing & WiFi page carries "
+        "the current charges [1].\n\n"
         "You pay through your **MUlaa** account with your student ID, so "
-        "there is nothing to set up at the machine [1].\n\n"
+        "there is nothing to set up at the machine [2].\n\n"
         f"If a print job fails or a machine takes your money, call "
         f"{KING_PHONE} and someone at the desk can sort it out.",
-        [_cite(1, PRINT_COST_FAQ_URL,
-               "Miami University Libraries — how much does it cost to print?")],
+        [_cite(1, PRINTING_PAGE_URL,
+               "Miami University Libraries — Printing & WiFi"),
+         _cite(2, PRINT_COST_FAQ_URL,
+               "Miami University Libraries — paying for printing with MUlaa")],
     )
 
 

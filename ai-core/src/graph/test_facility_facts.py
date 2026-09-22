@@ -375,26 +375,31 @@ def test_the_trouble_shapes_still_reach_it():
 # --- "Is there free printing?" -- a real student, first week of beta --------
 
 
-def test_free_printing_gets_a_price_not_a_how_to_guide():
+def test_free_printing_gets_a_yes_or_no_and_no_price():
     """A real student asked this on 2026-08-15 and got the MUprint and Wi-Fi
-    guides -- how to print, when they asked what it costs.
+    guides -- how to print, when they asked what it costs. _NOT_PRINTING_RE
+    excluded cost questions but not the words people actually use: "free"
+    and "pay" were missing, so these fell through to the generic pointer.
 
-    _NOT_PRINTING_RE already excluded cost questions (cost, price, how much,
-    charge, fines); it just did not list the words people actually use.
-    "Free" and "pay" were missing, so these fell through to the generic
-    pointer.
+    THE HALF THAT CHANGED. Until 2026-09-22 this test also asserted the
+    figures -- "$0.10" and "$0.25" from FAQ 163327 -- on the reasoning that
+    we knew the answer exactly so the honest thing was to give it. The
+    operator has overruled that: never quote a per-page rate, even a
+    sourced one, because prices change, the FAQ lags, and a stale figure
+    costs the patron money at the machine.
 
-    We know the answer exactly (FAQ 163327), so the fix is to give it. "Is it
-    free?" deserves yes or no, not a link.
+    THE HALF THAT DID NOT. "Is it free?" still deserves yes or no rather
+    than a link, and how you pay is not what it costs, so MUlaa stays.
     """
     from src.graph.facility_facts import printing_cost_answer
 
     body, cites = printing_cost_answer("Is there free printing?")
     low = body.lower()
     assert "not free" in low, "answer the question that was asked"
-    assert "$0.10" in body and "$0.25" in body
-    assert "mulaa" in low, "say how they pay, or the price is not actionable"
-    assert cites and "163327" in cites[0]["url"]
+    assert "$0.10" not in body and "$0.25" not in body
+    assert "mulaa" in low, "how they pay is not what it costs"
+    assert any("technology/printing" in c["url"] for c in cites), \
+        "the page that carries the current rate has to be reachable"
 
 
 def test_the_cost_phrasings_people_actually_use():
