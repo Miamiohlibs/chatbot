@@ -169,11 +169,20 @@ g("rt_hours_art_labor_day",
   category=C)
 
 g("rt_hours_music_close", "when does music library close", "hours",
-  "The Amos Music Library is CLOSED -- it shut in 2023 and its collection "
-  "moved into King. Say that rather than giving hours.", library="king",
+  "The Amos Music Library is CLOSED -- it shut in 2023. Say that rather "
+  "than giving hours. Where the collection went is NOT something we can "
+  "source, so 'moved to other Miami University Libraries' is right and "
+  "naming a building would be an invention.", library="king",
   urls=[MUSIC, KING], category=C,
   notes="Closure, not a schedule. Giving hours for a closed library sends "
         "somebody to a locked door. "
+        "CORRECTED 2026-09-23: this row demanded that the answer say the "
+        "collection moved INTO KING. Nothing supports that -- not one "
+        "chunk, not one doc. The pre-launch test of 2026-07 lists "
+        "\"invents a location\" as the failure condition for this very "
+        "question, and the vague answer the bot gives is the "
+        "deliberate right one. Second time these music rows asserted "
+        "something unsourced; the first was the library's name."
         "CORRECTED 2026-09-22: this row first called it the Amelia Hoover "
         "Music Library. There is no such library -- the name was "
         "invented, in a rubric written to stop the bot inventing "

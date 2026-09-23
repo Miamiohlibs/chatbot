@@ -1107,6 +1107,8 @@ def _run_turn(
             # not mis-answered: the words carried no library vocabulary and
             # the turn died before anything could retrieve. Narrow matchers,
             # each measured against all 774 distinct real questions.
+            ("eresource_down", _eresource_down_answer),
+            ("library_count", _library_count_answer),
             ("crowd_index", _crowd_index_answer),
             ("library_jobs", _library_jobs_answer),
             ("writing_center", _writing_center_answer),
@@ -6423,6 +6425,121 @@ _KING_LIBRARY_URL = "https://www.lib.miamioh.edu/about/locations/king-library/"
 venues that names the Howe Writing Center."""
 _EMPLOYMENT_URL = "https://www.lib.miamioh.edu/about/organization/employment/"
 
+# A LICENSED RESOURCE THAT WILL NOT LOAD.
+#
+# "is swank video broken?" (2026-09-17, rated thumbs-down) reached the
+# complaint answer and was offered the service desk telephone. Swank Digital
+# Campus is a streaming subscription: no shelf, no counter, and nobody on
+# that number can fix it. Excluding it from the complaint path stopped the
+# wrong answer; this gives the right one.
+#
+# We cannot see a vendor platform's status and must not pretend to -- Swank
+# appears in NO chunk of the corpus. What we can do is recognise the KIND of
+# problem. An e-resource that will not load is an access question, and Ask Us
+# can check the subscription and report an outage upstream.
+_ERESOURCE_DOWN_RE = re.compile(
+    r"\b(swank|kanopy|jstor|ebsco|proquest|gale|primo|ohiolink|libguides?"
+    r"|database|databases|e-?book|e-?books|journal|journals|streaming"
+    r"|video\s+service|article|articles)\b"
+    r"[^.?!]{0,40}"
+    r"\b(broken|down|not\s+working|doesn'?t\s+work|won'?t\s+(load|open|work)"
+    r"|offline|unavailable|error|blank\s+screen|will\s+not\s+load)\b"
+    r"|\b(broken|down|not\s+working|offline|unavailable)\b[^.?!]{0,40}"
+    r"\b(swank|kanopy|jstor|ebsco|proquest|database|databases|e-?book"
+    r"|journal|streaming)\b",
+    re.IGNORECASE,
+)
+
+
+def _eresource_down_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
+    m = message or ""
+    if not _ERESOURCE_DOWN_RE.search(m):
+        return None
+    return (
+        "I can't see whether a vendor's platform is up -- that runs on their "
+        "servers, not ours, and I have no status feed for it.\n\n"
+        "What I can tell you is who to ask. A licensed resource that won't "
+        "load is an **access** problem rather than a building one, so **Ask "
+        "Us** [1] is the right route: they can check the subscription, tell "
+        "you whether it's down for everyone, and report an outage to the "
+        "vendor. The service desk telephone is for things in the building, "
+        "and this isn't one.\n\n"
+        "If you just need another way in, the **Databases A-Z** list [2] is "
+        "where every subscription we hold is linked from -- reaching it "
+        "through there rather than the vendor's own site is also what fixes "
+        "most \"it says I have to pay\" problems.",
+        [{"n": 1, "url": _ASKUS_URL,
+          "snippet": "Miami University Libraries — Ask Us"},
+         {"n": 2, "url": _DATABASES_AZ_URL,
+          "snippet": "Miami University Libraries — Databases A-Z"}],
+    )
+
+
+# HOW MANY LIBRARIES, AND WHAT ARE THEY CALLED.
+#
+# OPERATOR RULING 2026-09-22: Oxford has TWO -- King and Art & Architecture
+# (Wertz). Walter Havighurst Special Collections is a department on King's
+# third floor, not a third library. Our own Library table agrees: two Oxford
+# rows.
+#
+# Deterministic because the retrieved evidence DISAGREES WITH ITSELF. A
+# LibAnswers FAQ says four; the locations pages list two; the closed Amos
+# Music Library is still named as a pickup location on the Home Delivery
+# page. Live 2026-09-11 the bot said "four Oxford-campus locations", listed
+# three, then narrated the contradiction out loud -- "the sources provided
+# identify three Oxford library locations rather than four". No prompt rule
+# fixes a corpus that contradicts itself; a ruling does.
+#
+# It also has to CORRECT A FALSE PREMISE, because the question that exposed
+# this was "what are the four libraries on oxford's campus called?" -- and
+# an answer that pads the list to four to match the question is the failure.
+_LIBRARY_COUNT_RE = re.compile(
+    r"\bhow\s+many\s+(librar\w+|locations?|branches)\b"
+    r"|\b(what|which)\s+(are|were)\s+the\s+(\w+\s+)?librar\w+"
+    r"[^.?!]{0,30}\bcalled\b"
+    r"|\blist\s+(all\s+)?(the\s+)?librar\w+\b"
+    r"|\b(all|every)\s+the\s+librar\w+\s+(on|at)\b",
+    re.IGNORECASE,
+)
+
+
+def _library_count_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
+    m = message or ""
+    if not _LIBRARY_COUNT_RE.search(m):
+        return None
+    # "how many books can I check out" is not this question.
+    if re.search(r"\b(book|books|item|items|renew|checkout|check\s+out)\b",
+                 m, re.IGNORECASE):
+        return None
+    wrong_count = re.search(r"\b(three|four|five|3|4|5)\s+librar", m,
+                            re.IGNORECASE)
+    lead = ""
+    if wrong_count:
+        lead = ("There are **two** libraries on the Oxford campus, not "
+                f"{wrong_count.group(1)} -- I think the count you have "
+                "somewhere is counting departments as libraries.\n\n")
+    return (
+        lead +
+        "**Oxford** has **King Library** [1] and the **Art & Architecture "
+        "Library** (Wertz) [2].\n\n"
+        "**Walter Havighurst Special Collections & University Archives** is "
+        "often listed alongside them, but it is a department on King's third "
+        "floor rather than a separate building [3].\n\n"
+        "The regional campuses have their own: **Rentschler Library** at "
+        "Hamilton [4] and **Gardner-Harvey Library** at Middletown [5].",
+        [{"n": 1, "url": _KING_LIBRARY_URL, "snippet": "King Library"},
+         {"n": 2, "url": "https://www.lib.miamioh.edu/about/locations/art-arch/",
+          "snippet": "Art & Architecture Library"},
+         {"n": 3, "url": "https://spec.lib.miamioh.edu/home/",
+          "snippet": "Walter Havighurst Special Collections & University "
+                     "Archives"},
+         {"n": 4, "url": "https://www.ham.miamioh.edu/library/",
+          "snippet": "Rentschler Library, Hamilton"},
+         {"n": 5, "url": "https://www.mid.miamioh.edu/library/",
+          "snippet": "Gardner-Harvey Library, Middletown"}],
+    )
+
+
 # --- three questions the site answers and the bot refused ----------------
 #
 # All live, all 2026-09, all the same shape: the phrasing carried no
@@ -6512,9 +6629,15 @@ def _writing_center_answer(message: str) -> "Optional[tuple[str, list[dict]]]":
         "That's the **Howe Writing Center**, in King Library -- King's own "
         "page lists it among the building's venues, alongside the MakerSpace "
         "and the Sidley Lounge [1].\n\n"
-        "It is run by Miami's Howe Center for Writing Excellence rather than "
-        "by the Libraries, so for hours and appointments go to them "
-        "directly. If what you actually want is help FINDING sources rather "
+        # NO CLAIM ABOUT WHO RUNS IT. The first version said "run by
+        # Miami's Howe Center for Writing Excellence rather than by the
+        # Libraries, so for hours and appointments go to them directly" --
+        # plausible, and sourced by nothing. The eval judge caught it on
+        # both rows, which is the check working: I wrote into an answer the
+        # kind of confident detail I keep marking the bot down for.
+        "King's page names it and does not say more than that, so for its "
+        "hours or an appointment you will want the Center itself rather "
+        "than me. If what you actually want is help FINDING sources rather "
         "than help writing, that is a subject librarian and I can name "
         "yours.",
         [{"n": 1, "url": _KING_LIBRARY_URL,

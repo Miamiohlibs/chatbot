@@ -125,19 +125,25 @@ g("rt_space_quiet_generic", "where is the quiet study area", "space_info",
   "Quiet study at King, from a cited page, or the desk if the site does not "
   "publish it.", library="king", urls=[READING, KING, ASKUS], category=C)
 
+# CORRECTED 2026-09-23, same fault as the two rows above: this asked the
+# bot to say the collection is IN KING, which no source states.
 g("rt_space_music_section", "Does King Library have a music section?",
   "space_info",
-  "The Music Library has CLOSED and its collection moved into King, so yes "
-  "-- King holds the music collection. Say that rather than describing an "
-  "open Music Library.", library="king", urls=[MUSIC, KING], category=C)
+  "Say the Amos Music Library closed and its collections moved to other "
+  "Miami University Libraries, and point at Ask Us for where a specific "
+  "item is now. Describing an open Music Library is wrong; so is naming "
+  "the building the collection went to.",
+  library="king", urls=[MUSIC, KING, ASKUS], category=C)
 
 g("rt_space_music_section_2", "do we have a music section in King", "space_info",
-  "Same: the music collection is in King since the Music Library closed.",
-  library="king", urls=[MUSIC, KING], category=C)
+  "Same: the Amos Music Library closed and its collections moved into the "
+  "other libraries. Do not name which one.",
+  library="king", urls=[MUSIC, KING, ASKUS], category=C)
 
 g("rt_space_music_where_1", "Where is the music library?", "space_info",
-  "The Amos Music Library closed in 2023 and its collection is in King. Do "
-  "not give directions to a closed building.",
+  "The Amos Music Library closed in 2023. Do not give directions to a "
+  "closed building, and do not name where the collection went -- we hold "
+  "no source for that.",
   library="king", urls=[MUSIC, KING], category=C,
   notes="CORRECTED 2026-09-22: this row first called it the Amelia Hoover "
         "Music Library. There is no such library -- the name was "

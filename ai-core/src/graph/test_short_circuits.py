@@ -6792,3 +6792,68 @@ def test_the_deterministic_printing_answer_quotes_no_price_either():
         # The yes/no survives -- charged-versus-free is stable, the rate is not.
         assert "not free" in answer.lower()
         assert any("technology/printing" in c["url"] for c in cites), q
+
+
+# --- the leftovers from the 2026-09-22 run -------------------------------
+
+
+def test_the_writing_centre_claims_only_what_the_page_says():
+    """My own answer text added "run by Miami's Howe Center for Writing
+    Excellence rather than by the Libraries" -- plausible, sourced by
+    nothing, and flagged by the judge on both rows. Exactly the kind of
+    confident detail this gold set exists to catch the bot writing."""
+    from src.graph.new_orchestrator import _writing_center_answer
+
+    answer, _ = _writing_center_answer(
+        "Where do you go if you want help for writing an assignment")
+    assert "Howe Writing Center" in answer
+    assert "run by" not in answer.lower()
+    assert "rather than by the librar" not in answer.lower()
+
+
+def test_oxford_has_two_libraries_and_the_premise_gets_corrected():
+    """OPERATOR RULING 2026-09-22. Deterministic because the evidence
+    disagrees with itself: a LibAnswers FAQ says four, the locations pages
+    list two, and the closed Amos Music Library is still named as a pickup
+    location on the Home Delivery page."""
+    from src.graph.new_orchestrator import _library_count_answer
+
+    answer, cites = _library_count_answer(
+        "what are the four libraries on oxford's campus called?")
+    assert "two" in answer.lower()
+    assert "not four" in answer.lower(), "the premise has to be corrected"
+    assert "King" in answer and "Art & Architecture" in answer
+    # Special Collections is named, and named as a department.
+    assert "department" in answer.lower()
+    assert len(cites) == 5
+
+
+def test_the_library_count_does_not_take_a_borrowing_question():
+    from src.graph.new_orchestrator import _library_count_answer
+
+    for q in ("how many books can I check out",
+              "how many times can I renew my book?",
+              "how many volumes does the speical collections hold",
+              "what are the library hours"):
+        assert _library_count_answer(q) is None, q
+
+
+def test_a_dead_database_goes_to_ask_us_not_the_service_desk():
+    """Swank Digital Campus runs on somebody else's servers. The desk
+    telephone is for things in the building."""
+    from src.graph.new_orchestrator import _eresource_down_answer
+
+    answer, cites = _eresource_down_answer("is swank video broken?")
+    assert "529-4141" not in answer, "the desk cannot fix a vendor platform"
+    assert "ask us" in answer.lower()
+    assert any("az/databases" in c["url"] for c in cites)
+    # And it must not claim to know whether Swank is up.
+    assert "can't see" in answer.lower() or "cannot see" in answer.lower()
+
+
+def test_a_broken_thing_in_the_building_is_not_an_e_resource():
+    from src.graph.new_orchestrator import _eresource_down_answer
+
+    for q in ("the printer is jammed", "the scanner is out of order",
+              "where are the bathrooms", "can i access EBSCO"):
+        assert _eresource_down_answer(q) is None, q
