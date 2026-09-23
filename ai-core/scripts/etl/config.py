@@ -414,7 +414,51 @@ TOPIC_BY_URL_PREFIX: Final[tuple[tuple[str, str], ...]] = (
     ("/about/policies/", "policy"),
     ("/about/", "about"),
     ("/digital-collections/", "collections"),
-    ("/library/", "about"),  # regional library landing pages
+
+    # --- REGIONAL CAMPUSES ---------------------------------------------
+    #
+    # Hamilton and Middletown do not use the Oxford path structure, so
+    # every one of their pages fell through to the `/library/` catch-all
+    # below and was tagged "about" -- all 47 Hamilton pages and all 13
+    # Middletown ones, whatever they were about. Measured 2026-09-23 on
+    # Chunk_vv20260830_0302: oxford had six topics across its pages,
+    # hamilton and middletown had exactly one between them.
+    #
+    # `topic` is a retrieval filter and boost, so Rentschler's page on
+    # computers, printing and copying was tagged "about" while an Oxford
+    # question about printing looked for "technology". The regional
+    # cross-campus gap has several causes; this was one of them, and it
+    # is the cheap one.
+    #
+    # Ordered specific-first, because the scan is first-match-wins on
+    # startswith. Hamilton's eleven start-researching pages are the
+    # biggest single correction here -- that is the campus's entire
+    # research section.
+    ("/library/start-researching/", "research"),
+    ("/library/services/checking-out-materials", "borrow"),
+    ("/library/services/interlibrary-loan", "borrow"),
+    ("/library/services/course-reserves-and-textbooks", "borrow"),
+    ("/library/services/for-faculty/reserves-information", "borrow"),
+    ("/library/services/computers-printing", "technology"),
+    ("/library/services/equipment-you-can-borrow", "technology"),
+    ("/library/services/audiovisual-resources", "technology"),
+    ("/library/study-rooms", "spaces"),
+    ("/library/my-library-account", "service"),
+    ("/library/services/", "service"),
+    ("/library/about/", "about"),
+    # Middletown publishes flat .htm files rather than a path tree.
+    ("/library/printing.htm", "technology"),
+    ("/library/reserves.htm", "borrow"),
+    ("/library/textbookreserves.htm", "borrow"),
+    ("/library/research.htm", "research"),
+    ("/library/researchconsultations.htm", "research"),
+    ("/library/citingsources.htm", "research"),
+    ("/library/reference.htm", "research"),
+    ("/library/services.htm", "service"),
+    ("/library/accessibility.htm", "service"),
+    ("/middletown_tec_lab/", "technology"),
+
+    ("/library/", "about"),  # regional landing pages: the genuine leftovers
 )
 
 
@@ -572,6 +616,36 @@ HOST_TO_CAMPUS: Final[dict[str, str]] = {
 # does first-match-wins. SPECIFIC overrides come BEFORE broad host
 # defaults, so a `/sword/` URL on the Middletown host still resolves
 # to SWORD instead of Gardner-Harvey.
+# --- Pages whose CONTENT is university-wide, whatever host serves them ------
+#
+# _infer_campus reads the host, which is right almost everywhere: a page on
+# ham.miamioh.edu is Hamilton's. It is wrong for a page that HOSTS
+# university-wide content, and the cross-campus guard then hides that content
+# from everybody else.
+#
+# The case that found this, live 2026-09-16: a student asked whether we have a
+# Cincinnati Enquirer subscription and got generic catalogue boilerplate. We
+# DO subscribe -- "Cincinnati Enquirer (2010-present)" and a historical
+# archive -- and the only page in the corpus that says so is Rentschler's
+# research-databases list, tagged campus=hamilton and therefore invisible to
+# an Oxford question.
+#
+# It is not a Hamilton list. Its own first line reads "If you are looking for
+# a specific database that is not listed on this page, please try the full
+# Miami University Libraries' Databases A-Z list", and access is by Miami
+# Unique ID. Every title on it is a university subscription.
+#
+# WHY THIS IS A WORKAROUND AND NOT THE FIX. The real A-Z list at
+# libguides.lib.miamioh.edu/az/databases is JS-rendered: the crawl yields two
+# chunks of promotional blurb for three databases and not one title. Until
+# that list can be fetched properly, Rentschler's static HTML is the only
+# place our holdings are written down, so it has to be reachable from every
+# campus. Keep this set tiny and justify each entry.
+CAMPUS_ALL_URLS: Final[frozenset[str]] = frozenset({
+    "https://www.ham.miamioh.edu/library/start-researching/research-databases",
+})
+
+
 LIBRARY_BY_URL_SUBSTRING: Final[tuple[tuple[str, str], ...]] = (
     # --- Specific path overrides (must come BEFORE host defaults) ---
     # Oxford-specific buildings

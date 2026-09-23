@@ -40,7 +40,15 @@ class DocMetadata:
 
 
 def _infer_campus(url: str) -> str:
-    """Infer campus from URL host. Fallback to 'oxford'."""
+    """Infer campus from URL host. Fallback to 'oxford'.
+
+    A handful of pages HOST university-wide content on one campus's site;
+    those are listed in config.CAMPUS_ALL_URLS and tagged "all" so the
+    cross-campus guard lets them through everywhere. See the comment on
+    that set for why it exists and why it should stay small.
+    """
+    if url.rstrip("/") in {u.rstrip("/") for u in config.CAMPUS_ALL_URLS}:
+        return "all"
     host = (urlparse(url).hostname or "").lower()
     return config.HOST_TO_CAMPUS.get(host, "oxford")
 

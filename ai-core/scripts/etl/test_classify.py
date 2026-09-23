@@ -27,7 +27,11 @@ _HERE = Path(__file__).resolve().parent
 _AI_CORE = _HERE.parent.parent
 sys.path.insert(0, str(_AI_CORE))
 
-from scripts.etl.classify import DocMetadata, classify  # noqa: E402
+import pytest  # noqa: E402
+
+from scripts.etl.classify import (  # noqa: E402
+    DocMetadata, _infer_campus, _infer_topic, classify,
+)
 
 
 # --- Campus inference (URL host) ----------------------------------------
@@ -459,3 +463,79 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+# --- regional topics, and content that is nobody's campus ----------------
+
+
+class TestRegionalPagesGetARealTopic:
+    """Measured 2026-09-23 on the serving corpus: all 47 Hamilton pages and
+    all 13 Middletown ones were tagged "about", because neither campus uses
+    the Oxford path structure and both fell through to the `/library/`
+    catch-all. `topic` is a retrieval filter, so Rentschler's page on
+    computers, printing and copying was invisible to a printing question.
+    """
+
+    @pytest.mark.parametrize("path,topic", [
+        # Hamilton's entire research section -- eleven pages -- was "about".
+        ("/library/start-researching/finding-articles", "research"),
+        ("/library/start-researching/citing-your-sources", "research"),
+        ("/library/services/computers-printing-and-copying", "technology"),
+        ("/library/services/equipment-you-can-borrow", "technology"),
+        ("/library/services/audiovisual-resources", "technology"),
+        ("/library/services/interlibrary-loan", "borrow"),
+        ("/library/services/checking-out-materials", "borrow"),
+        ("/library/services/course-reserves-and-textbooks", "borrow"),
+        ("/library/study-rooms", "spaces"),
+        ("/library/services/get-help", "service"),
+        ("/library/my-library-account", "service"),
+        ("/library/about/rentschler-library-staff", "about"),
+        # Middletown publishes flat .htm files.
+        ("/library/printing.htm", "technology"),
+        ("/library/reserves.htm", "borrow"),
+        ("/library/textbookreserves.htm", "borrow"),
+        ("/library/research.htm", "research"),
+        ("/library/aboutus.htm", "about"),
+    ])
+    def test_a_regional_path_says_what_the_page_is(self, path, topic):
+        assert _infer_topic(f"https://www.ham.miamioh.edu{path}") == topic
+
+    @pytest.mark.parametrize("path,topic", [
+        ("/use/technology/printing/", "technology"),
+        ("/use/spaces/makerspace/", "spaces"),
+        ("/use/borrow/ill/", "borrow"),
+        ("/research/find/guides/", "research"),
+        ("/about/locations/king-library/", "about"),
+    ])
+    def test_oxford_is_untouched(self, path, topic):
+        assert _infer_topic(f"https://www.lib.miamioh.edu{path}") == topic
+
+
+class TestUniversityWideContentOnACampusHost:
+    """Live 2026-09-16: a student asked whether we subscribe to the
+    Cincinnati Enquirer and got catalogue boilerplate. We do -- and the only
+    page in the corpus that says so is Rentschler's research-databases list,
+    which the host rule tagged campus=hamilton and the cross-campus guard
+    then hid from an Oxford question.
+
+    It is not a Hamilton list: its own first line points at "the full Miami
+    University Libraries' Databases A-Z list" and access is by Miami Unique
+    ID.
+    """
+
+    def test_the_databases_list_reaches_every_campus(self):
+        u = ("https://www.ham.miamioh.edu/library/start-researching/"
+             "research-databases")
+        assert _infer_campus(u) == "all"
+        assert _infer_campus(u + "/") == "all"
+
+    def test_hamiltons_own_pages_are_still_hamiltons(self):
+        for p in ("/library/services/interlibrary-loan", "/library/study-rooms",
+                  "/library/about/rentschler-library-staff"):
+            assert _infer_campus(f"https://www.ham.miamioh.edu{p}") == "hamilton"
+
+    def test_the_override_set_stays_small(self):
+        """A general escape hatch would quietly undo campus scoping. If this
+        grows past a handful, the fix belongs upstream in the crawl."""
+        from scripts.etl import config
+        assert len(config.CAMPUS_ALL_URLS) <= 5
