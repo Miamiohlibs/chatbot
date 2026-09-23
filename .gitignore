@@ -267,3 +267,12 @@ ai-core/data/raw/*.csv
 ai-core/secrets/
 *.key
 *.pem
+
+# Eval run output. The per-case rows carry `bot_answer` and `judge_reason`,
+# and a good answer to "who is the biology librarian" is a name, an email
+# and a telephone number -- across 349 questions that is the
+# spreadsheet-of-people shape scan_for_pii.py blocks, and it blocked it on
+# 2026-09-23. Raw runs live beside the conversation exports in
+# /opt/chatbot-private-data/eval/; docs/eval/summaries/ holds the
+# verdicts-only reduction that a score comparison actually needs.
+ai-core/docs/eval/real_traffic_*/

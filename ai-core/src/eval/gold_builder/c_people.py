@@ -14,10 +14,23 @@ from base import *   # noqa: F401,F403
 C = "people"
 
 def liaison(id, q, subject, who, email, extra="", **kw):
+    """`email` is taken and deliberately NOT written into the rubric.
+
+    A gold row that spells out "boehmemv@miamioh.edu" duplicates the
+    Librarian table, goes stale the day somebody's address changes, and --
+    across enough rows -- makes the gold file look exactly like the
+    spreadsheet-of-people that scan_for_pii.py exists to stop. CI blocked
+    the push on 2026-09-23 for that reason and was right about the shape.
+
+    The address is still checked, just not here: verify_gold.py matches
+    every name in this file against the roster, and the bot reads the
+    address from that same roster. The standard is the NAME.
+    """
     g(id, q, "subject_librarian",
-      f"Name {who} ({email}) as the {subject} liaison, with the phone if "
-      f"held. Deflecting to the liaisons directory without the name is "
-      f"wrong -- we hold the record. {extra}".strip(),
+      f"Name {who} as the {subject} liaison, with the email and phone as "
+      f"the staff directory gives them. Deflecting to the liaisons "
+      f"directory without the name is wrong -- we hold the record. "
+      f"{extra}".strip(),
       urls=[LIAISONS, GUIDES], category=C, **kw)
 
 liaison("rt_lia_bio_my", "who is my biology subject librarian",
@@ -71,7 +84,7 @@ liaison("rt_lia_ai_literacy", "I need to learn about AI literacy.",
 # --- cross-campus liaison asks -------------------------------------------
 g("rt_lia_hamilton_history", "who is the history librarian at Hamilton?",
   "subject_librarian",
-  "History's liaison is Jenny Presnell (presnejl@miamioh.edu), based at "
+  "History's liaison is Jenny Presnell, based at "
   "OXFORD. Name her AND say which campus she is on. Dropping her because "
   "Hamilton has no history liaison leaves the patron with nothing; "
   "presenting her as Hamilton's is the other error.",
@@ -80,29 +93,29 @@ g("rt_lia_hamilton_history", "who is the history librarian at Hamilton?",
 
 g("rt_lia_hamilton_bio", "who is the biology librarian at the hamilton campus",
   "subject_librarian",
-  "Biology's liaison is Ginny Boehme (boehmemv@miamioh.edu) at Oxford; name "
+  "Biology's liaison is Ginny Boehme at Oxford; name "
   "her and label the campus.",
   campus="hamilton", library="rentschler", urls=[LIAISONS, GUIDES, HAM],
   category=C)
 
 g("rt_lia_hamilton_edu", "who is the education librarian at the hamilton campus",
   "subject_librarian",
-  "Education's liaison is Abigail Morgan (morgan55@miamioh.edu) at Oxford; "
+  "Education's liaison is Abigail Morgan at Oxford; "
   "name her and label the campus.",
   campus="hamilton", library="rentschler", urls=[LIAISONS, GUIDES, HAM],
   category=C)
 
 g("rt_lia_hamilton_art", "who is the art librarian at the hamilton campus?",
   "subject_librarian",
-  "Art's liaison is Stefanie Hilles (hillessa@miamioh.edu) at Oxford; "
+  "Art's liaison is Stefanie Hilles at Oxford; "
   "Hamilton's Community Arts liaison is Krista McDonald "
-  "(mcdonak@miamioh.edu). Either is right if the campus is labelled.",
+  ". Either is right if the campus is labelled.",
   campus="hamilton", library="rentschler", urls=[LIAISONS, GUIDES, HAM],
   category=C)
 
 g("rt_lia_middletown_nursing", "who is the nursing librarian at Middletown?",
   "subject_librarian",
-  "Nursing's liaison is Ginny Boehme (boehmemv@miamioh.edu) at Oxford. Name "
+  "Nursing's liaison is Ginny Boehme at Oxford. Name "
   "her and say she is at Oxford rather than refusing.",
   campus="middletown", library="gardner_harvey", urls=[LIAISONS, GUIDES, MID],
   category=C)
